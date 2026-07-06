@@ -112,9 +112,13 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   queue and never pollute the channel archive.
 - **First click** — browsers block audio until you interact with the page
   once; if you see **🔊 Click to enable audio**, click it and you're set.
-- Multiple open tabs each play audio (mute the extras); controls stay in
-  sync everywhere via WebSocket, and a track ending in one tab advances the
-  queue exactly once.
+- **One speaker at a time** — open the page in as many tabs/devices as you
+  like; controls stay in sync everywhere, but only one page plays audio (the
+  most recently opened, so there's never an echo). Any other tab shows a
+  **🔊 Play audio in this tab** button to take over as the speaker.
+- **Live vs. backfill** — only songs posted within the last 30 minutes
+  (`live_window_s`) auto-play or queue; older history downloads quietly into
+  the archive. Channel songs always queue ahead of radio-station filler.
 
 Where the sound comes out: with `backend = "web"` (the default off-hardware),
 whatever browser has the page open is the speaker. On the future appliance

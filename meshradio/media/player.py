@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -170,7 +171,30 @@ class PlayerService:
 
     # -- live policy -----------------------------------------------------------
 
+    def _is_fresh(self, track: dict[str, Any]) -> bool:
+        """Was this posted recently? Cache completions of backfilled history
+        (first boot, retry sweeps) must not hijack the jukebox."""
+        mesh_ts = track.get("mesh_ts")
+        if mesh_ts is None:
+            return True
+        return (time.time() - float(mesh_ts)) <= self.config.live_window_s
+
+    def _enqueue(self, track: dict[str, Any]) -> None:
+        """Channel tracks go ahead of radio filler; radio appends at the end."""
+        if track.get("source") == "radio":
+            self.queue.append(track)
+        else:
+            idx = next(
+                (i for i, t in enumerate(self.queue) if t.get("source") == "radio"),
+                len(self.queue),
+            )
+            self.queue.insert(idx, track)
+
     async def on_track_ready(self, track: dict[str, Any]) -> None:
+        # Radio tracks were explicitly requested; channel tracks only enter
+        # the jukebox if freshly posted (older ones are archive backfill).
+        if track.get("source") != "radio" and not self._is_fresh(track):
+            return
         if (
             self.status == "idle"
             and self.mode == "live"
@@ -179,7 +203,7 @@ class PlayerService:
         ):
             await self.play_track(track)
         else:
-            self.queue.append(track)
+            self._enqueue(track)
             self.publish_state()
 
     def in_quiet_hours(self, now: datetime | None = None) -> bool:
@@ -235,7 +259,7 @@ class PlayerService:
         if self.status == "idle" and play_if_idle:
             await self.play_track(track)
         else:
-            self.queue.append(track)
+            self._enqueue(track)
             self.publish_state()
 
     async def play_day(self, date: str) -> None:
