@@ -1,0 +1,13 @@
+{% if state.queue %}
+<ol class="queue">
+  {% for track in state.queue %}
+  <li>
+    <span class="title">{{ track.title or track.video_id }}</span>
+    {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
+    <span class="sender">({{ track.sender or "?" }})</span>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="empty">Queue is empty.</p>
+{% endif %}

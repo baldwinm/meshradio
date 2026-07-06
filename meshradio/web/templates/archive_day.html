@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ date }}</h2>
+<form method="post" action="/api/play-day/{{ date }}">
+  <button type="submit">▶ Play this day</button>
+</form>
+{% for theme in themes %}
+<section class="theme">
+  <h3>{{ theme.title }} {% if theme.set_by %}<small>set by {{ theme.set_by }}</small>{% endif %}</h3>
+  <ol>
+    {% for track in theme.tracks %}
+    <li>
+      <span class="title">{{ track.title or track.video_id }}</span>
+      {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
+      <span class="sender">({{ track.sender or "?" }})</span>
+      {% if track.cache_status == "ready" %}
+        <button hx-post="/api/queue/{{ track.id }}" hx-swap="none">+ queue</button>
+      {% elif track.cache_status == "failed" %}
+        <span class="badge failed">couldn't fetch audio</span>
+      {% else %}
+        <span class="badge">caching…</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,25 @@
+{% set current = state.current %}
+<div class="card now-playing">
+  {% if current %}
+    <img class="art" src="https://i.ytimg.com/vi/{{ current.video_id }}/mqdefault.jpg" alt="">
+    <div class="meta">
+      <div class="title">{{ current.title or current.video_id }}</div>
+      <div class="artist">{{ current.artist or "" }}</div>
+      <div class="sender">shared by {{ current.sender or "—" }}</div>
+    </div>
+  {% else %}
+    <div class="meta idle">
+      <div class="title">Nothing playing</div>
+      <div class="sender">mode: {{ state.mode }} · waiting for the mesh…</div>
+    </div>
+  {% endif %}
+  <div class="controls">
+    <button hx-post="/api/pause" hx-target="#now-playing">
+      {% if state.status == "playing" %}⏸{% else %}▶{% endif %}
+    </button>
+    <button hx-post="/api/skip" hx-target="#now-playing">⏭</button>
+    <span class="badge">{{ state.status }}</span>
+    <span class="badge">{{ state.output }}</span>
+    <span class="badge">vol {{ state.volume }}</span>
+  </div>
+</div>

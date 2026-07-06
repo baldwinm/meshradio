@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MeshRadio</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1><a href="/">📻 MeshRadio</a></h1>
+    <nav>
+      <a href="/">Now Playing</a>
+      <a href="/archive">Archive</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <script>
+    // Live state: any bus event nudges htmx containers to re-fetch.
+    (function connect() {
+      const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+      ws.onmessage = () => document.body.dispatchEvent(new Event("meshradio:state"));
+      ws.onclose = () => setTimeout(connect, 3000);
+    })();
+  </script>
+</body>
+</html>

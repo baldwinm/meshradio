@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Archive</h2>
+{% if days %}
+<ul class="days">
+  {% for day in days %}
+  <li>
+    <a href="/archive/{{ day.date }}">{{ day.date }}</a>
+    <span class="badge">{{ day.tracks }} tracks</span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No history yet — the archive fills in as links land on the channel.</p>
+{% endif %}
+{% endblock %}
