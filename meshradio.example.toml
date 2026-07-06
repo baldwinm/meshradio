@@ -13,7 +13,7 @@ channel_key = ""                # MeshCore channel key
 
 [corescope]
 enabled = true
-base_url = ""                   # AUS CoreScope instance URL
+base_url = "https://scope.digitaino.com"   # Austin CoreScope instance
 channel = "#music"
 poll_interval_s = 180
 

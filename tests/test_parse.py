@@ -64,6 +64,20 @@ def test_theme_basic():
     assert parse_theme("Theme: songs about rain") == "songs about rain"
 
 
+def test_theme_real_austin_phrasing():
+    # Actual message observed on the Austin #music channel via CoreScope.
+    text = "Happy Friday Music Meshers! Today’s theme is: Friends and friendship."
+    assert parse_theme(text) == "Friends and friendship"
+
+
+def test_theme_for_today_variant():
+    assert parse_theme("theme for today: disco or funk") == "disco or funk"
+
+
+def test_theme_trailing_punctuation_stripped():
+    assert parse_theme("Theme: songs about rain!") == "songs about rain"
+
+
 def test_theme_case_insensitive():
     assert parse_theme("THEME:  One Hit Wonders ") == "One Hit Wonders"
 

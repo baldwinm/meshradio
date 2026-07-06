@@ -1,8 +1,11 @@
 """Link extraction and theme detection — pure functions, unit-tested.
 
-Channel convention (architecture §6): the daily theme post starts with
-``Theme:`` (case-insensitive). Every YouTube/YouTube Music link message
-attaches to the most recent theme of that day.
+Theme detection matches how the Austin #music channel actually posts
+(observed via CoreScope): "Happy Friday Music Meshers! Today's theme is:
+Friends and friendship." — i.e. the word "theme", optionally a few words,
+then a colon, then the title. This also covers the stricter ``Theme: ...``
+convention proposed in architecture §6. Every YouTube/YouTube Music link
+message attaches to the most recent theme of that day.
 """
 
 from __future__ import annotations
@@ -28,7 +31,8 @@ _LINK_PATTERNS = [
     ),
 ]
 
-_THEME_RE = re.compile(r"^\s*theme\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+# "theme", at most a few filler words ("is", "for today", …), a colon, title.
+_THEME_RE = re.compile(r"\btheme[^:\n]{0,40}:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -55,10 +59,15 @@ def extract_links(text: str) -> list[ParsedLink]:
 
 
 def parse_theme(text: str) -> str | None:
-    """Theme title if this message declares one (``Theme: songs about rain``)."""
+    """Theme title if this message declares one.
+
+    Matches ``Theme: songs about rain`` and in-the-wild phrasings like
+    ``Today's theme is: Friends and friendship.`` Trailing sentence
+    punctuation is stripped so repeat posts dedupe to the same title.
+    """
     match = _THEME_RE.search(text)
     if match:
-        title = match.group(1).strip()
+        title = match.group(1).strip().rstrip(".!?…").strip()
         return title or None
     return None
 

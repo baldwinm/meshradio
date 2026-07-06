@@ -1,5 +1,6 @@
-# MeshRadio dev data (SQLite archive + audio cache)
+# MeshRadio dev data (SQLite archive + audio cache) and local config
 /data/
+/meshradio.toml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
