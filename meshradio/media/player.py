@@ -193,6 +193,8 @@ class PlayerService:
     async def on_track_ready(self, track: dict[str, Any]) -> None:
         # Radio tracks were explicitly requested; channel tracks only enter
         # the jukebox if freshly posted (older ones are archive backfill).
+        if track.get("source") == "radio" and not self.radio_active:
+            return  # radio stopped while this was still caching
         if track.get("source") != "radio" and not self._is_fresh(track):
             return
         if (
