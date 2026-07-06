@@ -79,6 +79,17 @@ async def test_seek_moves_and_clamps(db, bus):
     assert player.position() < 1
 
 
+async def test_play_day_tracks_the_day(db, bus):
+    player = make_player(db, bus)
+    await make_ready_track(db, "aaaaaaaaaaa", duration=0.02)
+    await player.play_day("2026-07-06")
+    assert player.mode == "archive"
+    assert player.state()["day"] == "2026-07-06"
+    await asyncio.sleep(0.1)  # replay ends → back to live, day cleared
+    assert player.status == "idle"
+    assert player.state()["day"] is None
+
+
 async def test_seek_without_track_is_noop(db, bus):
     player = make_player(db, bus)
     await player.seek(30)

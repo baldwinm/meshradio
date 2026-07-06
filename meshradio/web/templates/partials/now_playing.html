@@ -1,4 +1,9 @@
 {% set current = state.current %}
+<div class="day-banner">
+  <span class="day-date">{{ day }}</span>
+  {% if theme_titles %}<span class="day-theme">{{ theme_titles|join(" · ") }}</span>{% endif %}
+  {% if day == today %}<span class="badge">today</span>{% endif %}
+</div>
 <div class="card now-playing">
   {% if current %}
     <img class="art" src="https://i.ytimg.com/vi/{{ current.video_id }}/mqdefault.jpg" alt="">
@@ -22,13 +27,17 @@
            max="{{ (current.duration or 0)|int }}" value="{{ state.position|int }}"
            title="Seek" {% if not current.duration %}disabled{% endif %}
            oninput="scrubPreview(this)" onchange="scrubCommit(this)">
-    <span class="time" id="pb-remaining">{% if current.duration %}-{{ (current.duration - state.position)|mmss }} · {{ current.duration|mmss }}{% endif %}</span>
+    <span class="time" id="pb-remaining">{% if current.duration %}-{{ (current.duration - state.position)|mmss }}{% endif %}</span>
   </div>
   {% endif %}
   <div class="controls">
-    <button hx-post="/api/pause" hx-target="#now-playing" title="Play/Pause">
-      {% if state.status == "playing" %}⏸{% else %}▶{% endif %}
-    </button>
+    {% if state.status == "idle" %}
+      <button hx-post="/api/play-today" hx-target="#now-playing" title="Play today's songs">▶</button>
+    {% else %}
+      <button hx-post="/api/pause" hx-target="#now-playing" title="Play/Pause">
+        {% if state.status == "playing" %}⏸{% else %}▶{% endif %}
+      </button>
+    {% endif %}
     <button hx-post="/api/skip" hx-target="#now-playing" title="Next track">⏭</button>
     {% if state.radio %}
       <button class="radio-btn active" hx-post="/api/radio/stop" hx-target="#now-playing"
@@ -37,9 +46,8 @@
       <button class="radio-btn" hx-post="/api/radio/start" hx-target="#now-playing"
               title="Keep the music going: queue similar songs from a YouTube Mix of this track">📻 Start radio</button>
     {% endif %}
+    <span class="vol-icon" title="Volume">🔊</span>
     <input type="range" min="0" max="100" value="{{ state.volume }}" title="Volume"
            onchange="fetch('/api/volume/' + this.value, {method: 'POST'})">
-    <span class="badge">{{ state.status }}</span>
-    <span class="badge">{{ state.output }}</span>
   </div>
 </div>

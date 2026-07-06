@@ -14,4 +14,11 @@
      hx-swap="innerHTML">
   {% include "partials/queue.html" %}
 </div>
+
+<div id="day-nav"
+     hx-get="/partials/day-nav"
+     hx-trigger="meshradio:state from:body"
+     hx-swap="innerHTML">
+  {% include "partials/day_nav.html" %}
+</div>
 {% endblock %}

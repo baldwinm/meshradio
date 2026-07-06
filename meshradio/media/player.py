@@ -150,6 +150,7 @@ class PlayerService:
 
         self.status: str = "idle"          # idle | playing | paused
         self.mode: str = "live"            # live | archive
+        self.day: str | None = None        # archive date being replayed (None = live/today)
         self.current: dict[str, Any] | None = None
         self.queue: list[dict[str, Any]] = []
         self.volume: int = config.volume
@@ -318,12 +319,15 @@ class PlayerService:
             return
         await self.backend.stop()
         self.mode = "archive"
+        self.day = date
         self.queue = tracks[1:]
         await self.play_track(tracks[0])
 
     async def set_mode(self, mode: str) -> None:
         if mode in ("live", "archive"):
             self.mode = mode
+            if mode == "live":
+                self.day = None
             self.publish_state()
 
     # -- queue editing -----------------------------------------------------
@@ -425,6 +429,7 @@ class PlayerService:
             self._pos_epoch = None
             if self.mode == "archive":
                 self.mode = "live"  # archive replay finished; fall back to live
+                self.day = None
             self._maybe_extend_radio(last)
             self.publish_state()
 
@@ -447,6 +452,7 @@ class PlayerService:
         return {
             "status": self.status,
             "mode": self.mode,
+            "day": self.day,
             "position": round(self.position(), 1),
             "volume": self.volume,
             "output": self.output_getter(),

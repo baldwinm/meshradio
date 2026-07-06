@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "meshradio.app", "-v"],
       "port": 8080
+    },
+    {
+      "name": "meshradio-preview",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "meshradio.app", "-v", "--port", "8090"],
+      "port": 8090
     }
   ]
 }

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -76,11 +77,31 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
     templates.env.filters["mmss"] = _mmss
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
+    def _today() -> str:
+        return datetime.now(player.tz).date().isoformat()
+
+    async def day_context() -> dict:
+        """The day being played (or today), its theme(s), and the adjacent
+        archive days for the prev/next navigation."""
+        today = _today()
+        day = player.day or today
+        themes = await db.themes_for_day(day)
+        days = sorted(d["date"] for d in await db.archive_days() if d["tracks"])
+        return {
+            "day": day,
+            "today": today,
+            "theme_titles": [t["title"] for t in themes],
+            "prev_day": max((d for d in days if d < day), default=None),
+            "next_day": min((d for d in days if day < d <= today), default=None),
+        }
+
     # -- pages -------------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        return templates.TemplateResponse(request, "index.html", {"state": player.state()})
+        return templates.TemplateResponse(
+            request, "index.html", {"state": player.state(), **await day_context()}
+        )
 
     @app.get("/archive", response_class=HTMLResponse)
     async def archive(request: Request):
@@ -101,7 +122,13 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
     @app.get("/partials/now-playing", response_class=HTMLResponse)
     async def partial_now_playing(request: Request):
         return templates.TemplateResponse(
-            request, "partials/now_playing.html", {"state": player.state()}
+            request, "partials/now_playing.html", {"state": player.state(), **await day_context()}
+        )
+
+    @app.get("/partials/day-nav", response_class=HTMLResponse)
+    async def partial_day_nav(request: Request):
+        return templates.TemplateResponse(
+            request, "partials/day_nav.html", {"state": player.state(), **await day_context()}
         )
 
     @app.get("/partials/queue", response_class=HTMLResponse)
@@ -162,6 +189,19 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
     async def api_play_day(date: str):
         await player.play_day(date)
         return RedirectResponse("/", status_code=303)
+
+    @app.post("/api/play-today")
+    async def api_play_today(request: Request):
+        """Default play action: today's songs, else the newest archived day."""
+        today = _today()
+        await player.play_day(today)
+        if player.status != "playing":
+            for d in await db.archive_days():  # newest first
+                if d["date"] < today and d["tracks"]:
+                    await player.play_day(d["date"])
+                    if player.status == "playing":
+                        break
+        return await partial_now_playing(request)
 
     @app.get("/audio/{track_id}")
     async def audio(track_id: int):

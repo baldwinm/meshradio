@@ -102,7 +102,7 @@
       const elapsed = document.getElementById("pb-elapsed");
       const remaining = document.getElementById("pb-remaining");
       if (elapsed) elapsed.textContent = fmtTime(pos);
-      if (remaining) remaining.textContent = dur ? "-" + fmtTime(dur - pos) + " · " + fmtTime(dur) : "";
+      if (remaining) remaining.textContent = dur ? "-" + fmtTime(dur - pos) : "";
     }
 
     setInterval(() => {
