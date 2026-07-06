@@ -21,7 +21,7 @@ Full design: [meshradio-architecture.md](meshradio-architecture.md).
 | Cache-first downloader (yt-dlp) + fallback ladder | ✅ working (oEmbed metadata-only fallback) |
 | Player: live-mode policy, queue, archive replay, quiet hours | ✅ working, tested |
 | Web UI (FastAPI + htmx + WebSocket) | ✅ working |
-| CoreScope poller | 🟡 built, endpoint shape unconfirmed ([corescope.py](meshradio/ingest/corescope.py)) |
+| CoreScope poller | ✅ built against the real CoreScope API, tested; needs the AUS instance URL in config |
 | Mesh serial ingestion (meshcore) | 🟡 built, needs validation on a Heltec V3 |
 | OLED panel + encoder/buttons | 🟡 skeleton, needs hardware bring-up |
 | PipeWire routing (pi4/lite backends) | 🟡 built, needs hardware bring-up |

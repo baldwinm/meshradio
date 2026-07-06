@@ -1,11 +1,21 @@
 """CoreScope poller — fallback ingestion and first-boot backfill.
 
-The AUS CoreScope API shape is not yet confirmed (architecture §6/§12.3), so
-everything endpoint-specific is isolated in ``_fetch_messages`` and
-``_normalize``. When the real API is known, this is the only file to touch.
+Written against CoreScope's real API (github.com/Kpa-clawbot/CoreScope,
+verified 2026-07 against a live instance):
 
-The poller keeps a cursor (last seen message timestamp) in settings so
-restarts don't re-fetch history; dedupe makes overlap harmless anyway.
+    GET /api/channels/{hash}/messages -> {"messages": [...], "total": N}
+
+where ``hash`` is the URL-encoded channel name (``#music`` -> ``%23music``)
+and each message carries ``sender``, ``text``, ``sender_timestamp`` (unix
+seconds, the mesh-side send time — the same value the local node sees, which
+is what makes cross-source dedupe line up) and ``first_seen`` (ISO, when the
+CoreScope server first observed the packet).
+
+There is no ``since`` parameter: the server returns full channel history,
+which doubles as the first-boot backfill. The poller keeps a cursor on
+``first_seen`` in settings so steady-state polls skip already-processed
+messages; late-arriving RF duplicates and cursor ties fall through to the
+dedupe hash, which makes reprocessing a no-op.
 """
 
 from __future__ import annotations
@@ -13,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -69,46 +80,45 @@ class CoreScopePoller:
                 await asyncio.sleep(self.config.poll_interval_s)
 
     async def poll_once(self, client: httpx.AsyncClient) -> int:
-        cursor = await self.db.get_setting(CURSOR_KEY)
-        since = float(cursor) if cursor else None
-        messages = await self._fetch_messages(client, since)
+        cursor = await self.db.get_setting(CURSOR_KEY, "")
+        messages = await self._fetch_messages(client)
+        # Skip what previous polls handled; include cursor ties (dedupe
+        # no-ops them) so nothing sharing a first_seen second is lost.
+        fresh = [m for m in messages if not cursor or m["first_seen"] >= cursor]
+        # Themes must land before the links posted after them.
+        fresh.sort(key=lambda m: m["ts"])
         inserted = 0
-        newest = since or 0.0
-        for msg in messages:
+        for msg in fresh:
             inserted += await self.service.handle_message(
                 sender=msg["sender"], text=msg["text"], ts=msg["ts"], source="corescope"
             )
-            newest = max(newest, msg["ts"])
-        if newest and newest != since:
-            await self.db.set_setting(CURSOR_KEY, str(newest))
+        newest = max((m["first_seen"] for m in fresh), default="")
+        if newest and newest != cursor:
+            await self.db.set_setting(CURSOR_KEY, newest)
         if inserted:
             log.info("CoreScope poll: %d new tracks", inserted)
         return inserted
 
-    # -- API adapter (the part that changes when the real API is confirmed) --
+    # -- API adapter -----------------------------------------------------------
 
-    async def _fetch_messages(
-        self, client: httpx.AsyncClient, since: float | None
-    ) -> list[dict[str, Any]]:
-        """Fetch channel messages newer than ``since`` (unix seconds).
-
-        PLACEHOLDER endpoint shape — confirm against the AUS CoreScope
-        instance and adjust here only.
-        """
-        params: dict[str, Any] = {"channel": self.config.channel}
-        if since:
-            params["since"] = since
-        resp = await client.get("/api/messages", params=params)
+    async def _fetch_messages(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
+        """Fetch the channel's full message history."""
+        resp = await client.get(f"/api/channels/{quote(self.config.channel, safe='')}/messages")
         resp.raise_for_status()
-        return [m for m in map(self._normalize, resp.json()) if m]
+        raw = resp.json()
+        return [m for m in map(self._normalize, raw.get("messages", [])) if m]
 
     @staticmethod
     def _normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Map one raw API message to {sender, text, ts}. Tolerates a few
-        plausible field spellings until the real schema is confirmed."""
-        text = raw.get("text") or raw.get("message") or raw.get("payload")
-        sender = raw.get("sender") or raw.get("from") or raw.get("origin") or "unknown"
-        ts = raw.get("ts") or raw.get("timestamp") or raw.get("time")
+        """Map one CoreScope message to {sender, text, ts, first_seen}."""
+        text = raw.get("text")
+        sender = raw.get("sender") or "unknown"
+        ts = raw.get("sender_timestamp")
         if not text or ts is None:
             return None
-        return {"sender": str(sender), "text": str(text), "ts": float(ts)}
+        return {
+            "sender": str(sender),
+            "text": str(text),
+            "ts": float(ts),
+            "first_seen": str(raw.get("first_seen") or ""),
+        }
