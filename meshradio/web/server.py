@@ -60,9 +60,20 @@ _AUDIO_TYPES = {
 }
 
 
+def _mmss(value) -> str:
+    """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations."""
+    if value is None:
+        return ""
+    value = int(value)
+    if value >= 3600:
+        return f"{value // 3600}:{value % 3600 // 60:02d}:{value % 60:02d}"
+    return f"{value // 60}:{value % 60:02d}"
+
+
 def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> FastAPI:
     app = FastAPI(title="MeshRadio")
     templates = Jinja2Templates(directory=_HERE / "templates")
+    templates.env.filters["mmss"] = _mmss
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
     # -- pages -------------------------------------------------------------
@@ -119,6 +130,11 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
     async def api_volume(request: Request, level: int):
         await player.set_volume(level)
         return await partial_now_playing(request)
+
+    @app.post("/api/seek/{seconds}")
+    async def api_seek(seconds: float):
+        await player.seek(seconds)
+        return JSONResponse({"ok": True, "position": player.position()})
 
     # NOTE: literal /api/queue/* routes must be registered before the
     # /api/queue/{track_id} catch-all or "clear" gets parsed as a track id.

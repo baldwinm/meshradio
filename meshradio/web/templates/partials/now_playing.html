@@ -15,6 +15,16 @@
       <div class="sender">mode: {{ state.mode }} · waiting for the mesh…</div>
     </div>
   {% endif %}
+  {% if current %}
+  <div class="playbar">
+    <span class="time" id="pb-elapsed">{{ state.position|mmss }}</span>
+    <input type="range" id="pb-scrub" min="0" step="1"
+           max="{{ (current.duration or 0)|int }}" value="{{ state.position|int }}"
+           title="Seek" {% if not current.duration %}disabled{% endif %}
+           oninput="scrubPreview(this)" onchange="scrubCommit(this)">
+    <span class="time" id="pb-remaining">{% if current.duration %}-{{ (current.duration - state.position)|mmss }} · {{ current.duration|mmss }}{% endif %}</span>
+  </div>
+  {% endif %}
   <div class="controls">
     <button hx-post="/api/pause" hx-target="#now-playing" title="Play/Pause">
       {% if state.status == "playing" %}⏸{% else %}▶{% endif %}

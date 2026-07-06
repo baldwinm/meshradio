@@ -32,12 +32,13 @@ class NullBackend:
         self.volume = 100
         self.paused = False
         self._timer: asyncio.Task | None = None
+        self._duration = 3.0
 
     async def play(self, path: str, duration: float | None) -> None:
         await self.stop()
         self.paused = False
-        wait = (duration or 3.0) * self.time_scale
-        self._timer = asyncio.create_task(self._finish_after(wait))
+        self._duration = duration or 3.0
+        self._timer = asyncio.create_task(self._finish_after(self._duration * self.time_scale))
 
     async def _finish_after(self, wait: float) -> None:
         await asyncio.sleep(wait)
@@ -57,6 +58,12 @@ class NullBackend:
 
     async def set_volume(self, volume: int) -> None:
         self.volume = volume
+
+    async def seek(self, seconds: float) -> None:
+        if self._timer:
+            self._timer.cancel()
+            remaining = max(self._duration - seconds, 0.0) * self.time_scale
+            self._timer = asyncio.create_task(self._finish_after(remaining))
 
 
 class WebBackend:
@@ -83,6 +90,9 @@ class WebBackend:
 
     async def set_volume(self, volume: int) -> None:
         self.volume = volume
+
+    async def seek(self, seconds: float) -> None:
+        pass  # the speaker tab moves its own <audio> element
 
 
 class MpvBackend:
@@ -117,6 +127,9 @@ class MpvBackend:
     async def set_volume(self, volume: int) -> None:
         self._player.volume = volume
 
+    async def seek(self, seconds: float) -> None:
+        self._player.seek(seconds, reference="absolute")
+
 
 class PlayerService:
     def __init__(
@@ -144,6 +157,11 @@ class PlayerService:
         self.radio: Any = None             # RadioService, injected by app.py
         self._play_id: int | None = None
         self._task: asyncio.Task | None = None
+        # Playback position clock: base seconds + wall time since epoch while
+        # playing. With WebBackend the browser is the real transport, so this
+        # is a close estimate kept in sync by /api/seek.
+        self._pos_base: float = 0.0
+        self._pos_epoch: float | None = None
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -232,6 +250,8 @@ class PlayerService:
             return
         self.current = track
         self.status = "playing"
+        self._pos_base = 0.0
+        self._pos_epoch = time.monotonic()
         self._play_id = await self.db.record_play(track["id"], self.output_getter())
         await self.backend.play(track["cache_path"], track.get("duration"))
         self.publish_state()
@@ -242,11 +262,36 @@ class PlayerService:
 
     async def toggle_pause(self) -> None:
         if self.status == "playing":
+            self._pos_base = self.position()
+            self._pos_epoch = None
             await self.backend.pause()
             self.status = "paused"
         elif self.status == "paused":
+            self._pos_epoch = time.monotonic()
             await self.backend.resume()
             self.status = "playing"
+        self.publish_state()
+
+    def position(self) -> float:
+        """Seconds into the current track (clamped to its duration)."""
+        pos = self._pos_base
+        if self._pos_epoch is not None:
+            pos += time.monotonic() - self._pos_epoch
+        duration = (self.current or {}).get("duration")
+        if duration:
+            pos = min(pos, float(duration))
+        return max(pos, 0.0)
+
+    async def seek(self, seconds: float) -> None:
+        """Jump within the current track. The backend follows; for WebBackend
+        the speaker tab either initiated this or follows via the state push."""
+        if self.current is None:
+            return
+        duration = self.current.get("duration")
+        seconds = max(0.0, min(seconds, float(duration)) if duration else seconds)
+        self._pos_base = seconds
+        self._pos_epoch = time.monotonic() if self.status == "playing" else None
+        await self.backend.seek(seconds)
         self.publish_state()
 
     async def set_volume(self, volume: int) -> None:
@@ -376,6 +421,8 @@ class PlayerService:
             await self.play_track(next_track)
         else:
             self.status = "idle"
+            self._pos_base = 0.0
+            self._pos_epoch = None
             if self.mode == "archive":
                 self.mode = "live"  # archive replay finished; fall back to live
             self._maybe_extend_radio(last)
@@ -400,6 +447,7 @@ class PlayerService:
         return {
             "status": self.status,
             "mode": self.mode,
+            "position": round(self.position(), 1),
             "volume": self.volume,
             "output": self.output_getter(),
             "radio": self.radio_active,

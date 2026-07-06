@@ -54,6 +54,37 @@ async def test_autoplay_disabled_enqueues(db, bus):
     assert len(player.queue) == 1
 
 
+async def test_position_advances_and_pauses(db, bus):
+    player = make_player(db, bus)
+    track = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    await player.on_track_ready(track)
+    await asyncio.sleep(0.05)
+    assert 0 < player.position() < 1
+    await player.toggle_pause()
+    frozen = player.position()
+    await asyncio.sleep(0.05)
+    assert player.position() == frozen  # clock stops while paused
+    assert player.state()["position"] == round(frozen, 1)
+
+
+async def test_seek_moves_and_clamps(db, bus):
+    player = make_player(db, bus)
+    track = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    await player.on_track_ready(track)
+    await player.seek(30)
+    assert 30 <= player.position() < 31
+    await player.seek(9999)
+    assert player.position() == 60  # clamped to the track duration
+    await player.seek(-5)
+    assert player.position() < 1
+
+
+async def test_seek_without_track_is_noop(db, bus):
+    player = make_player(db, bus)
+    await player.seek(30)
+    assert player.position() == 0
+
+
 async def test_track_end_advances_queue(db, bus):
     player = make_player(db, bus)
     first = await make_ready_track(db, "aaaaaaaaaaa", duration=0.02)
