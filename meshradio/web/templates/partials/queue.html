@@ -4,10 +4,14 @@
   <li>
     <span class="title">{{ track.title or track.video_id }}</span>
     {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
-    <span class="sender">({{ track.sender or "?" }})</span>
+    {% if track.source == "radio" %}
+      <span class="badge">radio</span>
+    {% else %}
+      <span class="sender">({{ track.sender or "?" }})</span>
+    {% endif %}
   </li>
   {% endfor %}
 </ol>
 {% else %}
-<p class="empty">Queue is empty.</p>
+<p class="empty">Queue is empty{% if state.radio %} — radio is fetching more…{% endif %}.</p>
 {% endif %}

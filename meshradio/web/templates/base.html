@@ -18,11 +18,51 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <button id="enable-audio" hidden>🔊 Click to enable audio</button>
   <script>
-    // Live state: any bus event nudges htmx containers to re-fetch.
+    // Web playback: when the server runs the "web" backend, this page IS the
+    // speaker. The <audio> element streams the cached file; on 'ended' it
+    // tells the server to advance (guarded server-side by track id, so
+    // multiple open tabs can't double-skip).
+    const audio = new Audio();
+    const enableBtn = document.getElementById("enable-audio");
+    let currentTrackId = null;
+
+    enableBtn.addEventListener("click", () => {
+      enableBtn.hidden = true;
+      audio.play().catch(() => {});
+    });
+
+    function applyState(s) {
+      if (!s.web_audio) return;
+      audio.volume = s.volume / 100;
+      if (s.status === "playing" && s.current) {
+        const src = "/audio/" + s.current.id;
+        if (currentTrackId !== s.current.id) {
+          currentTrackId = s.current.id;
+          audio.src = src;
+          audio.onended = () => fetch("/api/ended/" + currentTrackId, { method: "POST" });
+        }
+        // Browsers block autoplay before the first user gesture; offer a button.
+        audio.play().then(() => { enableBtn.hidden = true; })
+                    .catch(() => { enableBtn.hidden = false; });
+      } else if (s.status === "paused") {
+        audio.pause();
+      } else {
+        currentTrackId = null;
+        audio.pause();
+        audio.removeAttribute("src");
+      }
+    }
+
+    // Live state: drive the audio element and nudge htmx containers to re-fetch.
     (function connect() {
       const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-      ws.onmessage = () => document.body.dispatchEvent(new Event("meshradio:state"));
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.topic === "player.state") applyState(msg.data);
+        document.body.dispatchEvent(new Event("meshradio:state"));
+      };
       ws.onclose = () => setTimeout(connect, 3000);
     })();
   </script>
