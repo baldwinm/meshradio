@@ -38,7 +38,7 @@ The Pi 4 wins over the Zero 2 W for the kit build, despite worse power draw, for
 2. **yt-dlp extraction speed.** 2–4s on a Pi 4 vs 10–20s on a Zero 2 W. Matters for perceived responsiveness when someone posts a link.
 3. **Kit assembly.** Full-size headers, full-size USB, no OTG adapters.
 
-A **"Lite" variant** on the Zero 2 W (UART-wired node, no BT-out, smaller battery) can be documented later for cost-sensitive builders; the software should not assume Pi 4-only.
+A **Lite variant** on the Zero 2 W — no mesh node, CoreScope-only ingestion — is fully specified in §13; the software must not assume Pi 4-only.
 
 ### MeshCore node: Heltec V3 over USB serial
 
@@ -248,3 +248,55 @@ FastAPI serving Jinja2 + htmx at `http://meshradio.local` (avahi mDNS). WebSocke
 3. AUS CoreScope exposes a pollable API for channel messages (adapter isolated regardless).
 4. Mono 3W built-in speaker is an acceptable "decent"; stereo would double amp/driver cost and complicate the enclosure for marginal gain at this size.
 5. Data partition separate from OS partition so reflashing the image preserves the archive/cache.
+
+---
+
+## 13. MeshRadio Lite — budget variant (no mesh node)
+
+Same product, same codebase, roughly **40% of the cost**. The Lite drops the onboard Heltec V3 and ingests exclusively from the AUS CoreScope instance over WiFi. That single deletion unlocks the rest of the cost reduction: with no node competing for USB, the **Pi Zero 2 W's lone OTG port goes to the Bluetooth dongle**, which resolves the WiFi/BT coexistence problem that forced the Pi 4 in the full build (onboard BT stays disabled; the dongle handles A2DP).
+
+### Hardware deltas
+
+| Subsystem | Full kit | Lite |
+|---|---|---|
+| Compute | Pi 4 (2GB) | Pi Zero 2 W |
+| Mesh ingestion | Heltec V3, USB serial | — (CoreScope poll only) |
+| Bluetooth out | USB dongle on USB-A | USB dongle on OTG (adapter) |
+| Built-in speaker | MAX98357A → 3" driver | MAX98357A → 2.5–3" driver (unchanged, 3W) |
+| 3.5mm out | Pi 4 onboard jack | **PCM5102A DAC board** (Zero has no analog jack) |
+| Display | 2.42" SSD1309 | 0.96" SSD1306 |
+| Controls | Encoder + 2 buttons | Encoder + 1 button (Mode folds into long-press) |
+| Power | UPS HAT + 4× 18650 | Wall-powered base; UPS HAT (C) + cell as optional add-on |
+
+### The shared-I2S trick
+
+The Zero 2 W has one I2S peripheral but the bus fans out fine: the MAX98357A (speaker) and PCM5102A (3.5mm) hang on the **same BCLK/LRCLK/DIN lines** and both receive the audio stream. Output "switching" between them is a GPIO on the MAX98357A's SD (shutdown) pin — speaker muted when Line Out is selected, unmuted otherwise. Both boards are through-hole header breakouts, keeping the no-SMD kit rule intact.
+
+Software impact is confined to `audio/routing.py`: on the full build, speaker/jack/BT are three PipeWire sinks; on Lite, speaker and jack are one ALSA/PipeWire sink plus an amp-enable GPIO, and BT remains a separate sink. The routing module exposes the same `set_output()` interface either way — a `hardware_profile` key in settings selects the backend. Nothing above the routing layer knows the difference.
+
+### Ingestion & behavior tradeoffs (be honest in the docs)
+
+- **Latency:** live tracks arrive on the CoreScope poll cadence (2–5 min) instead of at RF speed. For a radio, this is nearly invisible — but it's not "watch the message land."
+- **Dependency:** the Lite is down if the AUS CoreScope instance is down. The full build keeps working off RF.
+- **Not a mesh client:** the Lite doesn't strengthen the mesh or work off-grid; it's a listener to the channel's reflection, not the channel. Worth a plain-language note in the kit docs so builders pick with eyes open.
+- **Upgrade path:** add a Heltec V3 later via a powered micro-USB hub (or migrate the SD card to a Pi 4) — the `hardware_profile` setting and the disabled `ingest/mesh.py` module make this a config change, not a rebuild.
+
+### Lite BOM (ballpark)
+
+| Part | Est. |
+|---|---|
+| Pi Zero 2 W + SD card | $23 |
+| USB BT 5.x dongle + OTG adapter | $10 |
+| MAX98357A breakout | $6 |
+| PCM5102A DAC board | $6 |
+| 2.5–3" full-range driver | $8 |
+| 0.96" SSD1306 OLED | $5 |
+| Rotary encoder, button, wiring | $6 |
+| 5V/2.5A wall supply | $8 |
+| Filament, fasteners, misc | $5 |
+| **Total (wall-powered)** | **~$77** |
+| *Optional:* UPS HAT (C) + cell | *+$20 → ~$97, ~4–5h runtime* |
+
+### What deliberately does *not* change
+
+Everything above the hardware line: same image (both device trees baked in, `hardware_profile` chosen at first-boot setup), same web UI, same archive, same cache-first player, same STL design language (smaller shell, shared speaker-chamber geometry). One codebase, two SKUs.
