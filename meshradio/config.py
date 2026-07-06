@@ -35,10 +35,12 @@ class CoreScopeConfig:
 
 @dataclass
 class PlayerConfig:
+    backend: str = "auto"          # auto | mpv | web | null; auto = mpv on pi4/lite, web on dev
     live_autoplay: bool = True     # auto-play new arrivals when idle in Live mode
     quiet_hours: str = ""          # "22:00-08:00" suppresses autoplay; empty = off
     timezone: str = "America/Chicago"
     volume: int = 70
+    radio_batch: int = 10          # tracks pulled per YouTube Mix fetch in radio mode
 
 
 @dataclass
@@ -48,6 +50,8 @@ class CacheConfig:
     audio_format: str = "opus"
     max_retries: int = 3
     retry_backoff_s: int = 30
+    ffmpeg_location: str = ""      # dir/exe passed to yt-dlp when ffmpeg isn't on PATH
+    ytdlp_extra_args: list = field(default_factory=list)  # e.g. ["--js-runtimes", "deno:C:/path/deno.exe"]
 
 
 @dataclass

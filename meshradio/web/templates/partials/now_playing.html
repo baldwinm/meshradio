@@ -5,7 +5,9 @@
     <div class="meta">
       <div class="title">{{ current.title or current.video_id }}</div>
       <div class="artist">{{ current.artist or "" }}</div>
-      <div class="sender">shared by {{ current.sender or "—" }}</div>
+      <div class="sender">
+        {% if current.source == "radio" %}📻 {{ current.sender }}{% else %}shared by {{ current.sender or "—" }}{% endif %}
+      </div>
     </div>
   {% else %}
     <div class="meta idle">
@@ -14,12 +16,20 @@
     </div>
   {% endif %}
   <div class="controls">
-    <button hx-post="/api/pause" hx-target="#now-playing">
+    <button hx-post="/api/pause" hx-target="#now-playing" title="Play/Pause">
       {% if state.status == "playing" %}⏸{% else %}▶{% endif %}
     </button>
-    <button hx-post="/api/skip" hx-target="#now-playing">⏭</button>
+    <button hx-post="/api/skip" hx-target="#now-playing" title="Next track">⏭</button>
+    {% if state.radio %}
+      <button class="radio-btn active" hx-post="/api/radio/stop" hx-target="#now-playing"
+              title="Stop the radio station">◼ Radio on</button>
+    {% else %}
+      <button class="radio-btn" hx-post="/api/radio/start" hx-target="#now-playing"
+              title="Keep the music going: queue similar songs from a YouTube Mix of this track">📻 Start radio</button>
+    {% endif %}
+    <input type="range" min="0" max="100" value="{{ state.volume }}" title="Volume"
+           onchange="fetch('/api/volume/' + this.value, {method: 'POST'})">
     <span class="badge">{{ state.status }}</span>
     <span class="badge">{{ state.output }}</span>
-    <span class="badge">vol {{ state.volume }}</span>
   </div>
 </div>

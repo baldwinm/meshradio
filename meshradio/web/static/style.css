@@ -53,6 +53,15 @@ button:hover { filter: brightness(1.1); }
   font-size: 0.8rem;
 }
 .badge.failed { color: #ef9a9a; }
+.radio-btn { background: #26313c; color: var(--text); }
+.radio-btn.active { background: #2e7d32; color: #eaf6ea; }
+input[type="range"] { accent-color: var(--accent); width: 110px; }
+#enable-audio {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+}
 ol, ul { line-height: 1.9; }
 .days { list-style: none; padding: 0; }
 .sender, .empty { color: var(--muted); }

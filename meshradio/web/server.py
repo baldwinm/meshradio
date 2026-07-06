@@ -11,8 +11,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -23,6 +23,14 @@ from ..media.player import PlayerService
 log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
+
+_AUDIO_TYPES = {
+    ".opus": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".webm": "audio/webm",
+}
 
 
 def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> FastAPI:
@@ -94,6 +102,34 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
     async def api_play_day(date: str):
         await player.play_day(date)
         return RedirectResponse("/", status_code=303)
+
+    @app.get("/audio/{track_id}")
+    async def audio(track_id: int):
+        """Stream a cached track to the browser (web playback)."""
+        track = await db.track_by_id(track_id)
+        if not track or track["cache_status"] != "ready" or not track["cache_path"]:
+            raise HTTPException(404, "track not cached")
+        path = Path(track["cache_path"])
+        if not path.exists():
+            raise HTTPException(404, "cache file missing")
+        media_type = _AUDIO_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        return FileResponse(path, media_type=media_type)
+
+    @app.post("/api/ended/{track_id}")
+    async def api_ended(track_id: int):
+        """Browser reports its <audio> element finished the track."""
+        advanced = await player.notify_ended(track_id)
+        return JSONResponse({"advanced": advanced})
+
+    @app.post("/api/radio/start")
+    async def api_radio_start(request: Request):
+        ok = await player.start_radio()
+        return await partial_now_playing(request)
+
+    @app.post("/api/radio/stop")
+    async def api_radio_stop(request: Request):
+        await player.stop_radio()
+        return await partial_now_playing(request)
 
     @app.post("/api/output/{name}")
     async def api_output(name: str):

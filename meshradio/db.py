@@ -61,6 +61,35 @@ MIGRATIONS: list[str] = [
         value TEXT
     );
     """,
+    # v2 — 'radio' track source (YouTube Mix continuations; not channel posts,
+    # theme_id stays NULL so they never appear in the archive). SQLite can't
+    # alter a CHECK, so rebuild the table.
+    """
+    PRAGMA foreign_keys=OFF;
+    CREATE TABLE tracks_v2(
+        id           INTEGER PRIMARY KEY,
+        video_id     TEXT NOT NULL,
+        url          TEXT NOT NULL,
+        title        TEXT,
+        artist       TEXT,
+        duration     REAL,
+        theme_id     INTEGER REFERENCES themes(id),
+        sender       TEXT,
+        mesh_ts      REAL,
+        ingested_at  TEXT NOT NULL,
+        source       TEXT NOT NULL CHECK(source IN ('mesh','corescope','radio')),
+        cache_path   TEXT,
+        cache_status TEXT NOT NULL DEFAULT 'pending'
+                     CHECK(cache_status IN ('pending','ready','failed')),
+        dedupe_hash  TEXT NOT NULL UNIQUE
+    );
+    INSERT INTO tracks_v2 SELECT * FROM tracks;
+    DROP TABLE tracks;
+    ALTER TABLE tracks_v2 RENAME TO tracks;
+    CREATE INDEX idx_tracks_theme ON tracks(theme_id);
+    CREATE INDEX idx_tracks_status ON tracks(cache_status);
+    PRAGMA foreign_keys=ON;
+    """,
 ]
 
 

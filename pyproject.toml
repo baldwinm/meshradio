@@ -15,9 +15,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Media playback/download — installable everywhere, but mpv needs libmpv at runtime.
+# Media playback/download — installable everywhere, but mpv needs libmpv at
+# runtime. yt-dlp[default] bundles the EJS challenge solver YouTube requires
+# (a JS runtime — deno — must also be installed on the machine).
 media = [
-    "yt-dlp>=2025.1.26",
+    "yt-dlp[default]>=2025.10.22",
     "python-mpv>=1.0.7",
 ]
 # Raspberry Pi hardware — only meaningful on the appliance itself.

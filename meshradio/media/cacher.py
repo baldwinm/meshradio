@@ -113,8 +113,11 @@ class Cacher:
             "--no-playlist",
             "--print-json",
             "-o", str(self.cache_dir / "%(id)s.%(ext)s"),
-            url,
         ]
+        if self.config.ffmpeg_location:
+            cmd += ["--ffmpeg-location", self.config.ffmpeg_location]
+        cmd += list(self.config.ytdlp_extra_args)
+        cmd.append(url)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

@@ -18,10 +18,13 @@ channel = "#music"
 poll_interval_s = 180
 
 [player]
+backend = "auto"                # auto | mpv | web | null — auto picks mpv on pi4/lite,
+                                # web (browser is the speaker) everywhere else
 live_autoplay = true            # auto-play new arrivals when idle in Live mode
 quiet_hours = ""                # e.g. "22:00-08:00" to suppress autoplay overnight
 timezone = "America/Chicago"    # channel-local day boundary for themes
 volume = 70
+radio_batch = 10                # tracks pulled per YouTube Mix fetch in radio mode
 
 [cache]
 max_bytes = 8589934592          # 8 GB LRU cap
@@ -29,6 +32,8 @@ ytdlp_bin = "yt-dlp"
 audio_format = "opus"
 max_retries = 3
 retry_backoff_s = 30
+ffmpeg_location = ""            # set if ffmpeg isn't on PATH (passed to yt-dlp)
+ytdlp_extra_args = []           # e.g. ["--js-runtimes", "deno:/path/to/deno"] if deno isn't on PATH
 
 [web]
 host = "0.0.0.0"

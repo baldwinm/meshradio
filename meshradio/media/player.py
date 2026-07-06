@@ -58,6 +58,32 @@ class NullBackend:
         self.volume = volume
 
 
+class WebBackend:
+    """Playback happens in connected browsers: the page's <audio> element
+    streams /audio/{id} and reports track end via POST /api/ended/{id}.
+    The server keeps authoritative state; this backend is state-only."""
+
+    def __init__(self) -> None:
+        self.on_end: Callable[[], None] | None = None
+        self.volume = 100
+        self.paused = False
+
+    async def play(self, path: str, duration: float | None) -> None:
+        self.paused = False
+
+    async def stop(self) -> None:
+        pass
+
+    async def pause(self) -> None:
+        self.paused = True
+
+    async def resume(self) -> None:
+        self.paused = False
+
+    async def set_volume(self, volume: int) -> None:
+        self.volume = volume
+
+
 class MpvBackend:
     """mpv via python-mpv JSON IPC. Outputs to the current PipeWire default
     sink, so output switching needs zero player logic."""
@@ -97,7 +123,7 @@ class PlayerService:
         config: PlayerConfig,
         db: Database,
         bus: EventBus,
-        backend: NullBackend | MpvBackend,
+        backend: NullBackend | WebBackend | MpvBackend,
         output_getter: Callable[[], str] = lambda: "speaker",
     ):
         self.config = config
@@ -113,6 +139,8 @@ class PlayerService:
         self.current: dict[str, Any] | None = None
         self.queue: list[dict[str, Any]] = []
         self.volume: int = config.volume
+        self.radio_active: bool = False
+        self.radio: Any = None             # RadioService, injected by app.py
         self._play_id: int | None = None
         self._task: asyncio.Task | None = None
 
@@ -227,6 +255,52 @@ class PlayerService:
             self.mode = mode
             self.publish_state()
 
+    # -- radio mode -----------------------------------------------------------
+
+    async def start_radio(self, track_id: int | None = None) -> bool:
+        """Start a YouTube Mix 'radio station' seeded from a track (default:
+        whatever is playing, else the most recently played track)."""
+        if self.radio is None:
+            return False
+        seed = None
+        if track_id is not None:
+            seed = await self.db.track_by_id(track_id)
+        elif self.current is not None:
+            seed = await self.db.track_by_id(self.current["id"])
+        else:
+            rows = await self.db._fetchall(
+                "SELECT tr.* FROM tracks tr JOIN plays p ON p.track_id=tr.id "
+                "ORDER BY p.played_at DESC LIMIT 1"
+            )
+            seed = rows[0] if rows else None
+        if seed is None:
+            return False
+        self.radio_active = True
+        self.publish_state()
+        await self.radio.extend(seed, limit=self.config.radio_batch)
+        return True
+
+    async def stop_radio(self) -> None:
+        self.radio_active = False
+        self.queue = [t for t in self.queue if t.get("source") != "radio"]
+        self.publish_state()
+
+    def _maybe_extend_radio(self, seed: dict[str, Any] | None) -> None:
+        if self.radio_active and self.radio is not None and seed is not None:
+            asyncio.get_running_loop().create_task(
+                self.radio.extend(seed, limit=self.config.radio_batch)
+            )
+
+    # -- browser playback signal ------------------------------------------------
+
+    async def notify_ended(self, track_id: int) -> bool:
+        """A browser finished playing a track (WebBackend). Guarded by track
+        id so duplicate signals from multiple tabs advance only once."""
+        if self.status != "playing" or not self.current or self.current["id"] != track_id:
+            return False
+        await self._advance(completed=True)
+        return True
+
     # -- track end handling ---------------------------------------------------
 
     def _schedule_track_ended(self) -> None:
@@ -236,13 +310,19 @@ class PlayerService:
         if self._play_id is not None and completed:
             await self.db.mark_play_completed(self._play_id)
         self._play_id = None
+        last = self.current
         self.current = None
         if self.queue:
-            await self.play_track(self.queue.pop(0))
+            next_track = self.queue.pop(0)
+            # Keep the radio rolling: top up when the queue is nearly dry.
+            if len(self.queue) == 0:
+                self._maybe_extend_radio(next_track)
+            await self.play_track(next_track)
         else:
             self.status = "idle"
             if self.mode == "archive":
                 self.mode = "live"  # archive replay finished; fall back to live
+            self._maybe_extend_radio(last)
             self.publish_state()
 
     # -- state ------------------------------------------------------------------
@@ -258,6 +338,7 @@ class PlayerService:
                 "artist": t.get("artist"),
                 "sender": t.get("sender"),
                 "duration": t.get("duration"),
+                "source": t.get("source"),
             }
 
         return {
@@ -265,6 +346,8 @@ class PlayerService:
             "mode": self.mode,
             "volume": self.volume,
             "output": self.output_getter(),
+            "radio": self.radio_active,
+            "web_audio": isinstance(self.backend, WebBackend),
             "current": brief(self.current),
             "queue": [brief(t) for t in self.queue],
         }

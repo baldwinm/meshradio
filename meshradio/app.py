@@ -23,7 +23,8 @@ from .ingest.corescope import CoreScopePoller
 from .ingest.mesh import MeshIngest
 from .ingest.service import IngestService
 from .media.cacher import Cacher
-from .media.player import MpvBackend, NullBackend, PlayerService
+from .media.player import MpvBackend, NullBackend, PlayerService, WebBackend
+from .media.radio import RadioService
 from .system.power import StaticPowerMonitor, UpsPowerMonitor
 from .ui.panel import make_panel
 from .web.server import create_app
@@ -31,12 +32,20 @@ from .web.server import create_app
 log = logging.getLogger("meshradio")
 
 
-def make_backend(profile: str):
-    if profile in ("pi4", "lite"):
+def make_backend(profile: str, choice: str = "auto"):
+    """Pick the playback engine. "auto": mpv on appliance profiles (audio out
+    the Pi's sinks), web playback everywhere else (the browser is the
+    speaker until hardware exists)."""
+    if choice == "auto":
+        choice = "mpv" if profile in ("pi4", "lite") else "web"
+    if choice == "mpv":
         try:
             return MpvBackend()
         except Exception:
-            log.exception("mpv unavailable; falling back to simulated playback")
+            log.exception("mpv unavailable; falling back to web playback")
+            choice = "web"
+    if choice == "web":
+        return WebBackend()
     return NullBackend()
 
 
@@ -82,9 +91,10 @@ async def run(config, demo: bool = False) -> None:
         config.player,
         db,
         bus,
-        backend=make_backend(config.hardware_profile),
+        backend=make_backend(config.hardware_profile, config.player.backend),
         output_getter=router.current,
     )
+    player.radio = RadioService(config.cache, db, bus)
     cacher = Cacher(config.cache, config.cache_dir, db, bus)
     panel = make_panel(config.hardware_profile, bus, player, router)
     power = (
