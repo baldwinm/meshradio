@@ -70,7 +70,7 @@ nav a {
 nav a:hover { color: var(--amber); }
 
 /* section headers double as window title bars */
-h2, h3 {
+h2, h3, .eq-window summary {
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.25em;
@@ -134,24 +134,8 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
 }
 @keyframes marquee { to { transform: translateX(-50%); } }
 
-/* tiny fake spectrum analyzer */
-.vis { display: inline-flex; gap: 2px; align-items: flex-end; height: 14px; margin-top: 0.15rem; }
-.vis i {
-  width: 4px;
-  height: 100%;
-  background: linear-gradient(to top, var(--green) 0 55%, var(--amber) 55% 80%, #ff4030 80%);
-  transform: scaleY(0.1);
-  transform-origin: bottom;
-  animation: vu 0.55s ease-in-out infinite alternate paused;
-}
-.vis.on i { animation-play-state: running; }
-.vis i:nth-child(1) { animation-duration: 0.52s; }
-.vis i:nth-child(2) { animation-duration: 0.34s; }
-.vis i:nth-child(3) { animation-duration: 0.61s; }
-.vis i:nth-child(4) { animation-duration: 0.42s; }
-.vis i:nth-child(5) { animation-duration: 0.57s; }
-.vis i:nth-child(6) { animation-duration: 0.38s; }
-@keyframes vu { from { transform: scaleY(0.12); } to { transform: scaleY(1); } }
+/* spectrum analyzer canvas (drawn from real FFT data in the speaker tab) */
+.vis-canvas { display: block; margin-top: 0.2rem; image-rendering: pixelated; }
 
 /* -- play bar (position slider + LCD times) -------------------------------- */
 
@@ -337,6 +321,57 @@ p.empty {
   font-family: "Lucida Console", "Courier New", monospace;
   font-size: 0.82rem;
   padding: 0.5rem 0.6rem;
+}
+
+/* -- equalizer window --------------------------------------------------------- */
+
+.eq-window { margin-top: 1.2rem; }
+.eq-window summary {
+  margin: 0;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.eq-window summary::-webkit-details-marker { display: none; }
+.eq-window summary::before { content: "▸ "; color: var(--amber); }
+.eq-window[open] summary::before { content: "▾ "; }
+.eq-body {
+  background: linear-gradient(#343444, #26262f);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  border-top: none;
+  padding: 0.6rem 0.7rem;
+}
+.eq-actions { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; }
+#eq-on.active { color: var(--green); }
+.eq-note { margin-left: auto; color: var(--muted); font-size: 0.68rem; }
+.eq-bands { display: flex; align-items: flex-end; }
+.eq-band { flex: 1; min-width: 0; }
+.eq-slider-wrap { width: 22px; height: 100px; position: relative; margin: 0 auto; }
+.eq-slider-wrap input[type="range"] {
+  position: absolute;
+  width: 100px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  margin: 0;
+}
+.eq-slider-wrap input[type="range"]::-webkit-slider-thumb { width: 18px; }
+.eq-slider-wrap input[type="range"]::-moz-range-thumb { width: 18px; }
+.eq-band label {
+  display: block;
+  text-align: center;
+  font-family: "Lucida Console", "Courier New", monospace;
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+.eq-gap {
+  width: 8px;
+  align-self: stretch;
+  border-left: 1px solid var(--face-lo);
+  border-right: 1px solid var(--face-hi);
+  margin: 0 6px;
 }
 
 /* -- day navigation ---------------------------------------------------------- */

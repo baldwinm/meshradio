@@ -14,7 +14,7 @@
       <div class="sender">
         {% if current.source == "radio" %}📻 {{ current.sender }}{% else %}shared by {{ current.sender or "—" }}{% endif %}
       </div>
-      <div class="vis{% if state.status == 'playing' %} on{% endif %}"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <canvas id="vis-canvas" class="vis-canvas" width="152" height="30"></canvas>
     </div>
   {% else %}
     <div class="meta idle">

@@ -7,6 +7,36 @@
   {% include "partials/now_playing.html" %}
 </div>
 
+<details id="eq-window" class="eq-window">
+  <summary>Equalizer</summary>
+  <div class="eq-body">
+    <div class="eq-actions">
+      <button id="eq-on" class="subtle" onclick="eqToggle()" title="Toggle the equalizer">ON</button>
+      <button class="subtle" onclick="eqReset()" title="Flatten all bands">Reset</button>
+      <span class="eq-note">applies in the tab playing the audio</span>
+    </div>
+    <div class="eq-bands">
+      <div class="eq-band">
+        <div class="eq-slider-wrap">
+          <input id="eq-preamp" type="range" min="-12" max="12" step="0.5" value="0"
+                 title="Preamp" oninput="eqPreamp(this.value)">
+        </div>
+        <label>PRE</label>
+      </div>
+      <div class="eq-gap"></div>
+      {% for label in ["60", "170", "310", "600", "1K", "3K", "6K", "12K", "14K", "16K"] %}
+      <div class="eq-band">
+        <div class="eq-slider-wrap">
+          <input class="band-input" type="range" min="-12" max="12" step="0.5" value="0"
+                 title="{{ label }}Hz" oninput="eqBand({{ loop.index0 }}, this.value)">
+        </div>
+        <label>{{ label }}</label>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</details>
+
 <h2>Queue</h2>
 <div id="queue"
      hx-get="/partials/queue"
