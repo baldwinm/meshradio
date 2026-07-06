@@ -99,6 +99,25 @@ async def test_stop_radio_clears_radio_queue(db, bus):
     assert [t["id"] for t in player.queue] == [channel_track["id"]]
 
 
+async def test_late_radio_track_dropped_after_stop(db, bus):
+    """A radio track still caching when the user hits stop must not enqueue
+    when it finally arrives via TRACK_READY."""
+    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    seed = await make_ready_track(db, SEED, duration=60)
+    await player.on_track_ready(seed)
+
+    radio_track = dict(await make_ready_track(db, "bbbbbbbbbbb", duration=60))
+    radio_track["source"] = "radio"
+    player.radio_active = True
+    await player.on_track_ready(radio_track)
+    assert [t["id"] for t in player.queue] == [radio_track["id"]]
+
+    await player.stop_radio()
+    assert player.queue == []
+    await player.on_track_ready(radio_track)  # late arrival from the cacher
+    assert player.queue == []
+
+
 async def test_web_backend_waits_for_browser_signal(db, bus):
     player = PlayerService(PlayerConfig(), db, bus, backend=WebBackend())
     track = await make_ready_track(db, SEED, duration=0.01)

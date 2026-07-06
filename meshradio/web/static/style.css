@@ -35,6 +35,17 @@ h2, h3 { color: var(--muted); font-weight: 600; }
 .meta .artist { color: var(--accent); }
 .meta .sender { color: var(--muted); font-size: 0.85rem; }
 .controls { display: flex; gap: 0.5rem; align-items: center; width: 100%; }
+.playbar { display: flex; gap: 0.6rem; align-items: center; width: 100%; }
+.playbar input[type="range"] { flex: 1; width: auto; cursor: pointer; }
+.playbar .time {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 2.6rem;
+}
+.playbar .time:last-child { text-align: right; min-width: 5.4rem; }
+.queue .duration { color: var(--muted); font-size: 0.85rem; margin-left: 0.3rem; }
 button {
   background: var(--accent);
   color: #04222f;

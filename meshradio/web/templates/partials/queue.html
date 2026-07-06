@@ -8,6 +8,7 @@
   <li>
     <span class="title">{{ track.title or track.video_id }}</span>
     {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
+    {% if track.duration %}<span class="duration">{{ track.duration|mmss }}</span>{% endif %}
     {% if track.source == "radio" %}
       <span class="badge">radio</span>
     {% else %}

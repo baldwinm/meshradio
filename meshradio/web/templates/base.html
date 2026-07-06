@@ -61,6 +61,8 @@
           currentTrackId = s.current.id;
           audio.src = "/audio/" + s.current.id;
           audio.onended = () => fetch("/api/ended/" + currentTrackId, { method: "POST" });
+        } else if (audio.readyState > 0 && Math.abs(audio.currentTime - s.position) > 3) {
+          audio.currentTime = s.position;  // a remote tab scrubbed; follow it
         }
         // Browsers block autoplay before the first user gesture; offer a button.
         audio.play().then(() => { audioCtl.hidden = true; })
@@ -75,13 +77,70 @@
       }
     }
 
+    // Play bar. The speaker tab reads its own <audio> element (exact);
+    // remote tabs extrapolate from the last server state + wall clock.
+    // The htmx swap replaces the bar's DOM on every state event, so the
+    // ticker re-queries elements each time and handlers live inline.
+    let lastPos = { value: 0, at: Date.now(), playing: false, duration: 0 };
+
+    function trackPos(s) {
+      lastPos = {
+        value: s.position || 0,
+        at: Date.now(),
+        playing: s.status === "playing",
+        duration: (s.current && s.current.duration) || 0,
+      };
+    }
+
+    function fmtTime(s) {
+      s = Math.max(0, Math.round(s));
+      const m = Math.floor(s / 60) % 60, h = Math.floor(s / 3600), sec = String(s % 60).padStart(2, "0");
+      return h ? h + ":" + String(m).padStart(2, "0") + ":" + sec : m + ":" + sec;
+    }
+
+    function paintBar(scrub, pos, dur) {
+      const elapsed = document.getElementById("pb-elapsed");
+      const remaining = document.getElementById("pb-remaining");
+      if (elapsed) elapsed.textContent = fmtTime(pos);
+      if (remaining) remaining.textContent = dur ? "-" + fmtTime(dur - pos) + " · " + fmtTime(dur) : "";
+    }
+
+    setInterval(() => {
+      const scrub = document.getElementById("pb-scrub");
+      if (!scrub || scrub.dataset.seeking) return;
+      let pos, dur;
+      if (currentTrackId !== null && audio.src) {          // this tab is the speaker
+        pos = audio.currentTime;
+        dur = audio.duration || lastPos.duration;
+      } else {
+        pos = lastPos.value + (lastPos.playing ? (Date.now() - lastPos.at) / 1000 : 0);
+        dur = lastPos.duration;
+      }
+      if (dur) pos = Math.min(pos, dur);
+      if (dur && +scrub.max !== Math.round(dur)) scrub.max = Math.round(dur);
+      scrub.value = Math.round(pos);
+      paintBar(scrub, pos, dur);
+    }, 500);
+
+    function scrubPreview(el) {                            // dragging: preview only
+      el.dataset.seeking = "1";
+      paintBar(el, +el.value, +el.max);
+    }
+
+    function scrubCommit(el) {                             // released: actually seek
+      delete el.dataset.seeking;
+      const pos = +el.value;
+      if (currentTrackId !== null && audio.src) audio.currentTime = pos;
+      fetch("/api/seek/" + pos, { method: "POST" });       // keep server clock + remotes in sync
+    }
+
     // Live state: drive the audio element and nudge htmx containers to re-fetch.
     (function connect() {
       const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
       socket = ws;
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-        if (msg.topic === "player.state") applyState(msg.data);
+        if (msg.topic === "player.state") { trackPos(msg.data); applyState(msg.data); }
         document.body.dispatchEvent(new Event("meshradio:state"));
       };
       ws.onclose = () => { socket = null; setTimeout(connect, 3000); };
