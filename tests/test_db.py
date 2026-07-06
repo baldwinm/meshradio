@@ -1,0 +1,109 @@
+from meshradio.db import Database, dedupe_hash
+
+VID = "dQw4w9WgXcQ"
+
+
+def _track_args(**overrides):
+    args = dict(
+        video_id=VID,
+        url=f"https://www.youtube.com/watch?v={VID}",
+        channel="#music",
+        sender="alice",
+        mesh_ts=1_751_800_000.0,
+        source="mesh",
+        theme_id=None,
+    )
+    args.update(overrides)
+    return args
+
+
+async def test_migrations_idempotent(db: Database):
+    # Second migrate on the same file is a no-op.
+    await db._migrate()
+    assert await db.get_setting("nope") is None
+
+
+async def test_dedupe_same_message(db: Database):
+    first = await db.add_track(**_track_args())
+    dupe = await db.add_track(**_track_args(source="corescope"))
+    assert first is not None
+    assert dupe is None  # corescope delivery of the same message no-ops
+
+
+async def test_dedupe_bucket_60s(db: Database):
+    ts = 1_751_800_020.0  # aligned to a 60s bucket start
+    assert dedupe_hash("#music", "alice", VID, ts) == dedupe_hash("#music", "alice", VID, ts + 30)
+    assert dedupe_hash("#music", "alice", VID, ts) != dedupe_hash("#music", "alice", VID, ts + 90)
+
+
+async def test_repost_by_other_sender_is_new_track(db: Database):
+    assert await db.add_track(**_track_args()) is not None
+    assert await db.add_track(**_track_args(sender="bob")) is not None
+
+
+async def test_theme_unique_per_day(db: Database):
+    theme_a = await db.create_theme("2026-07-06", "rain songs", set_by="alice")
+    theme_b = await db.create_theme("2026-07-06", "rain songs", set_by="bob")
+    assert theme_a["id"] == theme_b["id"]
+
+
+async def test_latest_theme_for_date(db: Database):
+    await db.create_theme("2026-07-06", "first")
+    second = await db.create_theme("2026-07-06", "second")
+    latest = await db.latest_theme_for_date("2026-07-06")
+    assert latest is not None and latest["id"] == second["id"]
+    assert await db.latest_theme_for_date("2026-07-07") is None
+
+
+async def test_cache_status_and_pending(db: Database):
+    track = await db.add_track(**_track_args())
+    assert [t["id"] for t in await db.pending_tracks()] == [track["id"]]
+    await db.set_cache_status(track["id"], "ready", "/cache/x.opus")
+    assert await db.pending_tracks() == []
+    refreshed = await db.track_by_id(track["id"])
+    assert refreshed["cache_status"] == "ready"
+    assert refreshed["cache_path"] == "/cache/x.opus"
+
+
+async def test_metadata_update_coalesces(db: Database):
+    track = await db.add_track(**_track_args())
+    await db.update_track_metadata(track["id"], title="Song", artist="Band", duration=200)
+    await db.update_track_metadata(track["id"], duration=201)  # title/artist untouched
+    refreshed = await db.track_by_id(track["id"])
+    assert refreshed["title"] == "Song"
+    assert refreshed["artist"] == "Band"
+    assert refreshed["duration"] == 201
+
+
+async def test_archive_queries(db: Database):
+    theme = await db.create_theme("2026-07-06", "rain songs")
+    await db.add_track(**_track_args(theme_id=theme["id"]))
+    await db.add_track(**_track_args(theme_id=theme["id"], sender="bob", video_id="abcdefghijk"))
+    days = await db.archive_days()
+    assert len(days) == 1
+    assert days[0]["date"] == "2026-07-06"
+    assert days[0]["tracks"] == 2
+    themes = await db.themes_for_day("2026-07-06")
+    assert themes[0]["track_count"] == 2
+    tracks = await db.tracks_for_theme(theme["id"])
+    assert len(tracks) == 2
+    assert len(await db.tracks_for_day("2026-07-06")) == 2
+
+
+async def test_plays_and_lru_order(db: Database):
+    theme = await db.create_theme("2026-07-06", "t")
+    a = await db.add_track(**_track_args(theme_id=theme["id"]))
+    b = await db.add_track(**_track_args(theme_id=theme["id"], video_id="abcdefghijk"))
+    await db.set_cache_status(a["id"], "ready", "/cache/a.opus")
+    await db.set_cache_status(b["id"], "ready", "/cache/b.opus")
+    await db.record_play(a["id"], "speaker")
+    lru = await db.cached_tracks_lru()
+    # b never played -> evict first
+    assert [t["id"] for t in lru] == [b["id"], a["id"]]
+
+
+async def test_settings_roundtrip(db: Database):
+    await db.set_setting("k", "v1")
+    await db.set_setting("k", "v2")
+    assert await db.get_setting("k") == "v2"
+    assert await db.get_setting("missing", "dflt") == "dflt"

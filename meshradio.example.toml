@@ -1,0 +1,35 @@
+# MeshRadio configuration — copy to meshradio.toml (dev) or
+# /etc/meshradio/config.toml (appliance). Every key is optional;
+# defaults live in meshradio/config.py.
+
+hardware_profile = "dev"        # dev | pi4 | lite
+data_dir = "./data"             # SQLite archive + audio cache ("/var/lib/meshradio" on the appliance)
+
+[mesh]
+enabled = false                 # true on the full kit (pi4)
+serial_port = ""                # empty = autodetect /dev/ttyUSB*
+channel = "#music"
+channel_key = ""                # MeshCore channel key
+
+[corescope]
+enabled = true
+base_url = ""                   # AUS CoreScope instance URL
+channel = "#music"
+poll_interval_s = 180
+
+[player]
+live_autoplay = true            # auto-play new arrivals when idle in Live mode
+quiet_hours = ""                # e.g. "22:00-08:00" to suppress autoplay overnight
+timezone = "America/Chicago"    # channel-local day boundary for themes
+volume = 70
+
+[cache]
+max_bytes = 8589934592          # 8 GB LRU cap
+ytdlp_bin = "yt-dlp"
+audio_format = "opus"
+max_retries = 3
+retry_backoff_s = 30
+
+[web]
+host = "0.0.0.0"
+port = 8080

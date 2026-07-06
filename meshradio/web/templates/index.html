@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="now-playing"
+     hx-get="/partials/now-playing"
+     hx-trigger="meshradio:state from:body"
+     hx-swap="innerHTML">
+  {% include "partials/now_playing.html" %}
+</div>
+
+<h2>Queue</h2>
+<div id="queue"
+     hx-get="/partials/queue"
+     hx-trigger="meshradio:state from:body"
+     hx-swap="innerHTML">
+  {% include "partials/queue.html" %}
+</div>
+{% endblock %}
