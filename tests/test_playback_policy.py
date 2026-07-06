@@ -45,7 +45,6 @@ async def test_channel_tracks_jump_ahead_of_radio_filler(db, bus):
 
 async def test_radio_tracks_append_at_end(db, bus):
     player = make_player(db, bus)
-    player.radio_active = True
     current = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
     await player.on_track_ready(dict(current, mesh_ts=time.time()))
     radio_track = await make_ready_track(db, "ccccccccccc", duration=60)

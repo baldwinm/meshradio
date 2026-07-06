@@ -210,10 +210,10 @@ class PlayerService:
             self.queue.insert(idx, track)
 
     async def on_track_ready(self, track: dict[str, Any]) -> None:
-        # Radio tracks were explicitly requested; channel tracks only enter
-        # the jukebox if freshly posted (older ones are archive backfill).
-        if track.get("source") == "radio" and not self.radio_active:
-            return  # radio stopped while this was still caching
+        # Radio tracks were explicitly requested (even if radio has been
+        # switched off since — stopping only halts NEW mix fetches); channel
+        # tracks only enter the jukebox if freshly posted (older ones are
+        # archive backfill).
         if track.get("source") != "radio" and not self._is_fresh(track):
             return
         if (
@@ -386,8 +386,9 @@ class PlayerService:
         return True
 
     async def stop_radio(self) -> None:
+        """Stop fetching new mix batches. Radio tracks already queued (or
+        still downloading) are kept — clear_queue is the way to drop them."""
         self.radio_active = False
-        self.queue = [t for t in self.queue if t.get("source") != "radio"]
         self.publish_state()
 
     def _maybe_extend_radio(self, seed: dict[str, Any] | None) -> None:

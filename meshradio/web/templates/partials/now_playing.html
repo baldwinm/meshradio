@@ -43,7 +43,7 @@
     <button hx-post="/api/skip" hx-target="#now-playing" title="Next track">⏭</button>
     {% if state.radio %}
       <button class="radio-btn active" hx-post="/api/radio/stop" hx-target="#now-playing"
-              title="Stop the radio station">◼ Radio on</button>
+              title="Stop fetching more songs — already-queued ones stay">◼ Radio on</button>
     {% else %}
       <button class="radio-btn" hx-post="/api/radio/start" hx-target="#now-playing"
               title="Keep the music going: queue similar songs from a YouTube Mix of this track">📻 Start radio</button>

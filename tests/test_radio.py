@@ -86,7 +86,8 @@ async def test_start_radio_without_history_fails(db, bus):
     assert await player.start_radio() is False
 
 
-async def test_stop_radio_clears_radio_queue(db, bus):
+async def test_stop_radio_keeps_queued_tracks(db, bus):
+    """Radio off only stops NEW mix fetches; already-queued radio tracks stay."""
     player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
     seed = await make_ready_track(db, SEED, duration=60)
     await player.on_track_ready(seed)
@@ -96,26 +97,33 @@ async def test_stop_radio_clears_radio_queue(db, bus):
     player.radio_active = True
     await player.stop_radio()
     assert not player.radio_active
-    assert [t["id"] for t in player.queue] == [channel_track["id"]]
+    assert [t["id"] for t in player.queue] == [99, channel_track["id"]]
 
 
-async def test_late_radio_track_dropped_after_stop(db, bus):
-    """A radio track still caching when the user hits stop must not enqueue
-    when it finally arrives via TRACK_READY."""
+async def test_late_radio_track_still_enqueued_after_stop(db, bus):
+    """A radio track still downloading when the user hits stop was already
+    requested — it joins the queue when it finishes; only NEW fetches stop."""
     player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
     seed = await make_ready_track(db, SEED, duration=60)
     await player.on_track_ready(seed)
 
+    player.radio_active = True
+    await player.stop_radio()
     radio_track = dict(await make_ready_track(db, "bbbbbbbbbbb", duration=60))
     radio_track["source"] = "radio"
-    player.radio_active = True
-    await player.on_track_ready(radio_track)
+    await player.on_track_ready(radio_track)  # late arrival from the cacher
     assert [t["id"] for t in player.queue] == [radio_track["id"]]
 
-    await player.stop_radio()
-    assert player.queue == []
-    await player.on_track_ready(radio_track)  # late arrival from the cacher
-    assert player.queue == []
+
+async def test_stopped_radio_never_extends(db, bus):
+    """With radio off, draining the queue must not trigger new mix fetches."""
+    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player.radio = FakeRadio(db, bus, [{"id": "bbbbbbbbbbb", "title": "Song B"}])
+    seed = await make_ready_track(db, SEED, duration=0.02)
+    await player.on_track_ready(seed)
+    await asyncio.sleep(0.1)  # track ends with an empty queue
+    assert player.status == "idle"
+    assert player.radio.fetched_seeds == []
 
 
 async def test_web_backend_waits_for_browser_signal(db, bus):
