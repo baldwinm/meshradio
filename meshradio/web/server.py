@@ -24,6 +24,33 @@ log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
 
+
+class SpeakerRegistry:
+    """Exactly one connected page is the 'speaker' — the tab that actually
+    plays audio in web-playback mode. Everyone else is a silent remote.
+    Newest connection wins; any tab can claim the role explicitly."""
+
+    def __init__(self) -> None:
+        self._conns: list = []
+
+    def join(self, conn) -> None:
+        self._conns.append(conn)
+
+    def leave(self, conn) -> None:
+        if conn in self._conns:
+            self._conns.remove(conn)
+
+    def claim(self, conn) -> None:
+        if conn in self._conns:
+            self._conns.remove(conn)
+            self._conns.append(conn)
+
+    def is_speaker(self, conn) -> bool:
+        return bool(self._conns) and self._conns[-1] is conn
+
+    def clients(self) -> list:
+        return list(self._conns)
+
 _AUDIO_TYPES = {
     ".opus": "audio/ogg",
     ".ogg": "audio/ogg",
@@ -142,19 +169,52 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
 
     # -- WebSocket -----------------------------------------------------------
 
+    speakers = SpeakerRegistry()
+    app.state.speakers = speakers
+
+    async def broadcast_state() -> None:
+        """Push fresh state to every page (speaker role may have moved)."""
+        for conn in speakers.clients():
+            try:
+                await conn.send_json({
+                    "topic": PLAYER_STATE,
+                    "data": {**player.state(), "speaker": speakers.is_speaker(conn)},
+                })
+            except Exception:
+                pass
+
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
         await websocket.accept()
+        speakers.join(websocket)
         sub = bus.subscribe(PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
-        try:
-            await websocket.send_json({"topic": PLAYER_STATE, "data": player.state()})
+
+        async def recv_loop():
+            while True:
+                msg = await websocket.receive_text()
+                if msg == "claim":
+                    speakers.claim(websocket)
+                    await broadcast_state()
+
+        async def send_loop():
             async for topic, payload in sub:
+                if topic == PLAYER_STATE:
+                    payload = {**payload, "speaker": speakers.is_speaker(websocket)}
                 await websocket.send_json({"topic": topic, "data": payload})
+
+        tasks = [asyncio.create_task(recv_loop()), asyncio.create_task(send_loop())]
+        try:
+            await broadcast_state()  # joining may reassign the speaker
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
         except Exception:
             log.debug("websocket closed", exc_info=True)
         finally:
+            for task in tasks:
+                task.cancel()
             sub.close()
+            speakers.leave(websocket)
+            await broadcast_state()  # promote the next speaker
 
     return app

@@ -56,7 +56,7 @@ button:hover { filter: brightness(1.1); }
 .radio-btn { background: #26313c; color: var(--text); }
 .radio-btn.active { background: #2e7d32; color: #eaf6ea; }
 input[type="range"] { accent-color: var(--accent); width: 110px; }
-#enable-audio {
+#audio-ctl {
   position: fixed;
   bottom: 1rem;
   right: 1rem;
