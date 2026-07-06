@@ -99,7 +99,10 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
 
 - **Now Playing** — art, title, artist, and which mesh member shared it.
   Controls: **▶/⏸ play-pause**, **⏭ next track**, **volume slider**, and the
-  **📻 Start radio** button (below). The queue is listed underneath.
+  **📻 Start radio** button (below). The queue is listed underneath — **⤒**
+  bumps a track to play next, **✕** removes it, and **Clear queue** empties
+  it (the current song keeps playing; radio mode switches off so it doesn't
+  refill what you just cleared).
 - **Live jukebox** — when a new song lands on the channel it auto-plays if
   the radio is idle, or joins the queue if something's already playing. A new
   arrival never interrupts the current song.

@@ -1,4 +1,8 @@
 {% if state.queue %}
+<div class="queue-actions">
+  <button class="subtle" hx-post="/api/queue/clear" hx-target="#queue"
+          title="Empty the queue (also stops radio mode)">Clear queue</button>
+</div>
 <ol class="queue">
   {% for track in state.queue %}
   <li>
@@ -9,6 +13,14 @@
     {% else %}
       <span class="sender">({{ track.sender or "?" }})</span>
     {% endif %}
+    <span class="row-actions">
+      {% if not loop.first %}
+      <button class="subtle" title="Play next"
+              hx-post="/api/queue/top/{{ loop.index0 }}/{{ track.id }}" hx-target="#queue">⤒</button>
+      {% endif %}
+      <button class="subtle" title="Remove from queue"
+              hx-post="/api/queue/remove/{{ loop.index0 }}/{{ track.id }}" hx-target="#queue">✕</button>
+    </span>
   </li>
   {% endfor %}
 </ol>

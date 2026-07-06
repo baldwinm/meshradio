@@ -120,6 +120,23 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
         await player.set_volume(level)
         return await partial_now_playing(request)
 
+    # NOTE: literal /api/queue/* routes must be registered before the
+    # /api/queue/{track_id} catch-all or "clear" gets parsed as a track id.
+    @app.post("/api/queue/clear")
+    async def api_queue_clear(request: Request):
+        await player.clear_queue()
+        return await partial_queue(request)
+
+    @app.post("/api/queue/remove/{index}/{track_id}")
+    async def api_queue_remove(request: Request, index: int, track_id: int):
+        await player.remove_from_queue(index, track_id)
+        return await partial_queue(request)
+
+    @app.post("/api/queue/top/{index}/{track_id}")
+    async def api_queue_top(request: Request, index: int, track_id: int):
+        await player.move_to_front(index, track_id)
+        return await partial_queue(request)
+
     @app.post("/api/queue/{track_id}")
     async def api_enqueue(track_id: int):
         await player.enqueue_track_id(track_id)

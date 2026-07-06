@@ -54,6 +54,45 @@ async def test_radio_tracks_append_at_end(db, bus):
     assert [t["video_id"] for t in player.queue] == ["bbbbbbbbbbb", "ccccccccccc"]
 
 
+async def test_remove_from_queue(db, bus):
+    player = make_player(db, bus)
+    player.queue = [
+        {"id": 1, "video_id": "a", "source": "corescope"},
+        {"id": 2, "video_id": "b", "source": "corescope"},
+    ]
+    assert await player.remove_from_queue(0, 1) is True
+    assert [t["id"] for t in player.queue] == [2]
+
+
+async def test_remove_with_stale_index_noops(db, bus):
+    player = make_player(db, bus)
+    player.queue = [{"id": 1, "video_id": "a", "source": "corescope"}]
+    # Client rendered an older queue: index 0 now holds a different track.
+    assert await player.remove_from_queue(0, 999) is False
+    assert await player.remove_from_queue(5, 1) is False
+    assert len(player.queue) == 1
+
+
+async def test_move_to_front(db, bus):
+    player = make_player(db, bus)
+    player.queue = [
+        {"id": 1, "video_id": "a", "source": "corescope"},
+        {"id": 2, "video_id": "b", "source": "corescope"},
+        {"id": 3, "video_id": "c", "source": "radio"},
+    ]
+    assert await player.move_to_front(2, 3) is True
+    assert [t["id"] for t in player.queue] == [3, 1, 2]
+
+
+async def test_clear_queue_also_stops_radio(db, bus):
+    player = make_player(db, bus)
+    player.queue = [{"id": 1, "video_id": "a", "source": "radio"}]
+    player.radio_active = True
+    await player.clear_queue()
+    assert player.queue == []
+    assert player.radio_active is False
+
+
 def test_speaker_registry_newest_wins():
     reg = SpeakerRegistry()
     reg.join("a")

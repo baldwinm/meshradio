@@ -279,6 +279,36 @@ class PlayerService:
             self.mode = mode
             self.publish_state()
 
+    # -- queue editing -----------------------------------------------------
+
+    def _queue_entry(self, index: int, track_id: int) -> dict[str, Any] | None:
+        """The queue item at ``index`` iff it's still the track the client
+        was looking at — the queue may have shifted since their page render."""
+        if 0 <= index < len(self.queue) and self.queue[index]["id"] == track_id:
+            return self.queue[index]
+        return None
+
+    async def remove_from_queue(self, index: int, track_id: int) -> bool:
+        if self._queue_entry(index, track_id) is None:
+            return False
+        self.queue.pop(index)
+        self.publish_state()
+        return True
+
+    async def move_to_front(self, index: int, track_id: int) -> bool:
+        if self._queue_entry(index, track_id) is None:
+            return False
+        self.queue.insert(0, self.queue.pop(index))
+        self.publish_state()
+        return True
+
+    async def clear_queue(self) -> None:
+        """Empty the queue. Also switches radio off — otherwise it would
+        immediately refill what the user just cleared."""
+        self.queue = []
+        self.radio_active = False
+        self.publish_state()
+
     # -- radio mode -----------------------------------------------------------
 
     async def start_radio(self, track_id: int | None = None) -> bool:
