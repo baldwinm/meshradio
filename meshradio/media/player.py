@@ -196,6 +196,7 @@ class PlayerService(Service):
         self.volume: int = config.volume
         self.radio_active: bool = False
         self.radio: Any = None             # RadioService, injected by app.py
+        self.on_state: Callable[[], None] | None = None  # session persistence hook
         self._play_id: int | None = None
         # Playback position clock: base seconds + wall time since epoch while
         # playing. With WebBackend the browser is the real transport, so this
@@ -510,3 +511,52 @@ class PlayerService(Service):
 
     def publish_state(self) -> None:
         self.events.publish(PLAYER_STATE, self.state())
+        if self.on_state is not None:
+            self.on_state()
+
+    # -- session persistence (embed hosting: survive deploys) -------------------
+
+    def snapshot(self) -> dict[str, Any]:
+        """Persistable state for a visitor session."""
+        return {
+            "day": self.day,
+            "mode": self.mode,
+            "status": self.status,
+            "volume": self.volume,
+            "current_track_id": self.current["id"] if self.current else None,
+            "position": round(self.position(), 1),
+            "saved_at": time.time(),
+            "queue_track_ids": [t["id"] for t in self.queue],
+        }
+
+    async def restore(self, snap: dict[str, Any]) -> None:
+        """Rebuild from a snapshot. Tracks that vanished or lost readiness
+        since the save are skipped; a playing position advances by the wall
+        time since the save, clamped inside the track."""
+        self.volume = int(snap.get("volume", self.volume))
+        self.mode = snap.get("mode") if snap.get("mode") in ("live", "archive") else "live"
+        self.day = snap.get("day")
+        queue: list[dict[str, Any]] = []
+        for track_id in snap.get("queue_track_ids", []):
+            track = await self.db.track_by_id(track_id)
+            if track and track["cache_status"] == "ready":
+                queue.append(track)
+        self.queue = queue
+        current = None
+        if snap.get("current_track_id") is not None:
+            current = await self.db.track_by_id(snap["current_track_id"])
+            if current and current["cache_status"] != "ready":
+                current = None
+        status = snap.get("status")
+        if current and status in ("playing", "paused"):
+            self.current = current
+            self.status = status
+            position = max(float(snap.get("position") or 0.0), 0.0)
+            if status == "playing" and snap.get("saved_at"):
+                position += max(0.0, time.time() - float(snap["saved_at"]))
+            duration = current.get("duration")
+            if duration:
+                position = min(position, max(float(duration) - 1.0, 0.0))
+            self._pos_base = position
+            self._pos_epoch = time.monotonic() if status == "playing" else None
+        self.publish_state()

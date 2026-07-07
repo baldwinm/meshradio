@@ -71,6 +71,48 @@ async def test_session_state_stays_off_global_bus(db, bus):
     assert global_sub.queue.qsize() == 0
 
 
+async def test_session_survives_process_restart(db, bus):
+    """Deploys restart the process: a returning cookie must restore its
+    session (day, current track, position, queue) from the web_sessions
+    table instead of landing on an idle player."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")
+        await client.post("/api/seek/30")
+        sid = client.cookies["mr_sid"]
+        await app.state.sessions.flush()   # what the maintenance loop does
+
+    # "Redeploy": a brand-new app + manager over the same DB and cookie.
+    app2 = embed_app(db, bus)
+    async with client_for(app2) as client:
+        client.cookies.set("mr_sid", sid)
+        state = (await client.get("/api/state")).json()
+        assert state["status"] == "playing"
+        assert state["current"]["video_id"] == "aaaaaaaaaaa"
+        assert state["day"] == "2026-07-06"
+        assert 30 <= state["position"] < 40
+
+
+async def test_restore_skips_vanished_tracks(db, bus):
+    """A snapshot referencing tracks that lost readiness restores what it
+    can instead of failing."""
+    track = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")
+        sid = client.cookies["mr_sid"]
+        await app.state.sessions.flush()
+    await db.set_cache_status(track["id"], "failed")   # pruned/broken meanwhile
+
+    app2 = embed_app(db, bus)
+    async with client_for(app2) as client:
+        client.cookies.set("mr_sid", sid)
+        state = (await client.get("/api/state")).json()
+        assert state["status"] == "idle"               # graceful, not broken
+        assert state["current"] is None
+
+
 async def test_appliance_mode_still_shares_one_player(db, bus):
     """No factory (web/mpv appliance): the communal player handles everyone."""
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)

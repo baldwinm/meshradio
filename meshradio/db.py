@@ -90,6 +90,14 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_tracks_status ON tracks(cache_status);
     PRAGMA foreign_keys=ON;
     """,
+    # v3 — per-visitor web session snapshots (embed hosting): survive deploys.
+    """
+    CREATE TABLE web_sessions(
+        sid        TEXT PRIMARY KEY,
+        updated_at TEXT NOT NULL,
+        state      TEXT NOT NULL              -- JSON snapshot
+    );
+    """,
 ]
 
 
@@ -320,6 +328,34 @@ class Database:
             "SELECT COUNT(*) AS n FROM tracks WHERE source != 'radio'"
         )
         return int(row["n"]) if row else 0
+
+    # -- web sessions ----------------------------------------------------------
+
+    async def save_web_session(self, sid: str, state: str) -> None:
+        await self.db.execute(
+            "INSERT INTO web_sessions(sid, updated_at, state) VALUES(?,?,?) "
+            "ON CONFLICT(sid) DO UPDATE SET updated_at=excluded.updated_at, "
+            "state=excluded.state",
+            (sid, utcnow(), state),
+        )
+        await self.db.commit()
+
+    async def load_web_session(self, sid: str) -> str | None:
+        row = await self._fetchone(
+            "SELECT state FROM web_sessions WHERE sid=?", (sid,)
+        )
+        return row["state"] if row else None
+
+    async def delete_web_sessions(self, sids: list[str] | None = None, older_than: str | None = None) -> None:
+        if sids:
+            await self.db.executemany(
+                "DELETE FROM web_sessions WHERE sid=?", [(s,) for s in sids]
+            )
+        if older_than:
+            await self.db.execute(
+                "DELETE FROM web_sessions WHERE updated_at < ?", (older_than,)
+            )
+        await self.db.commit()
 
     # -- plays / LRU ---------------------------------------------------------
 
