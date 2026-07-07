@@ -120,8 +120,31 @@ async def run(config, demo: bool = False) -> None:
 
     demo_task = asyncio.create_task(seed_demo(config, ingest)) if demo else None
 
+    # Public embed hosting: every visiting browser gets its own session
+    # player (queue/position/day), so nobody can pause or steal anyone
+    # else's music. The appliance modes stay one communal radio.
+    player_factory = None
+    if isinstance(player.backend, EmbedBackend):
+        def player_factory(out_bus: EventBus) -> PlayerService:
+            p = PlayerService(
+                config.player,
+                db,
+                bus,                       # hears shared TRACK_READY events
+                backend=EmbedBackend(),
+                output_getter=lambda: "embed",
+                events_out=out_bus,        # announces state only to its session
+            )
+            p.start()
+            return p
+
     web_app = create_app(
-        bus, db, player, router, ingest=ingest, ingest_token=config.web.ingest_token
+        bus,
+        db,
+        player,
+        router,
+        ingest=ingest,
+        ingest_token=config.web.ingest_token,
+        player_factory=player_factory,
     )
     server = uvicorn.Server(
         uvicorn.Config(

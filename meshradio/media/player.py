@@ -171,10 +171,16 @@ class PlayerService:
         bus: EventBus,
         backend: NullBackend | WebBackend | MpvBackend,
         output_getter: Callable[[], str] = lambda: "speaker",
+        events_out: EventBus | None = None,
     ):
         self.config = config
         self.db = db
+        # Inbound events (TRACK_READY from the shared cacher) arrive on
+        # ``bus``; state announcements go to ``events_out`` when given, so a
+        # per-visitor session player (public embed hosting) broadcasts only
+        # to its own browser's sockets instead of to every visitor.
         self.bus = bus
+        self.events = events_out or bus
         self.backend = backend
         self.embed = isinstance(backend, EmbedBackend)
         self.backend.on_end = self._schedule_track_ended
@@ -513,4 +519,4 @@ class PlayerService:
         }
 
     def publish_state(self) -> None:
-        self.bus.publish(PLAYER_STATE, self.state())
+        self.events.publish(PLAYER_STATE, self.state())

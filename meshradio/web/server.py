@@ -10,8 +10,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -53,6 +56,60 @@ class SpeakerRegistry:
     def clients(self) -> list:
         return list(self._conns)
 
+SESSION_COOKIE = "mr_sid"
+
+
+@dataclass
+class Session:
+    """One visitor's private radio: their own player (queue, position, day)
+    and their own speaker election among their tabs."""
+    player: PlayerService
+    bus: EventBus
+    speakers: SpeakerRegistry = field(default_factory=SpeakerRegistry)
+    last_seen: float = field(default_factory=time.monotonic)
+
+
+class SessionManager:
+    """Per-visitor sessions for public embed hosting. The appliance modes
+    (web/mpv) are one communal radio and never use this; in embed mode a
+    shared player would let any visitor pause everyone's music and every
+    new connection would steal the speaker role mid-song."""
+
+    def __init__(self, factory: Callable[[EventBus], PlayerService]):
+        self._factory = factory
+        self._sessions: dict[str, Session] = {}
+        self._reaper: asyncio.Task | None = None
+
+    def get(self, sid: str) -> Session:
+        session = self._sessions.get(sid)
+        if session is None:
+            out_bus = EventBus()
+            session = Session(player=self._factory(out_bus), bus=out_bus)
+            self._sessions[sid] = session
+            log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
+            if self._reaper is None:
+                self._reaper = asyncio.create_task(self._reap_loop())
+        session.last_seen = time.monotonic()
+        return session
+
+    async def _reap_loop(self) -> None:
+        while True:
+            await asyncio.sleep(300)
+            try:
+                await self.reap()
+            except Exception:
+                log.exception("session reaper failed")
+
+    async def reap(self, max_idle_s: float = 1800) -> None:
+        """Drop sessions with no connected tabs that have been idle a while."""
+        now = time.monotonic()
+        for sid, session in list(self._sessions.items()):
+            if not session.speakers.clients() and now - session.last_seen > max_idle_s:
+                del self._sessions[sid]
+                await session.player.stop()
+                log.info("session %s… reaped (%d live)", sid[:8], len(self._sessions))
+
+
 _AUDIO_TYPES = {
     ".opus": "audio/ogg",
     ".ogg": "audio/ogg",
@@ -79,6 +136,7 @@ def create_app(
     router,
     ingest=None,
     ingest_token: str = "",
+    player_factory: Callable[[EventBus], PlayerService] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="MeshRadio")
     templates = Jinja2Templates(directory=_HERE / "templates")
@@ -87,14 +145,41 @@ def create_app(
     templates.env.globals["asset_v"] = int((_HERE / "static" / "style.css").stat().st_mtime)
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
+    # Per-visitor sessions (public embed hosting) vs one communal player
+    # (the appliance). A cookie names the session; each browser gets its own.
+    sessions = SessionManager(player_factory) if player_factory else None
+    app.state.sessions = sessions
+
+    if sessions is not None:
+        @app.middleware("http")
+        async def ensure_session_cookie(request: Request, call_next):
+            sid = request.cookies.get(SESSION_COOKIE)
+            fresh = sid is None
+            if fresh:
+                sid = secrets.token_hex(16)
+            request.state.sid = sid
+            response = await call_next(request)
+            if fresh:
+                response.set_cookie(
+                    SESSION_COOKIE, sid,
+                    max_age=365 * 24 * 3600, httponly=True, samesite="lax",
+                )
+            return response
+
+    def get_player(request: Request) -> PlayerService:
+        if sessions is None:
+            return player
+        sid = getattr(request.state, "sid", None) or request.cookies.get(SESSION_COOKIE)
+        return sessions.get(sid or "anonymous").player
+
     def _today() -> str:
         return datetime.now(player.tz).date().isoformat()
 
-    async def day_context() -> dict:
+    async def day_context(p: PlayerService) -> dict:
         """The day being played (or today), its theme(s), and the adjacent
         archive days for the prev/next navigation."""
         today = _today()
-        day = player.day or today
+        day = p.day or today
         themes = await db.themes_for_day(day)
         days = sorted(d["date"] for d in await db.archive_days() if d["tracks"])
         return {
@@ -109,8 +194,9 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
+        p = get_player(request)
         return templates.TemplateResponse(
-            request, "index.html", {"state": player.state(), **await day_context()}
+            request, "index.html", {"state": p.state(), **await day_context(p)}
         )
 
     @app.get("/archive", response_class=HTMLResponse)
@@ -131,85 +217,89 @@ def create_app(
 
     @app.get("/partials/now-playing", response_class=HTMLResponse)
     async def partial_now_playing(request: Request):
+        p = get_player(request)
         return templates.TemplateResponse(
-            request, "partials/now_playing.html", {"state": player.state(), **await day_context()}
+            request, "partials/now_playing.html", {"state": p.state(), **await day_context(p)}
         )
 
     @app.get("/partials/day-nav", response_class=HTMLResponse)
     async def partial_day_nav(request: Request):
+        p = get_player(request)
         return templates.TemplateResponse(
-            request, "partials/day_nav.html", {"state": player.state(), **await day_context()}
+            request, "partials/day_nav.html", {"state": p.state(), **await day_context(p)}
         )
 
     @app.get("/partials/queue", response_class=HTMLResponse)
     async def partial_queue(request: Request):
         return templates.TemplateResponse(
-            request, "partials/queue.html", {"state": player.state()}
+            request, "partials/queue.html", {"state": get_player(request).state()}
         )
 
     # -- JSON API ------------------------------------------------------------
 
     @app.get("/api/state")
-    async def api_state():
-        return JSONResponse(player.state())
+    async def api_state(request: Request):
+        return JSONResponse(get_player(request).state())
 
     @app.post("/api/skip")
     async def api_skip(request: Request):
-        await player.skip()
+        await get_player(request).skip()
         return await partial_now_playing(request)
 
     @app.post("/api/pause")
     async def api_pause(request: Request):
-        await player.toggle_pause()
+        await get_player(request).toggle_pause()
         return await partial_now_playing(request)
 
     @app.post("/api/volume/{level}")
     async def api_volume(request: Request, level: int):
-        await player.set_volume(level)
+        await get_player(request).set_volume(level)
         return await partial_now_playing(request)
 
     @app.post("/api/seek/{seconds}")
-    async def api_seek(seconds: float):
-        await player.seek(seconds)
-        return JSONResponse({"ok": True, "position": player.position()})
+    async def api_seek(request: Request, seconds: float):
+        p = get_player(request)
+        await p.seek(seconds)
+        return JSONResponse({"ok": True, "position": p.position()})
 
     # NOTE: literal /api/queue/* routes must be registered before the
     # /api/queue/{track_id} catch-all or "clear" gets parsed as a track id.
     @app.post("/api/queue/clear")
     async def api_queue_clear(request: Request):
-        await player.clear_queue()
+        await get_player(request).clear_queue()
         return await partial_queue(request)
 
     @app.post("/api/queue/remove/{index}/{track_id}")
     async def api_queue_remove(request: Request, index: int, track_id: int):
-        await player.remove_from_queue(index, track_id)
+        await get_player(request).remove_from_queue(index, track_id)
         return await partial_queue(request)
 
     @app.post("/api/queue/top/{index}/{track_id}")
     async def api_queue_top(request: Request, index: int, track_id: int):
-        await player.move_to_front(index, track_id)
+        await get_player(request).move_to_front(index, track_id)
         return await partial_queue(request)
 
     @app.post("/api/queue/{track_id}")
-    async def api_enqueue(track_id: int):
-        await player.enqueue_track_id(track_id)
+    async def api_enqueue(request: Request, track_id: int):
+        await get_player(request).enqueue_track_id(track_id)
         return JSONResponse({"ok": True})
 
     @app.post("/api/play-day/{date}")
-    async def api_play_day(date: str):
-        await player.play_day(date)
+    async def api_play_day(request: Request, date: str):
+        await get_player(request).play_day(date)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/api/play-today")
     async def api_play_today(request: Request):
         """Default play action: today's songs, else the newest archived day."""
+        p = get_player(request)
         today = _today()
-        await player.play_day(today)
-        if player.status != "playing":
+        await p.play_day(today)
+        if p.status != "playing":
             for d in await db.archive_days():  # newest first
                 if d["date"] < today and d["tracks"]:
-                    await player.play_day(d["date"])
-                    if player.status == "playing":
+                    await p.play_day(d["date"])
+                    if p.status == "playing":
                         break
         return await partial_now_playing(request)
 
@@ -226,16 +316,16 @@ def create_app(
         return FileResponse(path, media_type=media_type)
 
     @app.post("/api/ended/{track_id}")
-    async def api_ended(track_id: int):
-        """Browser reports its <audio> element finished the track."""
-        advanced = await player.notify_ended(track_id)
+    async def api_ended(request: Request, track_id: int):
+        """Browser reports its <audio>/embed player finished the track."""
+        advanced = await get_player(request).notify_ended(track_id)
         return JSONResponse({"advanced": advanced})
 
     @app.post("/api/duration/{track_id}/{seconds}")
-    async def api_duration(track_id: int, seconds: float):
+    async def api_duration(request: Request, track_id: int, seconds: float):
         """The embed speaker tab reports a track's real duration (embed
         tracks start without one — oEmbed metadata has no length)."""
-        await player.report_duration(track_id, seconds)
+        await get_player(request).report_duration(track_id, seconds)
         return JSONResponse({"ok": True})
 
     @app.post("/api/ingest")
@@ -276,12 +366,12 @@ def create_app(
 
     @app.post("/api/radio/start")
     async def api_radio_start(request: Request):
-        ok = await player.start_radio()
+        await get_player(request).start_radio()
         return await partial_now_playing(request)
 
     @app.post("/api/radio/stop")
     async def api_radio_stop(request: Request):
-        await player.stop_radio()
+        await get_player(request).stop_radio()
         return await partial_now_playing(request)
 
     @app.post("/api/output/{name}")
@@ -298,13 +388,13 @@ def create_app(
     speakers = SpeakerRegistry()
     app.state.speakers = speakers
 
-    async def broadcast_state() -> None:
-        """Push fresh state to every page (speaker role may have moved)."""
-        for conn in speakers.clients():
+    async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
+        """Push fresh state to a session's pages (speaker role may have moved)."""
+        for conn in reg.clients():
             try:
                 await conn.send_json({
                     "topic": PLAYER_STATE,
-                    "data": {**player.state(), "speaker": speakers.is_speaker(conn)},
+                    "data": {**p.state(), "speaker": reg.is_speaker(conn)},
                 })
             except Exception:
                 pass
@@ -312,25 +402,33 @@ def create_app(
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
         await websocket.accept()
-        speakers.join(websocket)
-        sub = bus.subscribe(PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
+        if sessions is not None:
+            # Per-visitor session: this browser's own player/bus/speakers.
+            sid = websocket.cookies.get(SESSION_COOKIE) or secrets.token_hex(16)
+            session = sessions.get(sid)
+            reg, p = session.speakers, session.player
+            sub = session.bus.subscribe(PLAYER_STATE)
+        else:
+            reg, p = speakers, player
+            sub = bus.subscribe(PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
+        reg.join(websocket)
 
         async def recv_loop():
             while True:
                 msg = await websocket.receive_text()
                 if msg == "claim":
-                    speakers.claim(websocket)
-                    await broadcast_state()
+                    reg.claim(websocket)
+                    await broadcast_state(reg, p)
 
         async def send_loop():
             async for topic, payload in sub:
                 if topic == PLAYER_STATE:
-                    payload = {**payload, "speaker": speakers.is_speaker(websocket)}
+                    payload = {**payload, "speaker": reg.is_speaker(websocket)}
                 await websocket.send_json({"topic": topic, "data": payload})
 
         tasks = [asyncio.create_task(recv_loop()), asyncio.create_task(send_loop())]
         try:
-            await broadcast_state()  # joining may reassign the speaker
+            await broadcast_state(reg, p)  # joining may reassign the speaker
             await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         except (WebSocketDisconnect, asyncio.CancelledError):
             pass
@@ -340,7 +438,7 @@ def create_app(
             for task in tasks:
                 task.cancel()
             sub.close()
-            speakers.leave(websocket)
-            await broadcast_state()  # promote the next speaker
+            reg.leave(websocket)
+            await broadcast_state(reg, p)  # promote the next speaker
 
     return app
