@@ -27,6 +27,7 @@ from urllib.parse import quote
 
 import httpx
 
+from .. import __version__
 from ..bus import EventBus, INGEST_STATUS
 from ..config import CoreScopeConfig
 from ..db import Database
@@ -35,6 +36,10 @@ from .service import IngestService
 log = logging.getLogger(__name__)
 
 CURSOR_KEY = "corescope.cursor"
+
+# Descriptive UA: httpx's default ("python-httpx/x.y") plus a datacenter IP
+# reads as a bot to Cloudflare and gets 403'd on hosted deployments.
+USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
 
 
 class CoreScopePoller:
@@ -68,12 +73,24 @@ class CoreScopePoller:
             self.bus.publish(INGEST_STATUS, {"corescope": "unconfigured"})
             return
         async with httpx.AsyncClient(
-            base_url=self.config.base_url, timeout=30
+            base_url=self.config.base_url,
+            timeout=30,
+            headers={"User-Agent": USER_AGENT},
         ) as client:
             while True:
                 try:
                     await self.poll_once(client)
                     self.bus.publish(INGEST_STATUS, {"corescope": "ok"})
+                except httpx.HTTPStatusError as exc:
+                    # Body snippet tells a Cloudflare block apart from an
+                    # origin error without dumping a whole challenge page.
+                    log.error(
+                        "CoreScope poll: HTTP %d from %s; server said: %.200s",
+                        exc.response.status_code,
+                        exc.request.url,
+                        exc.response.text,
+                    )
+                    self.bus.publish(INGEST_STATUS, {"corescope": "error"})
                 except Exception:
                     log.exception("CoreScope poll failed")
                     self.bus.publish(INGEST_STATUS, {"corescope": "error"})

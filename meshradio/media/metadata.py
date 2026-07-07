@@ -10,16 +10,21 @@ import logging
 
 import httpx
 
+from .. import __version__
+
 log = logging.getLogger(__name__)
 
 OEMBED_URL = "https://www.youtube.com/oembed"
+USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
 
 
 async def fetch_oembed(video_id: str) -> dict[str, str] | None:
     """Return {"title", "artist", "thumbnail"} or None if unresolvable."""
     watch_url = f"https://www.youtube.com/watch?v={video_id}"
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(
+            timeout=15, headers={"User-Agent": USER_AGENT}
+        ) as client:
             resp = await client.get(
                 OEMBED_URL, params={"url": watch_url, "format": "json"}
             )
