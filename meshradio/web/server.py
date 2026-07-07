@@ -264,7 +264,13 @@ def create_app(
                 )
             except (KeyError, TypeError, ValueError):
                 continue  # skip malformed entries, keep the batch going
-        return JSONResponse({"ok": True, "inserted": inserted})
+        # Total lets the pusher detect a wiped DB (ephemeral hosting) and
+        # reset its cursor for a full re-backfill.
+        return JSONResponse({
+            "ok": True,
+            "inserted": inserted,
+            "tracks": await db.channel_track_count(),
+        })
 
     @app.post("/api/radio/start")
     async def api_radio_start(request: Request):

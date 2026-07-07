@@ -297,6 +297,14 @@ class Database:
             (cursor,),
         )
 
+    async def channel_track_count(self) -> int:
+        """How many channel (non-radio) tracks this node knows. The relay
+        compares counts to detect a wiped receiver and re-backfill."""
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM tracks WHERE source != 'radio'"
+        )
+        return int(row["n"]) if row else 0
+
     # -- plays / LRU ---------------------------------------------------------
 
     async def record_play(self, track_id: int, output: str | None) -> int:

@@ -70,20 +70,35 @@ class RelayPusher:
                 await asyncio.sleep(self.config.interval_s)
 
     async def push_once(self, client: httpx.AsyncClient) -> int:
+        """Push new messages; an empty batch still POSTs as a heartbeat so a
+        wiped receiver (ephemeral hosting resets its disk on deploys and
+        spin-downs) is detected by track-count mismatch and re-backfilled."""
         cursor = await self.db.get_setting(CURSOR_KEY, "")
         messages, newest = await self.collect(cursor)
-        if not messages:
-            return 0
         resp = await client.post(
             self.config.push_url.rstrip("/") + "/api/ingest",
             json={"messages": messages},
         )
         resp.raise_for_status()
-        inserted = resp.json().get("inserted", "?")
+        data = resp.json()
         # Advance only after a confirmed 2xx so a failed push retries in full.
         if newest != cursor:
             await self.db.set_setting(CURSOR_KEY, newest)
-        log.info("relay: pushed %d messages (%s new remotely)", len(messages), inserted)
+        if messages:
+            log.info(
+                "relay: pushed %d messages (%s new remotely)",
+                len(messages), data.get("inserted", "?"),
+            )
+        remote_total = data.get("tracks")
+        local_total = await self.db.channel_track_count()
+        if remote_total is not None and remote_total < local_total:
+            log.warning(
+                "relay: receiver has %d tracks vs %d local — wiped? re-backfilling",
+                remote_total, local_total,
+            )
+            await self.db.set_setting(CURSOR_KEY, "")
+            if cursor:  # just re-pushed from scratch? then don't loop on a
+                return await self.push_once(client)  # persistent mismatch
         return len(messages)
 
     async def collect(self, cursor: str) -> tuple[list[dict[str, Any]], str]:
