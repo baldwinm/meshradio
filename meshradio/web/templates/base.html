@@ -25,6 +25,13 @@
     {% block content %}{% endblock %}
   </main>
   <button id="audio-ctl" hidden></button>
+  {% if embed_mode %}
+  <!-- Public host only: the button script self-inserts here. Kept outside
+       <main> so htmx partial swaps never destroy it. -->
+  <footer id="site-footer">
+    <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="meshradio" data-color="#FFDD00" data-emoji="☕"  data-font="Arial" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#000000" data-coffee-color="#ffffff" ></script>
+  </footer>
+  {% endif %}
   <!-- Classic scripts sharing top-level bindings; order matters (see radio.js).
        No build chain, ever (architecture §9). -->
   <script src="/static/js/radio.js?v={{ asset_v }}"></script>

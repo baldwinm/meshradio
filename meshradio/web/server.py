@@ -83,6 +83,10 @@ def create_app(
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
     templates.env.globals["asset_v"] = _asset_version()
+    # Public embed hosting only: the Buy-Me-a-Coffee button pulls an external
+    # CDN script, so keep it off the offline LAN/appliance skin. player_factory
+    # is set exactly when we're in embed mode (see app.py).
+    templates.env.globals["embed_mode"] = player_factory is not None
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
     # Per-visitor sessions (public embed hosting) vs one communal player

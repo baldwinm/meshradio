@@ -32,6 +32,15 @@ body {
   padding: 0 1rem 3rem;
 }
 
+/* -- footer (Buy-Me-a-Coffee, public host only) --------------------------- */
+#site-footer {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--face-lo);
+  text-align: center;
+}
+#site-footer .bmc-btn { vertical-align: middle; }
+
 /* -- window chrome ------------------------------------------------------- */
 
 .bevel-out { border: 2px solid; border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi); }
