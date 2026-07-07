@@ -78,7 +78,13 @@ function applyEmbed(s) {
     embedTrackId = s.current.id;
     ytPlayer = new YT.Player("yt-player", {
       videoId: ytCurrentVid,
-      playerVars: { autoplay: 1, rel: 0, start: Math.floor(s.position || 0) },
+      // A cued (paused) session must not fight the server state by
+      // autoplaying the moment the iframe loads.
+      playerVars: {
+        autoplay: s.status === "playing" ? 1 : 0,
+        rel: 0,
+        start: Math.floor(s.position || 0),
+      },
       events: {
         onReady: () => {
           try { ytPlayer.setVolume(s.volume); } catch (e) {}

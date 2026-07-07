@@ -35,18 +35,35 @@ async def test_visitors_get_independent_players(db, bus):
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)
     app = embed_app(db, bus)
     async with client_for(app) as alice, client_for(app) as bob:
-        # Alice starts playing a day; Bob's radio must stay untouched.
+        # Alice starts playing a day; Bob lands cued (paused), untouched.
         resp = await alice.post("/api/play-day/2026-07-06")
         assert resp.status_code == 303
         assert (await alice.get("/api/state")).json()["status"] == "playing"
-        assert (await bob.get("/api/state")).json()["status"] == "idle"
+        assert (await bob.get("/api/state")).json()["status"] == "paused"
 
-        # Bob pausing his own (idle) player doesn't stop Alice's music.
+        # Bob unpausing his own player doesn't affect Alice's session.
         await bob.post("/api/pause")
-        assert (await alice.get("/api/state")).json()["status"] == "playing"
+        alice_state = (await alice.get("/api/state")).json()
+        assert alice_state["status"] == "playing"
 
         # Alice's session persists across her requests (same cookie).
-        assert (await alice.get("/api/state")).json()["current"]["video_id"] == "aaaaaaaaaaa"
+        assert alice_state["current"]["video_id"] == "aaaaaaaaaaa"
+
+
+async def test_new_visitor_lands_with_newest_day_cued(db, bus):
+    """The landing page must never be an empty player: a fresh session gets
+    the newest archive day loaded, parked at 0:00, one press from music."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        state = (await client.get("/api/state")).json()
+        assert state["status"] == "paused"
+        assert state["position"] == 0
+        assert state["current"]["video_id"] == "aaaaaaaaaaa"
+        assert state["day"] == "2026-07-06"
+        # One press starts the day (toggle_pause on the cued player).
+        await client.post("/api/pause")
+        assert (await client.get("/api/state")).json()["status"] == "playing"
 
 
 async def test_session_cookie_issued_once(db, bus):

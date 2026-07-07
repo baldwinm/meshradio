@@ -356,6 +356,25 @@ class PlayerService(Service):
         self.queue = tracks[1:]
         await self.play_track(tracks[0])
 
+    async def cue_day(self, date: str) -> bool:
+        """Load a day like play_day but parked at 0:00 in 'paused' — a new
+        visitor lands with music ready instead of an empty player. No play
+        row is recorded until something actually plays."""
+        tracks = [
+            t for t in await self.db.tracks_for_day(date) if t["cache_status"] == "ready"
+        ]
+        if not tracks:
+            return False
+        self.mode = "archive"
+        self.day = date
+        self.current = tracks[0]
+        self.queue = tracks[1:]
+        self.status = "paused"
+        self._pos_base = 0.0
+        self._pos_epoch = None
+        self.publish_state()
+        return True
+
     async def set_mode(self, mode: str) -> None:
         if mode in ("live", "archive"):
             self.mode = mode
