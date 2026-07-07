@@ -58,12 +58,46 @@ async def test_embed_cacher_fails_unresolvable(db, bus, monkeypatch, tmp_path):
         return None  # deleted/private video
 
     monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", fake_oembed)
-    c = Cacher(CacheConfig(), Path(tmp_path), db, bus, embed=True)
+    c = Cacher(CacheConfig(max_retries=1), Path(tmp_path), db, bus, embed=True)
     track = await make_pending_track(db, "aaaaaaaaaaa")
     sub = bus.subscribe(TRACK_FAILED)
     await c.process_track(track)
     _, payload = await asyncio.wait_for(sub.get(), 1)
     assert payload["track"]["cache_status"] == "failed"
+
+
+async def test_embed_oembed_retries_transient_failures(db, bus, monkeypatch, tmp_path):
+    """A throttled oEmbed call leaves the track pending; the periodic sweep
+    retries and it goes ready once YouTube answers again."""
+    calls = {"n": 0}
+
+    async def flaky_oembed(video_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return {"title": "Song A", "artist": "Artist A", "thumbnail": ""}
+
+    monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", flaky_oembed)
+    c = Cacher(CacheConfig(), Path(tmp_path), db, bus, embed=True)
+    track = await make_pending_track(db, "aaaaaaaaaaa")
+    await c.process_track(track)
+    assert (await db.track_by_id(track["id"]))["cache_status"] == "pending"
+    await c.process_track(track)   # what the sweep does a minute later
+    assert (await db.track_by_id(track["id"]))["cache_status"] == "ready"
+
+
+async def test_process_track_skips_already_ready(db, bus, monkeypatch, tmp_path):
+    """Sweep + event stream can deliver the same track twice; the second
+    delivery must not refetch or re-announce it."""
+    async def must_not_run(video_id):
+        raise AssertionError("oEmbed called for an already-ready track")
+
+    monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", must_not_run)
+    c = Cacher(CacheConfig(), Path(tmp_path), db, bus, embed=True)
+    track = await make_pending_track(db, "aaaaaaaaaaa")
+    await db.set_cache_status(track["id"], "ready")
+    stale = dict(track, cache_status="pending")   # snapshot from before
+    await c.process_track(stale)                  # no exception, no calls
 
 
 async def test_report_duration_fills_missing(db, bus):

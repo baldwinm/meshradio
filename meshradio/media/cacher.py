@@ -43,6 +43,7 @@ class Cacher:
         # streams from YouTube directly. Tracks go straight to 'ready' with
         # oEmbed metadata and no cache file.
         self.embed = embed
+        self._embed_attempts: dict[int, int] = {}
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -60,25 +61,55 @@ class Cacher:
     async def _run(self) -> None:
         sub = self.bus.subscribe(TRACK_DISCOVERED)
         try:
-            # Startup: resume anything that was pending when we last shut down.
-            for track in await self.db.pending_tracks():
-                await self.process_track(track)
-            async for _topic, payload in sub:
-                await self.process_track(payload["track"])
+            while True:
+                # Sweep pending rows every cycle, not just at startup: this
+                # catches boot backlog, bus events dropped under a relay
+                # backfill burst, and embed-mode oEmbed retries. Anything
+                # that leaves a track pending self-heals within a minute.
+                for track in await self.db.pending_tracks():
+                    await self._process_safely(track)
+                try:
+                    _topic, payload = await asyncio.wait_for(sub.get(), timeout=60)
+                except asyncio.TimeoutError:
+                    continue
+                await self._process_safely(payload["track"])
         finally:
             sub.close()
+
+    async def _process_safely(self, track: dict[str, Any]) -> None:
+        """One bad track must not kill the cacher loop for all that follow."""
+        try:
+            await self.process_track(track)
+        except Exception:
+            log.exception("cacher: unexpected error on %s", track.get("video_id"))
 
     async def process_track(self, track: dict[str, Any]) -> None:
         track_id = track["id"]
         video_id = track["video_id"]
 
+        # The sweep and the event stream can hand us the same track (or a
+        # stale snapshot of one); only pending rows need work.
+        current = await self.db.track_by_id(track_id)
+        if current is None or current["cache_status"] != "pending":
+            return
+
         if self.embed:
             meta = await metadata.fetch_oembed(video_id)
             if meta is None:
-                # Unresolvable video (deleted/private) — don't queue it.
+                # Could be a deleted video or a transient throttle; stay
+                # pending so the sweep retries, fail only after max_retries.
+                attempts = self._embed_attempts.get(track_id, 0) + 1
+                self._embed_attempts[track_id] = attempts
+                if attempts < self.config.max_retries:
+                    log.warning(
+                        "oEmbed failed for %s (attempt %d/%d); will retry",
+                        video_id, attempts, self.config.max_retries,
+                    )
+                    return
                 await self.db.set_cache_status(track_id, "failed")
                 self.bus.publish(TRACK_FAILED, {"track": await self.db.track_by_id(track_id)})
                 return
+            self._embed_attempts.pop(track_id, None)
             await self.db.update_track_metadata(
                 track_id, title=meta["title"] or None, artist=meta["artist"] or None
             )
