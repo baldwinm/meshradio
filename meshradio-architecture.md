@@ -1,7 +1,12 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.1 draft — architecture locked, implementation not started. Working name only; rename at will.*
+*Status: v0.1 — the core software is built, tested (119 tests), and running:
+ingest, cache-first player, browser web player, YouTube-Mix radio mode, and a
+public embed-mode deployment fed by a home-node relay (§14). The hardware kit
+(§2) remains design-locked and not yet built; module status is tracked in the
+[README](README.md). This document is the full design; sections marked below
+note where the implementation has diverged from or gone beyond the original plan.*
 
 ---
 
@@ -118,40 +123,66 @@ UPS HAT with I2C fuel gauge and pass-through charging (Waveshare UPS HAT (B) or 
 
 A **single asyncio application** with clearly separated modules communicating over an in-process event bus, backed by SQLite. Not microservices, not MQTT-between-daemons. Rationale: this is an appliance, and the failure domain is the whole box anyway; one process means one systemd unit, one log stream, no IPC serialization bugs, and a codebase a future contributor (or an AI pair) can hold in their head. This is the single biggest maintainability decision in the project.
 
+*As-built layout (the design above held; `net.py`, `runtime.py`,
+`ingest/relay.py`, `media/radio.py` were added, and `web/` grew a router split —
+see §14):*
+
 ```
 meshradio/
 ├── app.py              # asyncio entrypoint, wires modules to the bus
-├── bus.py              # tiny pub/sub EventBus (asyncio queues, ~50 lines)
+├── bus.py              # tiny pub/sub EventBus (asyncio queues)
+├── config.py           # TOML over dataclass defaults; secrets from env
 ├── db.py               # aiosqlite layer + migrations
+├── net.py              # shared outbound HTTP client (User-Agent, timeouts)
+├── runtime.py          # supervised task/Service runtime — restart-with-backoff
 ├── ingest/
+│   ├── parse.py        # link extraction, theme detection  ← pure functions, unit-tested
+│   ├── service.py      # message → theme/track rows, dedupe (the ingest core)
 │   ├── mesh.py         # meshcore serial client, #music subscription
 │   ├── corescope.py    # CoreScope poller (fallback + backfill)
-│   └── parse.py        # link extraction, theme detection  ← pure functions, unit-tested
+│   └── relay.py        # push local channel history to a hosted instance (§14)
 ├── media/
-│   ├── cacher.py       # yt-dlp download-to-cache worker
-│   ├── player.py       # mpv control via python-mpv (JSON IPC)
+│   ├── cacher.py       # yt-dlp download-to-cache worker (self-healing retries)
+│   ├── player.py       # backends: mpv | web | embed | null; queue + live policy
+│   ├── radio.py        # YouTube-Mix "station" continuations (radio mode)
 │   └── metadata.py     # oEmbed / fallback metadata resolution
 ├── audio/
-│   ├── routing.py      # PipeWire sink selection (wpctl)
+│   ├── routing.py      # PipeWire sink selection (wpctl), per-profile
 │   └── bluetooth.py    # BlueZ pairing/connection state machine
 ├── ui/
-│   ├── panel.py        # OLED screens (luma.oled) + encoder/buttons (gpiozero)
-│   └── screens/        # NowPlaying, Queue, Archive, Outputs, Status
-├── web/
-│   ├── server.py       # FastAPI, WebSocket for live state
+│   └── panel.py        # OLED screens (luma.oled) + encoder/buttons (gpiozero); log panel on dev
+├── web/                # FastAPI + Jinja2 + htmx + WebSocket (split into routers)
+│   ├── server.py       # create_app: assembly, lifespan, session middleware
+│   ├── context.py      # WebContext — shared state on app.state
+│   ├── sessions.py     # per-visitor session players + speaker registry (embed)
+│   ├── routes_pages.py # HTML pages + htmx partials
+│   ├── routes_api.py   # player/queue control API
+│   ├── routes_ingest.py# /audio streaming, relay /api/ingest, /healthz
+│   ├── ws.py           # WebSocket: forwards bus events → htmx re-fetch
 │   ├── templates/      # Jinja2 + htmx — no JS build chain, ever
-│   └── static/
+│   └── static/         # vendored htmx + js/ (embed, eq, playbar, radio), style.css
 ├── system/
 │   ├── power.py        # fuel gauge polling, safe shutdown
 │   └── provision.py    # first-boot AP-mode WiFi setup (nmcli)
-└── tests/
+tests/                  # top-level; 119 tests, pytest-asyncio
 ```
 
-**Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node.
+**Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `httpx`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node.
+
+**Supervised runtime.** Every long-lived loop runs under `runtime.supervise()` (or the `Service` base class): an unhandled exception is logged loudly and the loop restarts with backoff (1s → 5s → 30s) instead of dying silently. One-shot background work goes through `spawn()`, which guarantees a logged traceback. This exists because a silently-dead cacher task once shipped to production; the runtime makes that failure class impossible by construction. systemd still restarts the whole process on a hard crash (§4 "one process").
 
 ### Event flow
 
-`ingest` publishes `track.discovered` → `cacher` downloads audio in the background and publishes `track.ready` → `player` enqueues per live-mode policy → `panel` and `web` subscribe to `player.state` and render. Every module is a subscriber/publisher on the bus and touches the DB through `db.py` only.
+The full topic vocabulary lives in `bus.py` as constants. Core flow:
+`ingest` (via `ingest/service.py`) publishes **`track.discovered`** → `cacher`
+downloads audio in the background and publishes **`track.ready`** (or
+**`track.failed`** for metadata-only tracks) → `player` enqueues per live-mode
+policy → `panel` and `web` subscribe to **`player.state`** and render. Themes
+announce on **`theme.created`**; routing, power, and ingest health emit
+**`output.changed`**, **`power.state`**, and **`ingest.status`** (the last also
+feeds `/healthz`). Every module is a subscriber/publisher on the bus and touches
+the DB through `db.py` only. The web WebSocket forwards bus payloads verbatim
+(they're plain dicts), and the page reacts by re-fetching htmx partials.
 
 ---
 
@@ -161,14 +192,20 @@ meshradio/
 themes(  id, date, title, set_by, raw_message, created_at )
 tracks(  id, video_id, url, title, artist, duration,
          theme_id → themes, sender, mesh_ts, ingested_at,
-         source TEXT CHECK(source IN ('mesh','corescope')),
+         source TEXT CHECK(source IN ('mesh','corescope','radio')),
          cache_path, cache_status,          -- pending|ready|failed
          dedupe_hash UNIQUE )
 plays(   id, track_id → tracks, played_at, output, completed )
-settings(key, value)
+settings(    key, value )
+web_sessions(sid, updated_at, state )       -- per-visitor snapshot, JSON
 ```
 
-`dedupe_hash = sha256(channel + sender + normalized_video_id + mesh_ts_bucketed_to_60s)` — this is what lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the message first wins, the other no-ops on the UNIQUE constraint.
+`dedupe_hash = sha256("channel|sender|video_id|mesh_ts_bucketed_to_60s")` — this is what lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the message first wins, the other no-ops on the UNIQUE constraint (an `ON CONFLICT … DO NOTHING` insert).
+
+Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Two migrations landed after the initial design:
+
+- **`radio` track source** — YouTube-Mix continuations queued by radio mode (§7). They keep `theme_id` NULL so they never appear in the channel archive. SQLite can't `ALTER` a `CHECK`, so the migration rebuilds the `tracks` table.
+- **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives an ephemeral-host redeploy. Keyed by the session cookie.
 
 ---
 
@@ -199,9 +236,20 @@ Proposal: adopt a lightweight channel convention — the daily theme post starts
 3. **Metadata-only mode**: resolve title/artist via YouTube's oEmbed endpoint (no API key needed), display the track on OLED/web with a "couldn't fetch audio" badge — the channel history stays intact and browsable even when playback can't happen
 4. *(Optional, config-off by default)*: play the 30s preview from the iTunes Search API as an audible placeholder
 
-**Live mode policy:** a new track never interrupts the current one. If the radio is idle in Live mode, a new arrival auto-plays (with a brief OLED toast: sender + title). If something's playing, it enqueues. Configurable quiet hours suppress auto-play.
+**Live mode policy:** a new track never interrupts the current one. If the radio is idle in Live mode, a new arrival auto-plays (with a brief OLED toast: sender + title). If something's playing, it enqueues. Only tracks posted within `live_window_s` (default 30 min) count as live; older ones are backfill and stay archive-only, so a first-boot history download doesn't stampede the queue. Configurable quiet hours suppress auto-play.
 
-**mpv** via `python-mpv` handles decode/output — battle-tested, gapless, and it outputs to whatever PipeWire sink is current, so output switching requires zero player logic.
+**Player backends** (selected by `player.backend`; `auto` picks by hardware profile):
+
+| Backend | Speaker | Source | Use |
+|---|---|---|---|
+| `mpv` | Pi sinks (I2S / jack / BT) via `python-mpv` | local cache file | appliance (`pi4`/`lite`) |
+| `web` | the browser that has the page open | server streams the cache file (`GET /audio/{id}`) | LAN / dev box |
+| `embed` | each visitor's own browser, via the YouTube IFrame player | YouTube directly — **no download** | public hosting (§14) |
+| `null` | — | — | `--demo` / tests |
+
+**mpv** via `python-mpv` handles decode/output — battle-tested, gapless, and it outputs to whatever PipeWire sink is current, so output switching requires zero player logic. The `web` and `embed` backends emit the same `player.state` events; the browser is the output device instead of mpv.
+
+**Radio mode (`media/radio.py`).** When the queue runs dry, the player can seed a "station" from the current (or last-played) track using its YouTube Mix: `radio.py` fetches similar tracks in batches (`radio_batch`), the cacher caches them, and they queue with `source='radio'` (theme_id NULL, so they never pollute the archive). The station keeps topping itself up until stopped. Channel posts always queue ahead of radio filler.
 
 ---
 
@@ -300,3 +348,95 @@ Software impact is confined to `audio/routing.py`: on the full build, speaker/ja
 ### What deliberately does *not* change
 
 Everything above the hardware line: same image (both device trees baked in, `hardware_profile` chosen at first-boot setup), same web UI, same archive, same cache-first player, same STL design language (smaller shell, shared speaker-chamber geometry). One codebase, two SKUs.
+
+---
+
+## 14. Public hosting — embed mode & the relay *(added post-design)*
+
+The original design assumed the radio *is* the appliance. In practice a third
+deployment target emerged before the hardware: **a public web app anyone can
+open in a browser** (live at [meshradio.onrender.com](https://meshradio.onrender.com)).
+It runs the same codebase with two new pieces — an embed player backend and a
+relay — plus per-visitor sessions. None of this touches the appliance path.
+
+### The two problems a public host has
+
+1. **It can't legally serve the audio.** A public server downloading and
+   redistributing YouTube audio is a different thing from a private appliance
+   caching for personal playback.
+2. **It can't reach the sources.** Cloudflare (fronting CoreScope) and YouTube
+   both challenge datacenter IPs, so a hosted instance can neither poll the
+   channel nor run yt-dlp successfully.
+
+### Embed mode solves (1)
+
+With `player.backend = "embed"` the server ships **only metadata** — video ids,
+titles, artists, themes, queue order — and each visitor's browser streams every
+song straight from YouTube via the **IFrame player** (`static/js/embed.js`). The
+server never downloads or serves audio; the cacher runs in metadata-only mode.
+This keeps a public deployment clear of redistributing copyrighted media, and it
+means normal YouTube ad rules apply in the browser (unlike cache-first playback).
+
+### The relay solves (2)
+
+A node with residential internet — the Pi at home, under systemd — polls the
+channel normally, then **pushes** new messages to the hosted instance instead of
+the host pulling:
+
+```
+  Home node (Pi, residential IP)                 Hosted instance (datacenter IP)
+  ┌──────────────────────────────┐               ┌────────────────────────────┐
+  │ corescope poll → ingest → DB  │               │  POST /api/ingest (token)  │
+  │ relay.py: DB → messages ──────┼──HTTPS POST──►│  → same ingest pipeline    │
+  │   (+ resolved track metadata) │   /api/ingest │  → SQLite → embed players  │
+  └──────────────────────────────┘               └────────────────────────────┘
+        residential internet                        can't poll CoreScope itself
+```
+
+`ingest/relay.py` reconstructs channel messages from the local DB (themes +
+tracks, sorted by mesh time) and POSTs them — carrying the **track metadata it
+already resolved**, since the datacenter-side host can't ask YouTube itself — to
+the receiver's authenticated `POST /api/ingest` (`routes_ingest.py`). The
+receiver funnels them through the *same* ingest pipeline, so its dedupe makes
+re-pushes no-ops; the relay's cursor is an optimization, not a correctness
+requirement. Auth is a shared bearer token (`MESHRADIO_INGEST_TOKEN` on the host,
+`[relay].token` on the Pi), compared with `secrets.compare_digest`.
+
+**Self-healing against ephemeral disks.** Free-tier hosting wipes its disk on
+every deploy and spin-down. Each push reports the receiver's track count; when it
+drops below the home node's, the pusher resets its cursor and re-backfills the
+whole channel automatically. An empty push still goes out as a heartbeat so a
+wiped receiver is detected promptly.
+
+### Per-visitor sessions
+
+The appliance is one communal radio; a public host is not — nobody should be able
+to pause or skip a stranger's music. In embed mode each browser gets its **own
+session player** (`web/sessions.py`): a session cookie names it, `app.py` supplies
+a `player_factory`, and each session player has its own queue/position/day while
+still hearing the shared `track.ready` stream. Snapshots persist to the
+`web_sessions` table (§5) so a session survives a redeploy. On the appliance/LAN
+path there's no factory — it stays the single shared player with the
+"one-speaker-at-a-time" speaker registry.
+
+### Deployment & operations
+
+- **Render blueprint** ([render.yaml](render.yaml)) — embed mode via
+  [meshradio.render.toml](meshradio.render.toml); Python 3.11 to match CI;
+  `MESHRADIO_INGEST_TOKEN` generated as a secret.
+- **CI gate** ([.github/workflows/test.yml](.github/workflows/test.yml)) — Render
+  deploys `main` only after the test suite is green (`autoDeployTrigger:
+  checksPass`), so a red suite never reaches production.
+- **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
+  session count); Render's health check hits it, and a stale age means the relay
+  stopped pushing.
+- **The Pi relay** runs under systemd ([deploy/meshradio.service](deploy/meshradio.service)):
+  `Restart=on-failure` rides out transient network/CoreScope hiccups.
+
+### What this validates about the original design
+
+The monolith-plus-event-bus decision (§4) paid off here: embed mode is one new
+`PlayerBackend`, the relay is one new bus-agnostic `Service`, per-visitor players
+are the *same* `PlayerService` instantiated per session, and the receiver reuses
+the *same* ingest pipeline. A public multi-tenant deployment the design never
+anticipated slotted in without touching the appliance code paths.
