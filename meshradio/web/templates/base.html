@@ -75,6 +75,15 @@
       }, 800);
     }
 
+    function onYtError(e) {
+      // 101/150 = embedding disabled, 100 = removed, 2/5 = bad id/HTML5
+      // error. Whatever it is, this video won't play here — skip instead of
+      // stalling the session until someone presses next.
+      if (embedTrackId !== null) {
+        fetch("/api/ended/" + embedTrackId, { method: "POST" });
+      }
+    }
+
     function onYtState(e) {
       if (e.data === YT.PlayerState.ENDED && embedTrackId !== null) {
         fetch("/api/ended/" + embedTrackId, { method: "POST" });
@@ -127,6 +136,7 @@
               if (s.status === "playing") ytNudgePlay();
             },
             onStateChange: onYtState,
+            onError: onYtError,
           },
         });
         return;

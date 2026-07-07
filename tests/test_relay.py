@@ -80,6 +80,44 @@ async def test_push_once_sends_auth_and_advances_cursor(db, bus):
         assert await pusher.push_once(client) == 0
 
 
+async def test_same_second_rows_not_skipped_nor_resent(db, bus):
+    """Timestamps are second-resolution: a row committed in the same second
+    as the cursor must still relay (id tiebreaker), and already-sent rows
+    must not re-send every cycle."""
+    theme = await db.create_theme("2026-07-05", "games", set_by="a", raw_message="Theme: games")
+    await db.add_track(
+        video_id="aaaaaaaaaaa", url="https://youtu.be/aaaaaaaaaaa", channel="#music",
+        sender="bob", mesh_ts=1_783_400_000.0, source="mesh", theme_id=theme["id"],
+    )
+    await db.db.execute("UPDATE tracks SET ingested_at='2099-01-01T00:00:00Z'")
+    await db.db.commit()
+    pusher = RelayPusher(RelayConfig(), db)
+    _, cursor = await pusher.collect("")
+
+    # A second track lands in the very same second, after the cursor moved.
+    await db.add_track(
+        video_id="bbbbbbbbbbb", url="https://youtu.be/bbbbbbbbbbb", channel="#music",
+        sender="carol", mesh_ts=1_783_400_060.0, source="mesh", theme_id=theme["id"],
+    )
+    await db.db.execute(
+        "UPDATE tracks SET ingested_at='2099-01-01T00:00:00Z' WHERE video_id='bbbbbbbbbbb'"
+    )
+    await db.db.commit()
+
+    messages, cursor2 = await pusher.collect(cursor)
+    assert [m["sender"] for m in messages] == ["carol"]   # not skipped
+    messages, _ = await pusher.collect(cursor2)
+    assert messages == []                                 # not re-sent forever
+
+
+async def test_legacy_plain_timestamp_cursor_still_works(db, bus):
+    await seed_history(db)
+    pusher = RelayPusher(RelayConfig(), db)
+    messages, cursor = await pusher.collect("2020-01-01T00:00:00Z")
+    assert len(messages) == 2          # everything after the legacy cursor
+    assert cursor.startswith("{")      # upgraded to the structured form
+
+
 async def test_wiped_receiver_triggers_rebackfill(db, bus):
     """Ephemeral hosting wipes the receiver's DB on deploys; the heartbeat
     push detects the count mismatch, resets the cursor, and re-pushes all."""

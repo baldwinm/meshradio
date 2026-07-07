@@ -104,6 +104,7 @@ class Cacher(Service):
                         video_id, attempts, self.config.max_retries,
                     )
                     return
+                self._embed_attempts.pop(track_id, None)
                 await self.db.set_cache_status(track_id, "failed")
                 self.bus.publish(TRACK_FAILED, {"track": await self.db.track_by_id(track_id)})
                 return

@@ -12,6 +12,7 @@ an optimization rather than a correctness requirement.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -90,11 +91,27 @@ class RelayPusher(Service):
                 return await self.push_once(client)  # persistent mismatch
         return len(messages)
 
+    @staticmethod
+    def _parse_cursor(raw: str) -> dict[str, list]:
+        """Cursor = per-table (timestamp, id) pairs, JSON-encoded. Legacy
+        plain-timestamp cursors from earlier versions parse as (ts, 0)."""
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                return {
+                    "themes": list(parsed["themes"]),
+                    "tracks": list(parsed["tracks"]),
+                }
+            except (ValueError, KeyError, TypeError):
+                return {"themes": [raw, 0], "tracks": [raw, 0]}
+        return {"themes": ["", 0], "tracks": ["", 0]}
+
     async def collect(self, cursor: str) -> tuple[list[dict[str, Any]], str]:
         """Reconstruct channel messages for everything ingested after
         ``cursor``. Returns (messages sorted by mesh time, newest cursor)."""
-        themes = await self.db.themes_since(cursor)
-        tracks = await self.db.tracks_since(cursor)
+        cur = self._parse_cursor(cursor)
+        themes = await self.db.themes_since(*cur["themes"])
+        tracks = await self.db.tracks_since(*cur["tracks"])
         messages: list[dict[str, Any]] = []
         for theme in themes:
             # Auto-created placeholder themes carry no message; the receiver
@@ -119,10 +136,10 @@ class RelayPusher(Service):
                 **({"meta": meta} if meta else {}),
             })
         messages.sort(key=lambda m: m["ts"])
-        newest = max(
-            [*(t["created_at"] for t in themes), *(t["ingested_at"] for t in tracks)],
-            default=cursor,
-        )
+        newest = json.dumps({
+            "themes": [themes[-1]["created_at"], themes[-1]["id"]] if themes else cur["themes"],
+            "tracks": [tracks[-1]["ingested_at"], tracks[-1]["id"]] if tracks else cur["tracks"],
+        })
         return messages, newest
 
     def _theme_ts(self, date: str) -> float:

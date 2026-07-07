@@ -293,19 +293,24 @@ class Database:
 
     # -- relay ----------------------------------------------------------------
 
-    async def themes_since(self, cursor: str) -> list[dict[str, Any]]:
-        """Themes created after ``cursor`` (ISO utc string), oldest first."""
+    async def themes_since(self, ts: str, last_id: int = 0) -> list[dict[str, Any]]:
+        """Themes created after the (timestamp, id) cursor, oldest first.
+        The id tiebreaker means rows sharing the cursor's second (timestamps
+        are second-resolution) are neither skipped nor re-sent forever."""
         return await self._fetchall(
-            "SELECT * FROM themes WHERE created_at > ? ORDER BY created_at", (cursor,)
+            "SELECT * FROM themes WHERE created_at > ? "
+            "OR (created_at = ? AND id > ?) ORDER BY created_at, id",
+            (ts, ts, last_id),
         )
 
-    async def tracks_since(self, cursor: str) -> list[dict[str, Any]]:
-        """Channel tracks ingested after ``cursor``, oldest first. Radio
-        filler is excluded — it's local jukebox state, not channel history."""
+    async def tracks_since(self, ts: str, last_id: int = 0) -> list[dict[str, Any]]:
+        """Channel tracks ingested after the (timestamp, id) cursor, oldest
+        first. Radio filler is excluded — it's local jukebox state, not
+        channel history."""
         return await self._fetchall(
-            "SELECT * FROM tracks WHERE ingested_at > ? AND source != 'radio' "
-            "ORDER BY ingested_at",
-            (cursor,),
+            "SELECT * FROM tracks WHERE source != 'radio' AND (ingested_at > ? "
+            "OR (ingested_at = ? AND id > ?)) ORDER BY ingested_at, id",
+            (ts, ts, last_id),
         )
 
     async def channel_track_count(self) -> int:

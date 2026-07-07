@@ -42,6 +42,9 @@ class IngestService:
         ``meta`` (optional ``{"title", "artist", "duration"}``) seeds track
         metadata at insert time — the relay sends it so an embed-mode host
         never has to ask YouTube for what the home node already knows."""
+        # Channel messages are short; anything huge is hostile or corrupt.
+        # Cap before regex work (mesh RF, CoreScope, and relay all land here).
+        text = text[:4096]
         date = self.local_date(ts)
 
         theme_title = parse.parse_theme(text)
