@@ -5,9 +5,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from .. import __version__
 from .context import ctx_of
 
 router = APIRouter()
+
+GITHUB_URL = "https://github.com/baldwinm/meshradio"
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -34,6 +37,13 @@ async def archive_day(request: Request, date: str):
         theme["tracks"] = await ctx.db.tracks_for_theme(theme["id"])
     return ctx.templates.TemplateResponse(
         request, "archive_day.html", {"date": date, "themes": themes}
+    )
+
+
+@router.get("/about", response_class=HTMLResponse)
+async def about(request: Request):
+    return ctx_of(request).templates.TemplateResponse(
+        request, "about.html", {"version": __version__, "github_url": GITHUB_URL}
     )
 
 

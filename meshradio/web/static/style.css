@@ -93,6 +93,25 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
   white-space: nowrap;
 }
 
+/* -- about page ----------------------------------------------------------- */
+.about { padding: 1rem 1.1rem; line-height: 1.65; }
+.about p { margin: 0 0 0.8rem; }
+.about strong { color: #cfd3dd; }
+.about-links { margin-top: 1rem; }
+.btn-link {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  color: #cfd3dd;
+  text-decoration: none;
+  background: linear-gradient(#4a4a5c, #2c2c38);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  text-shadow: 1px 1px 0 #000;
+}
+.btn-link:hover { color: var(--amber); filter: brightness(1.12); }
+.btn-link:active { border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo); }
+.about-version { margin-top: 1rem; color: var(--muted); font-size: 0.75rem; }
+
 /* -- window chrome ------------------------------------------------------- */
 
 .bevel-out { border: 2px solid; border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi); }

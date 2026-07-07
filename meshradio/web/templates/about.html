@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>About</h2>
+<div class="card about">
+  <p><strong>MeshRadio</strong> is a standalone internet radio that plays the
+    songs people share each day on the Austin MeshCore <strong>#music</strong>
+    channel, against that day's theme — live as they land, and from a
+    browsable archive of past days.</p>
+
+  {% if embed_mode %}
+  <p>This is the public web player: songs stream from YouTube right in your
+    browser, and your queue is your own.</p>
+  {% else %}
+  <p>Running in local mode: this device caches each track's audio and plays it
+    back itself, so the archive keeps working even when the network doesn't.</p>
+  {% endif %}
+
+  <p>It's open source — built to be forkable and eventually a documented
+    hardware kit. Code, design docs, and how to run your own:</p>
+
+  <p class="about-links">
+    <a class="btn-link" href="{{ github_url }}" target="_blank" rel="noopener">
+      ⭐ View on GitHub
+    </a>
+  </p>
+
+  <p class="about-version">MeshRadio v{{ version }}</p>
+</div>
+{% endblock %}
