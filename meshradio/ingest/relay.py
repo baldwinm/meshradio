@@ -118,10 +118,16 @@ class RelayPusher:
                 "ts": self._theme_ts(theme["date"]),
             })
         for track in tracks:
+            # Ship the metadata we already have: the receiver (embed mode on
+            # a datacenter IP) may not be able to ask YouTube itself.
+            meta = {
+                k: track[k] for k in ("title", "artist", "duration") if track.get(k)
+            }
             messages.append({
                 "sender": track["sender"],
                 "text": track["url"],
                 "ts": float(track["mesh_ts"] or 0),
+                **({"meta": meta} if meta else {}),
             })
         messages.sort(key=lambda m: m["ts"])
         newest = max(

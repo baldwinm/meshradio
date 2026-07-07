@@ -86,6 +86,51 @@ async def test_embed_oembed_retries_transient_failures(db, bus, monkeypatch, tmp
     assert (await db.track_by_id(track["id"]))["cache_status"] == "ready"
 
 
+async def test_embed_ready_without_oembed_when_meta_relayed(db, bus, monkeypatch, tmp_path):
+    """Relayed messages carry title/artist/duration; the embed cacher must
+    go straight to ready without asking YouTube anything."""
+    from meshradio.ingest.service import IngestService
+
+    async def must_not_run(video_id):
+        raise AssertionError("oEmbed called despite relayed metadata")
+
+    monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", must_not_run)
+    c = Cacher(CacheConfig(), Path(tmp_path), db, bus, embed=True)
+    ingest = IngestService(db, bus, channel="#music")
+    await ingest.handle_message(
+        sender="bob",
+        text="https://youtu.be/aaaaaaaaaaa",
+        ts=1_783_400_000.0,
+        source="corescope",
+        meta={"title": "Song A", "artist": "Artist A", "duration": 213.0},
+    )
+    track = (await db.tracks_since(""))[0]
+    assert track["title"] == "Song A"
+    assert track["duration"] == 213.0
+    await c.process_track(track)
+    assert (await db.track_by_id(track["id"]))["cache_status"] == "ready"
+
+
+async def test_meta_backfills_deduped_track(db, bus):
+    """A re-pushed message for a known bare track fills in its metadata."""
+    from meshradio.ingest.service import IngestService
+
+    ingest = IngestService(db, bus, channel="#music")
+    await ingest.handle_message(
+        sender="bob", text="https://youtu.be/aaaaaaaaaaa", ts=1_783_400_000.0,
+        source="corescope",
+    )
+    assert (await db.tracks_since(""))[0]["title"] is None
+    inserted = await ingest.handle_message(
+        sender="bob", text="https://youtu.be/aaaaaaaaaaa", ts=1_783_400_000.0,
+        source="corescope", meta={"title": "Song A", "duration": 213.0},
+    )
+    assert inserted == 0                      # deduped, but…
+    row = (await db.tracks_since(""))[0]
+    assert row["title"] == "Song A"           # …metadata landed anyway
+    assert row["duration"] == 213.0
+
+
 async def test_process_track_skips_already_ready(db, bus, monkeypatch, tmp_path):
     """Sweep + event stream can deliver the same track twice; the second
     delivery must not refetch or re-announce it."""

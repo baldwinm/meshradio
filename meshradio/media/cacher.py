@@ -94,6 +94,12 @@ class Cacher:
             return
 
         if self.embed:
+            # Relayed tracks arrive with metadata already attached — nothing
+            # to look up, and no dependency on YouTube answering this host.
+            if current.get("title"):
+                await self.db.set_cache_status(track_id, "ready")
+                self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
+                return
             meta = await metadata.fetch_oembed(video_id)
             if meta is None:
                 # Could be a deleted video or a transient throttle; stay

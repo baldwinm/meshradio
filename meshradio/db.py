@@ -243,6 +243,12 @@ class Database:
             "SELECT * FROM tracks WHERE cache_status='pending' ORDER BY ingested_at"
         )
 
+    async def tracks_for_video(self, video_id: str) -> list[dict[str, Any]]:
+        """Every row for a video regardless of status (reposts share an id)."""
+        return await self._fetchall(
+            "SELECT * FROM tracks WHERE video_id=?", (video_id,)
+        )
+
     async def cached_track_for_video(self, video_id: str) -> dict[str, Any] | None:
         """Another track row with the same video already cached (same song reposted)."""
         return await self._fetchone(

@@ -256,11 +256,13 @@ def create_app(
         inserted = 0
         for msg in (payload.get("messages") or [])[:5000]:
             try:
+                meta = msg.get("meta")
                 inserted += await ingest.handle_message(
                     sender=str(msg["sender"]),
                     text=str(msg["text"]),
                     ts=float(msg["ts"]),
                     source="corescope",  # relayed community-channel history
+                    meta=meta if isinstance(meta, dict) else None,
                 )
             except (KeyError, TypeError, ValueError):
                 continue  # skip malformed entries, keep the batch going

@@ -20,7 +20,7 @@ async def seed_history(db: Database):
         "2026-07-05", "games", set_by="alice", raw_message="Theme: games"
     )
     await db.create_theme("2026-07-04", "(untitled)")  # auto-created: not relayed
-    await db.add_track(
+    track = await db.add_track(
         video_id="aaaaaaaaaaa",
         url="https://www.youtube.com/watch?v=aaaaaaaaaaa",
         channel="#music",
@@ -29,6 +29,7 @@ async def seed_history(db: Database):
         source="mesh",
         theme_id=theme["id"],
     )
+    await db.update_track_metadata(track["id"], title="Song A", duration=213.0)
     await db.add_track(
         video_id="bbbbbbbbbbb",
         url="https://www.youtube.com/watch?v=bbbbbbbbbbb",
@@ -50,6 +51,8 @@ async def test_collect_reconstructs_channel_messages(db, bus):
     assert messages[0]["sender"] == "alice"
     assert messages[1]["text"].endswith("aaaaaaaaaaa")
     assert messages[1]["sender"] == "bob"
+    # Metadata the home node already has rides along for the embed host.
+    assert messages[1]["meta"] == {"title": "Song A", "duration": 213.0}
     assert newest != ""
 
 

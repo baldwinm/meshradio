@@ -28,8 +28,20 @@ class IngestService:
     def local_date(self, ts: float) -> str:
         return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(self.tz).strftime("%Y-%m-%d")
 
-    async def handle_message(self, *, sender: str, text: str, ts: float, source: str) -> int:
-        """Process one channel message. Returns number of new tracks inserted."""
+    async def handle_message(
+        self,
+        *,
+        sender: str,
+        text: str,
+        ts: float,
+        source: str,
+        meta: dict | None = None,
+    ) -> int:
+        """Process one channel message. Returns number of new tracks inserted.
+
+        ``meta`` (optional ``{"title", "artist", "duration"}``) seeds track
+        metadata at insert time — the relay sends it so an embed-mode host
+        never has to ask YouTube for what the home node already knows."""
         date = self.local_date(ts)
 
         theme_title = parse.parse_theme(text)
@@ -49,6 +61,7 @@ class IngestService:
             theme = await self.db.create_theme(date, parse.untitled_theme(date))
             self.bus.publish(THEME_CREATED, {"theme": theme})
 
+        meta = meta or {}
         inserted = 0
         for link in links:
             track = await self.db.add_track(
@@ -59,10 +72,26 @@ class IngestService:
                 mesh_ts=ts,
                 source=source,
                 theme_id=theme["id"],
+                title=meta.get("title"),
+                artist=meta.get("artist"),
             )
             if track is None:
                 log.debug("dedupe: %s from %s via %s already ingested", link.video_id, sender, source)
+                if meta:
+                    # Late-arriving metadata for a known track (e.g. the relay
+                    # re-pushing history the receiver ingested bare): fill it
+                    # in so embed hosts don't have to ask YouTube.
+                    for row in await self.db.tracks_for_video(link.video_id):
+                        await self.db.update_track_metadata(
+                            row["id"],
+                            title=meta.get("title"),
+                            artist=meta.get("artist"),
+                            duration=float(meta["duration"]) if meta.get("duration") else None,
+                        )
                 continue
+            if meta.get("duration"):
+                await self.db.update_track_metadata(track["id"], duration=float(meta["duration"]))
+                track = await self.db.track_by_id(track["id"])
             inserted += 1
             log.info("new track %s from %s via %s", link.video_id, sender, source)
             self.bus.publish(TRACK_DISCOVERED, {"track": track})
