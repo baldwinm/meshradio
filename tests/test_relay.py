@@ -134,6 +134,21 @@ async def test_ingest_endpoint_rejects_bad_token(db, bus):
         assert resp.status_code == 401
 
 
+async def test_healthz_shape(db, bus):
+    async with api_client(make_app(db, bus, token="s3cret")) as client:
+        body = (await client.get("/healthz")).json()
+        assert body["ok"] is True
+        assert body["tracks"] == 0
+        assert body["ingest_age_s"] is None      # nothing ingested yet
+        await client.post(
+            "/api/ingest", json={"messages": [MSG]},
+            headers={"Authorization": "Bearer s3cret"},
+        )
+        body = (await client.get("/healthz")).json()
+        assert body["tracks"] == 1
+        assert body["ingest_age_s"] is not None and body["ingest_age_s"] < 5
+
+
 async def test_ingest_endpoint_inserts_and_dedupes(db, bus):
     async with api_client(make_app(db, bus, token="s3cret")) as client:
         headers = {"Authorization": "Bearer s3cret"}

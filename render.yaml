@@ -10,6 +10,10 @@ services:
     plan: free
     buildCommand: pip install .
     startCommand: meshradio --config meshradio.render.toml --port $PORT
+    # Deploy only after GitHub Actions is green; restart if /healthz stops
+    # answering (dashboard equivalents: Settings -> Build & Deploy).
+    autoDeployTrigger: checksPass
+    healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9

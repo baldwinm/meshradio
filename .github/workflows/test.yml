@@ -1,0 +1,18 @@
+# CI gate: Render deploys main only after this passes (autoDeployTrigger:
+# checksPass in render.yaml), so a red suite never reaches production.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # matches the Render runtime
+      - run: pip install -e . pytest pytest-asyncio
+      - run: pytest -q

@@ -11,6 +11,7 @@ import asyncio
 import logging
 import secrets
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from ..bus import EventBus, OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
+from ..bus import EventBus, INGEST_STATUS, OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
@@ -81,6 +82,9 @@ class SessionManager:
         self._sessions: dict[str, Session] = {}
         self._reaper: asyncio.Task | None = None
 
+    def count(self) -> int:
+        return len(self._sessions)
+
     def get(self, sid: str) -> Session:
         session = self._sessions.get(sid)
         if session is None:
@@ -136,7 +140,26 @@ def create_app(
     ingest_token: str = "",
     player_factory: Callable[[EventBus], PlayerService] | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="MeshRadio")
+    # Ingest freshness for /healthz: updated by successful relay pushes and,
+    # via the lifespan watcher below, by successful CoreScope polls.
+    health: dict = {"last_ingest": None}
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        async def watch_ingest():
+            sub = bus.subscribe(INGEST_STATUS)
+            try:
+                async for _topic, payload in sub:
+                    if payload.get("corescope") == "ok":
+                        health["last_ingest"] = time.time()
+            finally:
+                sub.close()
+
+        task = supervise("ingest-health-watch", watch_ingest)
+        yield
+        task.cancel()
+
+    app = FastAPI(title="MeshRadio", lifespan=lifespan)
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
     # Cache-buster: browsers can hold stale CSS across app updates otherwise.
@@ -354,12 +377,24 @@ def create_app(
                 )
             except (KeyError, TypeError, ValueError):
                 continue  # skip malformed entries, keep the batch going
+        health["last_ingest"] = time.time()
         # Total lets the pusher detect a wiped DB (ephemeral hosting) and
         # reset its cursor for a full re-backfill.
         return JSONResponse({
             "ok": True,
             "inserted": inserted,
             "tracks": await db.channel_track_count(),
+        })
+
+    @app.get("/healthz")
+    async def healthz():
+        """Liveness + basic freshness; Render's health check hits this."""
+        last = health["last_ingest"]
+        return JSONResponse({
+            "ok": True,
+            "tracks": await db.channel_track_count(),
+            "sessions": sessions.count() if sessions else None,
+            "ingest_age_s": round(time.time() - last, 1) if last else None,
         })
 
     @app.post("/api/radio/start")
