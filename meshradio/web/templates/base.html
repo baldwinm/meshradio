@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MeshRadio</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
@@ -96,11 +96,45 @@
       eqFilters.forEach((f, i) => { f.gain.value = eq.on ? (eq.bands[i] || 0) : 0; });
     }
 
+    // The classic Winamp preset bank (dB per band, clamped to this EQ's ±12).
+    const EQ_PRESETS = {
+      "Flat":               [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "Classical":          [0, 0, 0, 0, 0, 0, -7.2, -7.2, -7.2, -9.6],
+      "Club":               [0, 0, 8, 5.6, 5.6, 5.6, 3.2, 0, 0, 0],
+      "Dance":              [9.6, 7.2, 2.4, 0, 0, -5.6, -7.2, -7.2, 0, 0],
+      "Full Bass":          [-8, 9.6, 9.6, 5.6, 1.6, -4, -8, -10.4, -11.2, -11.2],
+      "Full Bass & Treble": [7.2, 5.6, 0, -7.2, -4.8, 1.6, 8, 11.2, 12, 12],
+      "Full Treble":        [-9.6, -9.6, -9.6, -4, 2.4, 11.2, 12, 12, 12, 12],
+      "Headphones":         [4.8, 11.2, 5.6, -3.2, -2.4, 1.6, 4.8, 9.6, 12, 12],
+      "Large Hall":         [10.4, 10.4, 5.6, 5.6, 0, -4.8, -4.8, -4.8, 0, 0],
+      "Live":               [-4.8, 0, 4, 5.6, 5.6, 5.6, 4, 2.4, 2.4, 2.4],
+      "Party":              [7.2, 7.2, 0, 0, 0, 0, 0, 0, 7.2, 7.2],
+      "Pop":                [-1.6, 4.8, 7.2, 8, 5.6, 0, -2.4, -2.4, -1.6, -1.6],
+      "Reggae":             [0, 0, 0, -5.6, 0, 6.4, 6.4, 0, 0, 0],
+      "Rock":               [8, 4.8, -5.6, -8, -3.2, 4, 8.8, 11.2, 11.2, 11.2],
+      "Ska":                [-2.4, -4.8, -4, 0, 4, 5.6, 8.8, 9.6, 11.2, 9.6],
+      "Soft":               [4.8, 1.6, 0, -2.4, 0, 4, 8, 9.6, 11.2, 12],
+      "Soft Rock":          [4, 4, 2.4, 0, -4, -5.6, -3.2, 0, 2.4, 8.8],
+      "Techno":             [8, 5.6, 0, -5.6, -4.8, 0, 8, 9.6, 9.6, 8.8],
+    };
+
     function saveEq() { localStorage.setItem("meshradio-eq", JSON.stringify(eq)); applyEq(); }
-    function eqBand(i, v) { eq.bands[i] = +v; saveEq(); }
+    function setPresetLabel(name) {
+      const sel = document.getElementById("eq-preset");
+      if (sel) sel.value = name;
+    }
+    function eqBand(i, v) { eq.bands[i] = +v; setPresetLabel(""); saveEq(); }
     function eqPreamp(v) { eq.preamp = +v; saveEq(); }
     function eqToggle() { eq.on = !eq.on; saveEq(); }
-    function eqReset() { eq.preamp = 0; eq.bands = EQ_FREQS.map(() => 0); saveEq(); syncEqSliders(); }
+    function eqReset() { eq.preamp = 0; eq.bands = EQ_FREQS.map(() => 0); setPresetLabel("Flat"); saveEq(); syncEqSliders(); }
+    function eqPreset(name) {
+      const bands = EQ_PRESETS[name];
+      if (!bands) return;
+      eq.bands = bands.slice();
+      eq.on = true;                     // picking a preset means "I want EQ"
+      saveEq();
+      syncEqSliders();
+    }
 
     function syncEqSliders() {
       const pre = document.getElementById("eq-preamp");
@@ -110,6 +144,14 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
+      const sel = document.getElementById("eq-preset");
+      if (sel) {
+        for (const name of Object.keys(EQ_PRESETS)) {
+          const opt = document.createElement("option");
+          opt.value = opt.textContent = name;
+          sel.appendChild(opt);
+        }
+      }
       syncEqSliders();
       const win = document.getElementById("eq-window");
       if (win) {

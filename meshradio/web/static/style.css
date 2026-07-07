@@ -344,7 +344,17 @@ p.empty {
 }
 .eq-actions { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; }
 #eq-on.active { color: var(--green); }
-.eq-note { margin-left: auto; color: var(--muted); font-size: 0.68rem; }
+select {
+  background: linear-gradient(#4a4a5c, #2c2c38);
+  color: #cfd3dd;
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.3rem;
+  cursor: pointer;
+}
 .eq-bands { display: flex; align-items: flex-end; }
 .eq-band { flex: 1; min-width: 0; }
 .eq-slider-wrap { width: 22px; height: 100px; position: relative; margin: 0 auto; }
@@ -385,4 +395,32 @@ p.empty {
   right: 1rem;
   color: var(--amber);
   box-shadow: 0 4px 16px rgb(0 0 0 / 60%);
+}
+
+/* -- small screens ------------------------------------------------------------ */
+
+@media (max-width: 520px) {
+  body { padding: 0 0.5rem 3rem; font-size: 12px; }
+  header { flex-wrap: wrap; gap: 0.5rem; }
+  .art { width: 64px; }
+  .meta .title { font-size: 0.85rem; }
+  .controls { flex-wrap: wrap; }
+  .controls input[type="range"][title="Volume"] { flex: 1; min-width: 80px; }
+  .playbar .time { min-width: 2.9rem; font-size: 0.75rem; padding: 0.15rem 0.2rem; }
+  .queue .sender { display: none; }      /* keep title + duration readable */
+  .queue li .duration { margin-left: auto; }
+  .queue, .days, section.theme ol { font-size: 0.75rem; }
+  .eq-gap { margin: 0 2px; }
+  .eq-slider-wrap { width: 18px; }
+  .eq-band label { font-size: 0.55rem; }
+}
+
+/* fatter touch targets where there's no mouse */
+@media (pointer: coarse) {
+  button { padding: 0.45rem 0.9rem; }
+  button.subtle { padding: 0.25rem 0.6rem; }
+  .row-actions { min-width: 4.6rem; }   /* two touch-sized buttons */
+  input[type="range"] { height: 20px; }
+  input[type="range"]::-webkit-slider-thumb { height: 18px; }
+  input[type="range"]::-moz-range-thumb { height: 18px; }
 }

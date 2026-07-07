@@ -75,6 +75,8 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
     app = FastAPI(title="MeshRadio")
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
+    # Cache-buster: browsers can hold stale CSS across app updates otherwise.
+    templates.env.globals["asset_v"] = int((_HERE / "static" / "style.css").stat().st_mtime)
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
     def _today() -> str:
