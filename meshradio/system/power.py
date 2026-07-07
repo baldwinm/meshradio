@@ -13,29 +13,18 @@ import asyncio
 import logging
 
 from ..bus import EventBus, POWER_STATE
+from ..runtime import Service
 
 log = logging.getLogger(__name__)
 
 SHUTDOWN_PERCENT = 5
 
 
-class StaticPowerMonitor:
+class StaticPowerMonitor(Service):
     """No fuel gauge: report 100% on mains, forever."""
 
     def __init__(self, bus: EventBus):
         self.bus = bus
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="power")
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
 
     async def _run(self) -> None:
         while True:

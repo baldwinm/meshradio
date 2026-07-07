@@ -21,12 +21,13 @@ from typing import Any
 from ..bus import EventBus, TRACK_DISCOVERED, TRACK_FAILED, TRACK_READY
 from ..config import CacheConfig
 from ..db import Database
+from ..runtime import Service
 from . import metadata
 
 log = logging.getLogger(__name__)
 
 
-class Cacher:
+class Cacher(Service):
     def __init__(
         self,
         config: CacheConfig,
@@ -44,19 +45,10 @@ class Cacher:
         # oEmbed metadata and no cache file.
         self.embed = embed
         self._embed_attempts: dict[int, int] = {}
-        self._task: asyncio.Task | None = None
 
     def start(self) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self._task = asyncio.create_task(self._run(), name="cacher")
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        super().start()
 
     async def _run(self) -> None:
         sub = self.bus.subscribe(TRACK_DISCOVERED)

@@ -114,6 +114,11 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
+        # Ingest bursts, cacher sweeps, and session flushes all write through
+        # this one connection; wait out short lock contention instead of
+        # surfacing SQLITE_BUSY, and let WAL fsync lazily.
+        await self._db.execute("PRAGMA busy_timeout=5000")
+        await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._migrate()
 
     async def close(self) -> None:

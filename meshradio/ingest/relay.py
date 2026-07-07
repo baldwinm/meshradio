@@ -22,6 +22,7 @@ import httpx
 from .. import __version__
 from ..config import RelayConfig
 from ..db import Database
+from ..runtime import Service
 
 log = logging.getLogger(__name__)
 
@@ -29,23 +30,11 @@ CURSOR_KEY = "relay.cursor"
 USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
 
 
-class RelayPusher:
+class RelayPusher(Service):
     def __init__(self, config: RelayConfig, db: Database, tz: str = "America/Chicago"):
         self.config = config
         self.db = db
         self.tz = ZoneInfo(tz)
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="relay-pusher")
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
 
     async def _run(self) -> None:
         async with httpx.AsyncClient(

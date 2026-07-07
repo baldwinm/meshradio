@@ -31,6 +31,7 @@ from .. import __version__
 from ..bus import EventBus, INGEST_STATUS
 from ..config import CoreScopeConfig
 from ..db import Database
+from ..runtime import Service
 from .service import IngestService
 
 log = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ CURSOR_KEY = "corescope.cursor"
 USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
 
 
-class CoreScopePoller:
+class CoreScopePoller(Service):
     def __init__(
         self,
         config: CoreScopeConfig,
@@ -54,18 +55,6 @@ class CoreScopePoller:
         self.service = service
         self.db = db
         self.bus = bus
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="corescope-poller")
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
 
     async def _run(self) -> None:
         if not self.config.base_url:

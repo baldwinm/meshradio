@@ -13,6 +13,7 @@ import time
 
 from ..bus import EventBus, INGEST_STATUS
 from ..config import MeshConfig
+from ..runtime import Service
 from .service import IngestService
 
 log = logging.getLogger(__name__)
@@ -25,27 +26,18 @@ except ImportError:
     HAVE_MESHCORE = False
 
 
-class MeshIngest:
+class MeshIngest(Service):
     def __init__(self, config: MeshConfig, service: IngestService, bus: EventBus):
         self.config = config
         self.service = service
         self.bus = bus
-        self._task: asyncio.Task | None = None
 
     def start(self) -> None:
         if not HAVE_MESHCORE:
             log.warning("meshcore library not installed; mesh ingestion disabled")
             self.bus.publish(INGEST_STATUS, {"mesh": "unavailable"})
             return
-        self._task = asyncio.create_task(self._run(), name="mesh-ingest")
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        super().start()
 
     async def _run(self) -> None:
         """Connect to the companion node and stream channel messages.

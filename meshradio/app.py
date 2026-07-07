@@ -26,6 +26,7 @@ from .ingest.service import IngestService
 from .media.cacher import Cacher
 from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
 from .media.radio import RadioService
+from .runtime import spawn
 from .system.power import StaticPowerMonitor, UpsPowerMonitor
 from .ui.panel import make_panel
 from .web.server import create_app
@@ -118,7 +119,7 @@ async def run(config, demo: bool = False) -> None:
     for service in services:
         service.start()
 
-    demo_task = asyncio.create_task(seed_demo(config, ingest)) if demo else None
+    demo_task = spawn("demo-seed", seed_demo(config, ingest)) if demo else None
 
     # Public embed hosting: every visiting browser gets its own session
     # player (queue/position/day), so nobody can pause or steal anyone

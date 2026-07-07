@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 from ..bus import EventBus, OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
 from ..db import Database
 from ..media.player import PlayerService
+from ..runtime import supervise
 
 log = logging.getLogger(__name__)
 
@@ -88,17 +89,14 @@ class SessionManager:
             self._sessions[sid] = session
             log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
             if self._reaper is None:
-                self._reaper = asyncio.create_task(self._reap_loop())
+                self._reaper = supervise("session-reaper", self._reap_loop)
         session.last_seen = time.monotonic()
         return session
 
     async def _reap_loop(self) -> None:
         while True:
             await asyncio.sleep(300)
-            try:
-                await self.reap()
-            except Exception:
-                log.exception("session reaper failed")
+            await self.reap()  # crashes restart via supervise()
 
     async def reap(self, max_idle_s: float = 1800) -> None:
         """Drop sessions with no connected tabs that have been idle a while."""

@@ -17,27 +17,16 @@ import logging
 from typing import Any
 
 from ..bus import EventBus, OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
+from ..runtime import Service
 
 log = logging.getLogger(__name__)
 
 
-class LogPanel:
+class LogPanel(Service):
     """Dev stand-in: logs what the OLED would show."""
 
     def __init__(self, bus: EventBus):
         self.bus = bus
-        self._task: asyncio.Task | None = None
-
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="panel")
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
 
     async def _run(self) -> None:
         sub = self.bus.subscribe(PLAYER_STATE, POWER_STATE, OUTPUT_CHANGED)

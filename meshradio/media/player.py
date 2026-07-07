@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from ..bus import EventBus, PLAYER_STATE, TRACK_READY
 from ..config import PlayerConfig
 from ..db import Database
+from ..runtime import Service, spawn
 
 log = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class MpvBackend:
         self._player.seek(seconds, reference="absolute")
 
 
-class PlayerService:
+class PlayerService(Service):
     def __init__(
         self,
         config: PlayerConfig,
@@ -196,7 +197,6 @@ class PlayerService:
         self.radio_active: bool = False
         self.radio: Any = None             # RadioService, injected by app.py
         self._play_id: int | None = None
-        self._task: asyncio.Task | None = None
         # Playback position clock: base seconds + wall time since epoch while
         # playing. With WebBackend the browser is the real transport, so this
         # is a close estimate kept in sync by /api/seek.
@@ -205,16 +205,8 @@ class PlayerService:
 
     # -- lifecycle -----------------------------------------------------------
 
-    def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name="player")
-
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        await super().stop()
         await self.backend.stop()
 
     async def _run(self) -> None:
@@ -433,9 +425,7 @@ class PlayerService:
 
     def _maybe_extend_radio(self, seed: dict[str, Any] | None) -> None:
         if self.radio_active and self.radio is not None and seed is not None:
-            asyncio.get_running_loop().create_task(
-                self.radio.extend(seed, limit=self.config.radio_batch)
-            )
+            spawn("radio-extend", self.radio.extend(seed, limit=self.config.radio_batch))
 
     # -- browser playback signal ------------------------------------------------
 
@@ -464,7 +454,7 @@ class PlayerService:
     # -- track end handling ---------------------------------------------------
 
     def _schedule_track_ended(self) -> None:
-        asyncio.get_running_loop().create_task(self._advance(completed=True))
+        spawn("player-advance", self._advance(completed=True))
 
     async def _advance(self, completed: bool) -> None:
         if self._play_id is not None and completed:
