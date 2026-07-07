@@ -1,0 +1,31 @@
+# MeshRadio systemd unit (Raspberry Pi / any Linux home node).
+#
+# Install (adjust User= and the ExecStart path if your username or clone
+# location differ):
+#
+#   sudo cp deploy/meshradio.service /etc/systemd/system/meshradio.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now meshradio
+#
+# Day-to-day:
+#   journalctl -u meshradio -f            # follow logs
+#   sudo systemctl restart meshradio      # apply config or code changes
+#   cd ~/meshradio && git pull && sudo systemctl restart meshradio   # update
+
+[Unit]
+Description=MeshRadio — plays the mesh #music channel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+ExecStart=/home/pi/meshradio/.venv/bin/meshradio --config /etc/meshradio/config.toml
+Restart=on-failure
+RestartSec=5
+# The radio should ride out transient failures (network blips, CoreScope
+# hiccups) rather than give up; on-failure + 5s covers crashes without
+# fighting a clean `systemctl stop`.
+
+[Install]
+WantedBy=multi-user.target

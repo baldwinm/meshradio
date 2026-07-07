@@ -1,6 +1,8 @@
 """Relay: the Pi pushes channel history to a hosted instance that Cloudflare
 won't let poll CoreScope itself."""
 
+import json
+
 import httpx
 
 from meshradio.audio.routing import make_router
@@ -75,6 +77,28 @@ async def test_push_once_sends_auth_and_advances_cursor(db, bus):
         assert await pusher.push_once(client) == 0
 
 
+async def test_wiped_receiver_triggers_rebackfill(db, bus):
+    """Ephemeral hosting wipes the receiver's DB on deploys; the heartbeat
+    push detects the count mismatch, resets the cursor, and re-pushes all."""
+    await seed_history(db)
+    pusher = RelayPusher(RelayConfig(push_url="https://r.example.org", token="t"), db)
+    calls = []
+    remote = {"tracks": 1}   # matches local channel_track_count after seed
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(len(json.loads(request.content)["messages"]))
+        return httpx.Response(200, json={"ok": True, "inserted": 0, **remote})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await pusher.push_once(client)
+        assert calls == [2]              # initial backfill; counts match, no reset
+        remote["tracks"] = 0             # receiver redeployed with a fresh DB
+        pushed = await pusher.push_once(client)
+        # heartbeat (0 msgs) sees the mismatch -> cursor reset -> full re-push
+        assert calls == [2, 0, 2]
+        assert pushed == 2
+
+
 def make_app(db, bus, token):
     player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
     ingest = IngestService(db, bus, channel="#music")
@@ -117,6 +141,7 @@ async def test_ingest_endpoint_inserts_and_dedupes(db, bus):
         )
         assert resp.status_code == 200
         assert resp.json()["inserted"] == 1   # malformed entry skipped
+        assert resp.json()["tracks"] == 1     # count for wipe detection
         # Replaying the same batch is a no-op thanks to ingest dedupe.
         resp = await client.post("/api/ingest", json={"messages": [MSG]}, headers=headers)
         assert resp.json()["inserted"] == 0
