@@ -41,6 +41,58 @@ body {
 }
 #site-footer .bmc-btn { vertical-align: middle; }
 
+/* -- help (? button + dialog) --------------------------------------------- */
+.help-btn {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+}
+.help-btn:hover { color: var(--amber); }
+
+dialog#help {
+  width: calc(100% - 2rem);
+  max-width: 30rem;
+  padding: 0;
+  color: var(--text);
+  background: linear-gradient(#343444, #26262f);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+}
+dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
+.help-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0.35rem 0.4rem 0.35rem 0.7rem;
+  background: linear-gradient(#464658, #2a2a36);
+  border-bottom: 2px solid var(--face-lo);
+}
+.help-titlebar h2 { margin: 0; padding: 0; }        /* titlebar already provides chrome */
+.help-close {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--muted);
+}
+.help-close:hover { color: var(--amber); }
+.help-body { padding: 0.85rem 1.1rem 1.1rem; font-size: 0.82rem; line-height: 1.65; }
+.help-body p { margin: 0 0 0.7rem; }
+.help-body strong { color: #cfd3dd; }
+.help-list { margin: 0; padding-left: 1.1rem; }
+.help-list li { margin-bottom: 0.5rem; line-height: 1.55; }
+.help-body .k {
+  color: var(--green);
+  font-family: "Lucida Console", "Courier New", monospace;
+  white-space: nowrap;
+}
+
 /* -- window chrome ------------------------------------------------------- */
 
 .bevel-out { border: 2px solid; border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi); }

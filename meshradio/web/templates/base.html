@@ -14,7 +14,37 @@
       <a href="/">Now Playing</a>
       <a href="/archive">Archive</a>
     </nav>
+    <button id="help-btn" class="help-btn" type="button" aria-label="How to use MeshRadio" title="Help">?</button>
   </header>
+  <!-- Help dialog. Outside <main> so htmx partial swaps never remove it; the
+       header ? button opens it, the titlebar ✕ / Esc / backdrop close it. -->
+  <dialog id="help">
+    <form method="dialog" class="help-titlebar">
+      <h2>How to use MeshRadio</h2>
+      <button class="help-close" aria-label="Close" title="Close">✕</button>
+    </form>
+    <div class="help-body">
+      <p>MeshRadio plays the songs people share each day on the Austin MeshCore
+         <strong>#music</strong> channel, against that day's theme.</p>
+      <ul class="help-list">
+        <li><strong>Now Playing</strong> — <span class="k">▶ / ⏸</span> play or pause,
+          <span class="k">⏭</span> skip, drag the bar to scrub, and set the volume slider.</li>
+        <li><strong>Queue</strong> — songs up next list below. <span class="k">⤒</span> plays one next,
+          <span class="k">✕</span> removes it, <span class="k">Clear queue</span> empties it.</li>
+        <li><strong>Archive</strong> — browse past days and themes. <span class="k">▶ Play this day</span>
+          replays a whole day; <span class="k">+ queue</span> adds a single track.</li>
+        {% if embed_mode %}
+        <li><strong>Playback</strong> — songs stream from YouTube right in your browser, and your
+          queue is your own — playing or skipping never affects anyone else.</li>
+        {% else %}
+        <li><strong>Radio</strong> — <span class="k">📻 Start radio</span> keeps the music going with
+          similar songs when the queue runs dry; press it again to stop.</li>
+        <li><strong>Audio</strong> — if you see <span class="k">🔊 Click to enable audio</span>, click it
+          once (browsers block autoplay). Open it in several tabs and only the newest plays sound.</li>
+        {% endif %}
+      </ul>
+    </div>
+  </dialog>
   <!-- Embed mode: the speaker tab streams from YouTube in this window. It
        lives outside the htmx-swapped containers so state pushes don't
        destroy the iframe mid-song. -->
@@ -38,5 +68,6 @@
   <script src="/static/js/embed.js?v={{ asset_v }}"></script>
   <script src="/static/js/eq.js?v={{ asset_v }}"></script>
   <script src="/static/js/playbar.js?v={{ asset_v }}"></script>
+  <script src="/static/js/help.js?v={{ asset_v }}"></script>
 </body>
 </html>
