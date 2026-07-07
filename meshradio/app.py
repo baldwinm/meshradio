@@ -23,7 +23,7 @@ from .ingest.corescope import CoreScopePoller
 from .ingest.mesh import MeshIngest
 from .ingest.service import IngestService
 from .media.cacher import Cacher
-from .media.player import MpvBackend, NullBackend, PlayerService, WebBackend
+from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
 from .media.radio import RadioService
 from .system.power import StaticPowerMonitor, UpsPowerMonitor
 from .ui.panel import make_panel
@@ -35,9 +35,12 @@ log = logging.getLogger("meshradio")
 def make_backend(profile: str, choice: str = "auto"):
     """Pick the playback engine. "auto": mpv on appliance profiles (audio out
     the Pi's sinks), web playback everywhere else (the browser is the
-    speaker until hardware exists)."""
+    speaker until hardware exists). "embed" streams via the YouTube IFrame
+    player in the browser — the no-download mode for public hosting."""
     if choice == "auto":
         choice = "mpv" if profile in ("pi4", "lite") else "web"
+    if choice == "embed":
+        return EmbedBackend()
     if choice == "mpv":
         try:
             return MpvBackend()
@@ -95,7 +98,9 @@ async def run(config, demo: bool = False) -> None:
         output_getter=router.current,
     )
     player.radio = RadioService(config.cache, db, bus)
-    cacher = Cacher(config.cache, config.cache_dir, db, bus)
+    cacher = Cacher(
+        config.cache, config.cache_dir, db, bus, embed=config.player.backend == "embed"
+    )
     panel = make_panel(config.hardware_profile, bus, player, router)
     power = (
         UpsPowerMonitor(bus) if config.hardware_profile == "pi4" else StaticPowerMonitor(bus)

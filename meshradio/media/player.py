@@ -95,6 +95,38 @@ class WebBackend:
         pass  # the speaker tab moves its own <audio> element
 
 
+class EmbedBackend:
+    """Playback happens in connected browsers via the YouTube IFrame player:
+    the speaker tab streams straight from YouTube, so no audio ever touches
+    this server — the mode for public hosting. Tracks are queued by video id
+    with no cached file; metadata comes from oEmbed and the embed player
+    reports real durations back via /api/duration. State-only, like
+    WebBackend."""
+
+    def __init__(self) -> None:
+        self.on_end: Callable[[], None] | None = None
+        self.volume = 100
+        self.paused = False
+
+    async def play(self, path: str | None, duration: float | None) -> None:
+        self.paused = False
+
+    async def stop(self) -> None:
+        pass
+
+    async def pause(self) -> None:
+        self.paused = True
+
+    async def resume(self) -> None:
+        self.paused = False
+
+    async def set_volume(self, volume: int) -> None:
+        self.volume = volume
+
+    async def seek(self, seconds: float) -> None:
+        pass  # the speaker tab seeks its own iframe player
+
+
 class MpvBackend:
     """mpv via python-mpv JSON IPC. Outputs to the current PipeWire default
     sink, so output switching needs zero player logic."""
@@ -144,6 +176,7 @@ class PlayerService:
         self.db = db
         self.bus = bus
         self.backend = backend
+        self.embed = isinstance(backend, EmbedBackend)
         self.backend.on_end = self._schedule_track_ended
         self.output_getter = output_getter
         self.tz = ZoneInfo(config.timezone)
@@ -246,7 +279,8 @@ class PlayerService:
     # -- playback commands -------------------------------------------------
 
     async def play_track(self, track: dict[str, Any]) -> None:
-        if not track.get("cache_path"):
+        # Embed mode streams by video id in the browser; no local file needed.
+        if not track.get("cache_path") and not self.embed:
             log.warning("track %s has no cached audio; skipping", track.get("video_id"))
             return
         self.current = track
@@ -407,6 +441,20 @@ class PlayerService:
         await self._advance(completed=True)
         return True
 
+    async def report_duration(self, track_id: int, seconds: float) -> None:
+        """The embed speaker tab learned the real duration from its player
+        (oEmbed metadata has no duration, so embed tracks start without one)."""
+        if seconds <= 0:
+            return
+        await self.db.update_track_metadata(track_id, duration=seconds)
+        changed = False
+        for t in [self.current, *self.queue]:
+            if t and t["id"] == track_id and not t.get("duration"):
+                t["duration"] = seconds
+                changed = True
+        if changed:
+            self.publish_state()
+
     # -- track end handling ---------------------------------------------------
 
     def _schedule_track_ended(self) -> None:
@@ -459,6 +507,7 @@ class PlayerService:
             "output": self.output_getter(),
             "radio": self.radio_active,
             "web_audio": isinstance(self.backend, WebBackend),
+            "embed": self.embed,
             "current": brief(self.current),
             "queue": [brief(t) for t in self.queue],
         }

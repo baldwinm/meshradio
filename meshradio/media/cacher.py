@@ -27,11 +27,22 @@ log = logging.getLogger(__name__)
 
 
 class Cacher:
-    def __init__(self, config: CacheConfig, cache_dir: Path, db: Database, bus: EventBus):
+    def __init__(
+        self,
+        config: CacheConfig,
+        cache_dir: Path,
+        db: Database,
+        bus: EventBus,
+        embed: bool = False,
+    ):
         self.config = config
         self.cache_dir = cache_dir
         self.db = db
         self.bus = bus
+        # Embed mode (public hosting): never download audio — the browser
+        # streams from YouTube directly. Tracks go straight to 'ready' with
+        # oEmbed metadata and no cache file.
+        self.embed = embed
         self._task: asyncio.Task | None = None
 
     def start(self) -> None:
@@ -60,6 +71,20 @@ class Cacher:
     async def process_track(self, track: dict[str, Any]) -> None:
         track_id = track["id"]
         video_id = track["video_id"]
+
+        if self.embed:
+            meta = await metadata.fetch_oembed(video_id)
+            if meta is None:
+                # Unresolvable video (deleted/private) — don't queue it.
+                await self.db.set_cache_status(track_id, "failed")
+                self.bus.publish(TRACK_FAILED, {"track": await self.db.track_by_id(track_id)})
+                return
+            await self.db.update_track_metadata(
+                track_id, title=meta["title"] or None, artist=meta["artist"] or None
+            )
+            await self.db.set_cache_status(track_id, "ready")
+            self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
+            return
 
         # Same song already cached under another track row? Reuse the file.
         existing = await self.db.cached_track_for_video(video_id)

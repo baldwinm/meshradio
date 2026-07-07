@@ -35,7 +35,9 @@ class CoreScopeConfig:
 
 @dataclass
 class PlayerConfig:
-    backend: str = "auto"          # auto | mpv | web | null; auto = mpv on pi4/lite, web on dev
+    backend: str = "auto"          # auto | mpv | web | embed | null; auto = mpv on pi4/lite,
+                                   # web on dev. embed = YouTube IFrame in the browser, no
+                                   # downloads (the mode for public hosting)
     live_autoplay: bool = True     # auto-play new arrivals when idle in Live mode
     quiet_hours: str = ""          # "22:00-08:00" suppresses autoplay; empty = off
     timezone: str = "America/Chicago"

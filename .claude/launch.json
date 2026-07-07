@@ -12,6 +12,12 @@
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["-m", "meshradio.app", "-v", "--port", "8090"],
       "port": 8090
+    },
+    {
+      "name": "meshradio-embed",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "meshradio.app", "-v", "--config", "meshradio.render.toml", "--port", "8091"],
+      "port": 8091
     }
   ]
 }

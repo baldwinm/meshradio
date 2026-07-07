@@ -397,6 +397,23 @@ select {
   box-shadow: 0 4px 16px rgb(0 0 0 / 60%);
 }
 
+/* embed mode's YouTube player window */
+#yt-window {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background: linear-gradient(#343444, #26262f);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 50%);
+}
+#yt-window iframe, #yt-player {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  background: #000;
+}
+
 /* -- small screens ------------------------------------------------------------ */
 
 @media (max-width: 520px) {

@@ -223,6 +223,13 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
         advanced = await player.notify_ended(track_id)
         return JSONResponse({"advanced": advanced})
 
+    @app.post("/api/duration/{track_id}/{seconds}")
+    async def api_duration(track_id: int, seconds: float):
+        """The embed speaker tab reports a track's real duration (embed
+        tracks start without one — oEmbed metadata has no length)."""
+        await player.report_duration(track_id, seconds)
+        return JSONResponse({"ok": True})
+
     @app.post("/api/radio/start")
     async def api_radio_start(request: Request):
         ok = await player.start_radio()

@@ -1,0 +1,21 @@
+# Public-hosting config (Render, Fly, etc.): embed mode.
+#
+# The browser streams every song straight from YouTube via the IFrame
+# player — this server never downloads or serves audio, only metadata
+# (video ids, titles, themes, queue order). That keeps a public
+# deployment clear of redistributing copyrighted media.
+hardware_profile = "dev"
+data_dir = "./data"
+
+[corescope]
+enabled = true
+base_url = "https://scope.digitaino.com"
+channel = "#music"
+poll_interval_s = 180
+
+[player]
+backend = "embed"
+
+[web]
+host = "0.0.0.0"
+port = 8080   # Render overrides this via --port $PORT
