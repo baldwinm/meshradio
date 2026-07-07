@@ -20,15 +20,14 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .. import __version__
 from ..config import RelayConfig
 from ..db import Database
+from ..net import http_client
 from ..runtime import Service
 
 log = logging.getLogger(__name__)
 
 CURSOR_KEY = "relay.cursor"
-USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
 
 
 class RelayPusher(Service):
@@ -38,12 +37,9 @@ class RelayPusher(Service):
         self.tz = ZoneInfo(tz)
 
     async def _run(self) -> None:
-        async with httpx.AsyncClient(
+        async with http_client(
             timeout=60,
-            headers={
-                "User-Agent": USER_AGENT,
-                "Authorization": f"Bearer {self.config.token}",
-            },
+            headers={"Authorization": f"Bearer {self.config.token}"},
         ) as client:
             while True:
                 try:

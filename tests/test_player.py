@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime
 
 from meshradio.bus import EventBus, PLAYER_STATE
@@ -14,7 +15,9 @@ async def make_ready_track(db: Database, video_id: str, duration: float = 0.05):
         url=f"https://www.youtube.com/watch?v={video_id}",
         channel="#music",
         sender="alice",
-        mesh_ts=1_783_443_600.0,
+        # "posted just now": a fixed timestamp here aged past the player's
+        # 30-minute live window mid-session once and failed half the suite.
+        mesh_ts=time.time(),
         source="mesh",
         theme_id=theme["id"],
     )

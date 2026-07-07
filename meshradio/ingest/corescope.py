@@ -27,20 +27,16 @@ from urllib.parse import quote
 
 import httpx
 
-from .. import __version__
 from ..bus import EventBus, INGEST_STATUS
 from ..config import CoreScopeConfig
 from ..db import Database
+from ..net import http_client
 from ..runtime import Service
 from .service import IngestService
 
 log = logging.getLogger(__name__)
 
 CURSOR_KEY = "corescope.cursor"
-
-# Descriptive UA: httpx's default ("python-httpx/x.y") plus a datacenter IP
-# reads as a bot to Cloudflare and gets 403'd on hosted deployments.
-USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
 
 
 class CoreScopePoller(Service):
@@ -61,11 +57,7 @@ class CoreScopePoller(Service):
             log.warning("CoreScope base_url not configured; poller idle")
             self.bus.publish(INGEST_STATUS, {"corescope": "unconfigured"})
             return
-        async with httpx.AsyncClient(
-            base_url=self.config.base_url,
-            timeout=30,
-            headers={"User-Agent": USER_AGENT},
-        ) as client:
+        async with http_client(base_url=self.config.base_url) as client:
             while True:
                 try:
                     await self.poll_once(client)
