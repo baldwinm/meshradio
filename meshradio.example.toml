@@ -18,8 +18,9 @@ channel = "#music"
 poll_interval_s = 180
 
 [player]
-backend = "auto"                # auto | mpv | web | null — auto picks mpv on pi4/lite,
-                                # web (browser is the speaker) everywhere else
+backend = "auto"                # auto | mpv | web | embed | null — auto picks mpv on pi4/lite,
+                                # web (browser is the speaker) everywhere else. embed streams
+                                # via the YouTube IFrame player (public-hosting mode, no downloads)
 live_autoplay = true            # auto-play new arrivals when idle in Live mode
 quiet_hours = ""                # e.g. "22:00-08:00" to suppress autoplay overnight
 timezone = "America/Chicago"    # channel-local day boundary for themes
@@ -38,3 +39,13 @@ ytdlp_extra_args = []           # e.g. ["--js-runtimes", "deno:/path/to/deno"] i
 [web]
 host = "0.0.0.0"
 port = 8080
+ingest_token = ""               # non-empty enables POST /api/ingest (relay receiver);
+                                # on hosts prefer the MESHRADIO_INGEST_TOKEN env var
+
+[relay]
+# Mirror this node's channel history to a hosted instance that can't poll
+# CoreScope itself (Cloudflare challenges datacenter IPs). Runs only when
+# both keys are set.
+push_url = ""                   # e.g. "https://meshradio.example.org"
+token = ""                      # must match the receiver's ingest token
+interval_s = 120

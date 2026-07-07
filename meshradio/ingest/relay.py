@@ -1,0 +1,122 @@
+"""Relay pusher — mirror this node's channel history to a hosted instance.
+
+Cloudflare challenges datacenter IPs, so a hosted (embed-mode) deployment
+can't poll CoreScope itself. This service runs on a node with residential
+internet (the Pi at home), reconstructs channel messages from the local DB,
+and POSTs anything new to the hosted instance's authenticated
+``/api/ingest`` endpoint. The receiver funnels them through the normal
+ingest pipeline, whose dedupe makes re-pushes no-ops, so the cursor here is
+an optimization rather than a correctness requirement.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import httpx
+
+from .. import __version__
+from ..config import RelayConfig
+from ..db import Database
+
+log = logging.getLogger(__name__)
+
+CURSOR_KEY = "relay.cursor"
+USER_AGENT = f"meshradio/{__version__} (+https://github.com/baldwinm/meshradio)"
+
+
+class RelayPusher:
+    def __init__(self, config: RelayConfig, db: Database, tz: str = "America/Chicago"):
+        self.config = config
+        self.db = db
+        self.tz = ZoneInfo(tz)
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="relay-pusher")
+
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+
+    async def _run(self) -> None:
+        async with httpx.AsyncClient(
+            timeout=60,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Authorization": f"Bearer {self.config.token}",
+            },
+        ) as client:
+            while True:
+                try:
+                    await self.push_once(client)
+                except httpx.HTTPStatusError as exc:
+                    log.error(
+                        "relay push: HTTP %d from %s; server said: %.200s",
+                        exc.response.status_code,
+                        exc.request.url,
+                        exc.response.text,
+                    )
+                except Exception:
+                    log.exception("relay push failed")
+                await asyncio.sleep(self.config.interval_s)
+
+    async def push_once(self, client: httpx.AsyncClient) -> int:
+        cursor = await self.db.get_setting(CURSOR_KEY, "")
+        messages, newest = await self.collect(cursor)
+        if not messages:
+            return 0
+        resp = await client.post(
+            self.config.push_url.rstrip("/") + "/api/ingest",
+            json={"messages": messages},
+        )
+        resp.raise_for_status()
+        inserted = resp.json().get("inserted", "?")
+        # Advance only after a confirmed 2xx so a failed push retries in full.
+        if newest != cursor:
+            await self.db.set_setting(CURSOR_KEY, newest)
+        log.info("relay: pushed %d messages (%s new remotely)", len(messages), inserted)
+        return len(messages)
+
+    async def collect(self, cursor: str) -> tuple[list[dict[str, Any]], str]:
+        """Reconstruct channel messages for everything ingested after
+        ``cursor``. Returns (messages sorted by mesh time, newest cursor)."""
+        themes = await self.db.themes_since(cursor)
+        tracks = await self.db.tracks_since(cursor)
+        messages: list[dict[str, Any]] = []
+        for theme in themes:
+            # Auto-created placeholder themes carry no message; the receiver
+            # regenerates its own when the day's first link arrives.
+            if not theme.get("raw_message") and not theme.get("set_by"):
+                continue
+            messages.append({
+                "sender": theme.get("set_by") or "mesh",
+                "text": theme.get("raw_message") or f"Theme: {theme['title']}",
+                "ts": self._theme_ts(theme["date"]),
+            })
+        for track in tracks:
+            messages.append({
+                "sender": track["sender"],
+                "text": track["url"],
+                "ts": float(track["mesh_ts"] or 0),
+            })
+        messages.sort(key=lambda m: m["ts"])
+        newest = max(
+            [*(t["created_at"] for t in themes), *(t["ingested_at"] for t in tracks)],
+            default=cursor,
+        )
+        return messages, newest
+
+    def _theme_ts(self, date: str) -> float:
+        """Just past local midnight, so the theme lands on the right day and
+        precedes every track posted that day."""
+        dt = datetime.strptime(date, "%Y-%m-%d").replace(hour=0, minute=5, tzinfo=self.tz)
+        return dt.timestamp()

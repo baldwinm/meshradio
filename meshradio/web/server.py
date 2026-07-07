@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from datetime import datetime
 from pathlib import Path
 
@@ -71,7 +72,14 @@ def _mmss(value) -> str:
     return f"{value // 60}:{value % 60:02d}"
 
 
-def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> FastAPI:
+def create_app(
+    bus: EventBus,
+    db: Database,
+    player: PlayerService,
+    router,
+    ingest=None,
+    ingest_token: str = "",
+) -> FastAPI:
     app = FastAPI(title="MeshRadio")
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
@@ -229,6 +237,34 @@ def create_app(bus: EventBus, db: Database, player: PlayerService, router) -> Fa
         tracks start without one — oEmbed metadata has no length)."""
         await player.report_duration(track_id, seconds)
         return JSONResponse({"ok": True})
+
+    @app.post("/api/ingest")
+    async def api_ingest(request: Request):
+        """Relay receiver: a home node pushes channel messages here when this
+        instance can't poll CoreScope itself (Cloudflare challenges
+        datacenter IPs). Shared-token auth; the normal ingest pipeline's
+        dedupe makes replays harmless."""
+        if not ingest_token or ingest is None:
+            raise HTTPException(404)
+        supplied = request.headers.get("authorization", "")
+        if not secrets.compare_digest(supplied, f"Bearer {ingest_token}"):
+            raise HTTPException(401, "bad token")
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(400, "invalid JSON")
+        inserted = 0
+        for msg in (payload.get("messages") or [])[:5000]:
+            try:
+                inserted += await ingest.handle_message(
+                    sender=str(msg["sender"]),
+                    text=str(msg["text"]),
+                    ts=float(msg["ts"]),
+                    source="corescope",  # relayed community-channel history
+                )
+            except (KeyError, TypeError, ValueError):
+                continue  # skip malformed entries, keep the batch going
+        return JSONResponse({"ok": True, "inserted": inserted})
 
     @app.post("/api/radio/start")
     async def api_radio_start(request: Request):

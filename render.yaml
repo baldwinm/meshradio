@@ -13,3 +13,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      # Shared secret for POST /api/ingest (the Pi relay pushes channel
+      # history here). Copy the generated value into the Pi's [relay] token.
+      - key: MESHRADIO_INGEST_TOKEN
+        generateValue: true

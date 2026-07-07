@@ -280,6 +280,23 @@ class Database:
             (date,),
         )
 
+    # -- relay ----------------------------------------------------------------
+
+    async def themes_since(self, cursor: str) -> list[dict[str, Any]]:
+        """Themes created after ``cursor`` (ISO utc string), oldest first."""
+        return await self._fetchall(
+            "SELECT * FROM themes WHERE created_at > ? ORDER BY created_at", (cursor,)
+        )
+
+    async def tracks_since(self, cursor: str) -> list[dict[str, Any]]:
+        """Channel tracks ingested after ``cursor``, oldest first. Radio
+        filler is excluded — it's local jukebox state, not channel history."""
+        return await self._fetchall(
+            "SELECT * FROM tracks WHERE ingested_at > ? AND source != 'radio' "
+            "ORDER BY ingested_at",
+            (cursor,),
+        )
+
     # -- plays / LRU ---------------------------------------------------------
 
     async def record_play(self, track_id: int, output: str | None) -> int:

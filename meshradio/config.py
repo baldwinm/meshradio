@@ -62,6 +62,17 @@ class CacheConfig:
 class WebConfig:
     host: str = "0.0.0.0"
     port: int = 8080
+    ingest_token: str = ""         # enables POST /api/ingest (relay receiver); empty = off.
+                                   # Prefer the MESHRADIO_INGEST_TOKEN env var on hosts.
+
+
+@dataclass
+class RelayConfig:
+    """Push this node's channel history to a hosted instance whose datacenter
+    IP Cloudflare won't let poll CoreScope directly."""
+    push_url: str = ""             # hosted instance base URL, e.g. https://meshradio.example.org
+    token: str = ""                # must match the receiver's ingest token
+    interval_s: int = 120
 
 
 @dataclass
@@ -73,6 +84,7 @@ class Config:
     player: PlayerConfig = field(default_factory=PlayerConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     web: WebConfig = field(default_factory=WebConfig)
+    relay: RelayConfig = field(default_factory=RelayConfig)
 
     @property
     def db_path(self) -> Path:
@@ -104,11 +116,16 @@ def load_config(path: str | Path | None = None) -> Config:
         if candidate and Path(candidate).is_file():
             with open(candidate, "rb") as f:
                 raw = tomllib.load(f)
-            for section in ("mesh", "corescope", "player", "cache", "web"):
+            for section in ("mesh", "corescope", "player", "cache", "web", "relay"):
                 if section in raw:
                     _apply(getattr(cfg, section), raw[section])
             _apply(cfg, {k: v for k, v in raw.items() if not isinstance(v, dict)})
             break
+
+    # Secrets belong in the environment, not in a committed config file.
+    env_token = os.environ.get("MESHRADIO_INGEST_TOKEN")
+    if env_token:
+        cfg.web.ingest_token = env_token
 
     if cfg.hardware_profile not in VALID_PROFILES:
         raise ValueError(

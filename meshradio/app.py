@@ -21,6 +21,7 @@ from .config import load_config
 from .db import Database
 from .ingest.corescope import CoreScopePoller
 from .ingest.mesh import MeshIngest
+from .ingest.relay import RelayPusher
 from .ingest.service import IngestService
 from .media.cacher import Cacher
 from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
@@ -111,13 +112,17 @@ async def run(config, demo: bool = False) -> None:
         services.append(MeshIngest(config.mesh, ingest, bus))
     if config.corescope.enabled:
         services.append(CoreScopePoller(config.corescope, ingest, db, bus))
+    if config.relay.push_url and config.relay.token:
+        services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
 
     for service in services:
         service.start()
 
     demo_task = asyncio.create_task(seed_demo(config, ingest)) if demo else None
 
-    web_app = create_app(bus, db, player, router)
+    web_app = create_app(
+        bus, db, player, router, ingest=ingest, ingest_token=config.web.ingest_token
+    )
     server = uvicorn.Server(
         uvicorn.Config(
             web_app, host=config.web.host, port=config.web.port, log_level="warning"
