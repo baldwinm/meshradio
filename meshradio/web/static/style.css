@@ -307,6 +307,29 @@ ol, ul { line-height: 1.75; }
 }
 .queue li:hover { background: #101810; }
 
+/* Winamp playlist window: the queue scrolls inside its own LCD box (unlimited
+   tracks) instead of stretching the page. Beveled-steel scrollbar to match
+   the chrome. */
+.queue {
+  max-height: min(55vh, 24rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;                       /* Firefox */
+  scrollbar-color: var(--face) var(--lcd-bg);
+}
+.queue::-webkit-scrollbar { width: 15px; }
+.queue::-webkit-scrollbar-track {
+  background: var(--lcd-bg);
+  border-left: 2px solid var(--face-lo);
+}
+.queue::-webkit-scrollbar-thumb {
+  background: linear-gradient(#3c3c4e, #23232f);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+}
+.queue::-webkit-scrollbar-thumb:hover { background: linear-gradient(#464658, #2a2a36); }
+.queue::-webkit-scrollbar-button { display: none; }
+
 /* right-hand group, Winamp order: sender/badge, then duration flush right */
 .queue li .badge, .queue li .sender { order: 7; margin-left: auto; flex: none; }
 .queue li .duration { order: 8; }
