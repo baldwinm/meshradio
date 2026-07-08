@@ -108,6 +108,44 @@ MIGRATIONS: list[str] = [
         state      TEXT NOT NULL              -- JSON snapshot
     );
     """,
+    # v4 — one playlist per day: lockable themes + merge existing duplicates.
+    #
+    # A theme *is* the day's playlist. Because UNIQUE is on (date, title), a
+    # second "Theme: …" message with a different title used to insert a rival
+    # theme row for the same date — splitting the day's tracks across two
+    # playlists and "resetting" which theme new links attached to. Themes now
+    # carry a `locked` flag: once a real theme is set for the day it is locked,
+    # and later theme messages are ignored (enforced in IngestService).
+    #
+    # Backfill for days that already split: reassign every track to its day's
+    # canonical theme (prefer a real title over an "Untitled —" placeholder,
+    # then the earliest row), drop the now-empty rivals, and lock every
+    # surviving real theme so it can't be reset either.
+    """
+    ALTER TABLE themes ADD COLUMN locked INTEGER NOT NULL DEFAULT 0;
+
+    UPDATE tracks
+    SET theme_id = (
+        SELECT t.id FROM themes t
+        WHERE t.date = (SELECT d.date FROM themes d WHERE d.id = tracks.theme_id)
+        ORDER BY (t.title LIKE 'Untitled — %') ASC, t.id ASC
+        LIMIT 1
+    )
+    WHERE theme_id IS NOT NULL;
+
+    DELETE FROM themes
+    WHERE id NOT IN (
+        SELECT (
+            SELECT t2.id FROM themes t2
+            WHERE t2.date = dates.date
+            ORDER BY (t2.title LIKE 'Untitled — %') ASC, t2.id ASC
+            LIMIT 1
+        )
+        FROM (SELECT DISTINCT date FROM themes) dates
+    );
+
+    UPDATE themes SET locked = 1 WHERE title NOT LIKE 'Untitled — %';
+    """,
 ]
 
 
@@ -175,15 +213,26 @@ class Database:
     # -- themes ------------------------------------------------------------
 
     async def create_theme(
-        self, date: str, title: str, set_by: str | None = None, raw_message: str | None = None
+        self,
+        date: str,
+        title: str,
+        set_by: str | None = None,
+        raw_message: str | None = None,
+        locked: bool = False,
     ) -> dict[str, Any]:
-        """Insert a theme; on (date, title) conflict return the existing row."""
+        """Insert a theme; on (date, title) conflict return the existing row.
+
+        ``locked`` marks the day's theme as final: the ingest pipeline refuses
+        to reset a locked theme, so a later "Theme: …" message can't spawn a
+        rival playlist. Auto-created "Untitled —" placeholders stay unlocked so
+        the real theme can still adopt them (see ``adopt_theme``)."""
         # RETURNING (not lastrowid, which is unreliable after DO NOTHING)
         # distinguishes a fresh insert from a conflict no-op.
         cur = await self.db.execute(
-            "INSERT INTO themes(date,title,set_by,raw_message,created_at) VALUES(?,?,?,?,?) "
+            "INSERT INTO themes(date,title,set_by,raw_message,created_at,locked) "
+            "VALUES(?,?,?,?,?,?) "
             "ON CONFLICT(date,title) DO NOTHING RETURNING id",
-            (date, title, set_by, raw_message, utcnow()),
+            (date, title, set_by, raw_message, utcnow(), int(locked)),
         )
         inserted = await cur.fetchone()
         await self.db.commit()
@@ -193,6 +242,23 @@ class Database:
             row = await self._fetchone(
                 "SELECT * FROM themes WHERE date=? AND title=?", (date, title)
             )
+        assert row is not None
+        return row
+
+    async def adopt_theme(
+        self, theme_id: int, title: str, set_by: str | None = None, raw_message: str | None = None
+    ) -> dict[str, Any]:
+        """Give an existing (unlocked) theme a real title and lock it.
+
+        Used when links arrived before the theme was announced: the day's
+        "Untitled —" placeholder is renamed in place so every early track stays
+        in the one playlist instead of being stranded on a separate theme."""
+        await self.db.execute(
+            "UPDATE themes SET title=?, set_by=?, raw_message=?, locked=1 WHERE id=?",
+            (title, set_by, raw_message, theme_id),
+        )
+        await self.db.commit()
+        row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
         assert row is not None
         return row
 

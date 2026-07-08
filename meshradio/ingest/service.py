@@ -49,11 +49,34 @@ class IngestService:
 
         theme_title = parse.parse_theme(text)
         if theme_title:
-            theme = await self.db.create_theme(
-                date, theme_title, set_by=sender, raw_message=text
-            )
-            log.info("theme for %s: %r (set by %s)", date, theme_title, sender)
-            self.bus.publish(THEME_CREATED, {"theme": theme})
+            existing = await self.db.latest_theme_for_date(date)
+            if existing is None:
+                # First theme of the day — set and lock it.
+                theme = await self.db.create_theme(
+                    date, theme_title, set_by=sender, raw_message=text, locked=True
+                )
+                log.info("theme for %s: %r (set by %s)", date, theme_title, sender)
+                self.bus.publish(THEME_CREATED, {"theme": theme})
+            elif existing["locked"]:
+                # The theme was set in the morning and is locked. A later
+                # "Theme: …" message must not reset it or spawn a rival
+                # playlist — keep ingesting links under the existing theme.
+                log.info(
+                    "theme for %s already locked (%r); ignoring reset to %r by %s",
+                    date, existing["title"], theme_title, sender,
+                )
+            else:
+                # Links arrived before the theme, so an "Untitled —"
+                # placeholder holds them. Adopt the real title into it (one
+                # playlist for the day) and lock it.
+                theme = await self.db.adopt_theme(
+                    existing["id"], theme_title, set_by=sender, raw_message=text
+                )
+                log.info(
+                    "theme for %s: %r (set by %s, adopted placeholder)",
+                    date, theme_title, sender,
+                )
+                self.bus.publish(THEME_CREATED, {"theme": theme})
 
         links = parse.extract_links(text)
         if not links:
