@@ -773,3 +773,28 @@ html[data-skin="wmp"] section.theme ol li:hover { background: #1d3f6d; }
 html[data-skin="wmp"] .stat-n { color: #7fd0ff; text-shadow: 0 0 8px rgb(90 170 255 / 40%); }
 html[data-skin="wmp"] .badge { color: #ff9b2f; }
 html[data-skin="wmp"] select option { background: #17335a; color: #eaf3ff; }
+
+/* -- easter eggs (hidden until triggered; see static/js/easter.js) --------- */
+.egg-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%) translateY(1rem);
+  z-index: 9999;
+  pointer-events: none;
+  background: var(--lcd-bg);
+  color: var(--green);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  padding: 0.5rem 0.9rem;
+  font-family: "Lucida Console", "Courier New", monospace;
+  font-size: 0.82rem;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+  opacity: 0;
+  transition: opacity 0.35s, transform 0.35s;
+}
+.egg-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@keyframes egg-hue { to { filter: hue-rotate(360deg); } }
+html.egg-disco { animation: egg-hue 6s linear infinite; }
+@media (prefers-reduced-motion: reduce) { html.egg-disco { animation: none; } }
