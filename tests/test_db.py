@@ -43,6 +43,32 @@ async def test_repost_by_other_sender_is_new_track(db: Database):
     assert await db.add_track(**_track_args(sender="bob")) is not None
 
 
+async def test_repost_into_same_theme_is_deduped(db: Database):
+    """One song per playlist: a repost of the same video into the same theme is
+    dropped even by a different sender in a different time bucket."""
+    theme = await db.create_theme("2026-07-06", "rain")
+    first = await db.add_track(**_track_args(theme_id=theme["id"]))
+    dupe = await db.add_track(
+        **_track_args(theme_id=theme["id"], sender="bob", mesh_ts=1_751_900_000.0)
+    )
+    assert first is not None
+    assert dupe is None
+    assert len(await db.tracks_for_theme(theme["id"])) == 1
+
+
+async def test_same_video_allowed_across_themes(db: Database):
+    """The rule is per playlist, not global — the same video can appear under a
+    different day's theme."""
+    monday = await db.create_theme("2026-07-06", "rain")
+    tuesday = await db.create_theme("2026-07-07", "sun")
+    assert await db.add_track(**_track_args(theme_id=monday["id"])) is not None
+    # A day later (distinct time bucket, so the message-level dedupe_hash lets
+    # it through) the same song can headline the new day's playlist.
+    assert await db.add_track(
+        **_track_args(theme_id=tuesday["id"], mesh_ts=1_751_886_400.0)
+    ) is not None
+
+
 async def test_malformed_video_id_rejected(db: Database):
     """A video id becomes a cache filename and a yt-dlp argument, so anything
     outside YouTube's 11-char id charset is refused at insert time."""
@@ -138,6 +164,60 @@ async def test_v4_prefers_real_title_over_placeholder(tmp_path):
         assert themes[0]["title"] == "rain"
         assert themes[0]["locked"] == 1
         assert len(await db.tracks_for_theme(themes[0]["id"])) == 2
+    finally:
+        await db.close()
+
+
+async def _build_v5_db(path):
+    """A database migrated only through v5 (before the playlist-dedupe migration
+    that collapses same-song reposts within a theme)."""
+    conn = await aiosqlite.connect(path)
+    conn.row_factory = aiosqlite.Row
+    for i, script in enumerate(MIGRATIONS[:5], start=1):
+        await conn.executescript(script)
+        await conn.execute(f"PRAGMA user_version={i}")
+    await conn.commit()
+    return conn
+
+
+async def _add_track_v5(conn, theme_id, video_id, mesh_ts, sender="alice"):
+    cur = await conn.execute(
+        "INSERT INTO tracks(video_id,url,ingested_at,source,dedupe_hash,theme_id,"
+        "sender,mesh_ts) VALUES(?,?,?,?,?,?,?,?) RETURNING id",
+        (video_id, f"https://y/{video_id}", utcnow(), "mesh",
+         f"{video_id}-{mesh_ts}-{sender}", theme_id, sender, mesh_ts),
+    )
+    row = await cur.fetchone()
+    await conn.commit()
+    return row["id"]
+
+
+async def test_v6_prunes_playlist_dupes(tmp_path):
+    """A song reposted twice into the same theme collapses to one row; the
+    earliest survives, plays follow it, and a distinct song is untouched."""
+    path = tmp_path / "legacy.db"
+    conn = await _build_v5_db(path)
+    theme = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
+    earliest = await _add_track_v5(conn, theme, VID, 1_751_800_000.0, sender="alice")
+    later = await _add_track_v5(conn, theme, VID, 1_751_806_000.0, sender="bob")
+    other = await _add_track_v5(conn, theme, "abcdefghijk", 1_751_803_000.0)
+    # A play recorded against the repost row must survive, repointed.
+    await conn.execute(
+        "INSERT INTO plays(track_id,played_at) VALUES(?,?)", (later, utcnow())
+    )
+    await conn.commit()
+    await conn.close()
+
+    db = Database(path)
+    await db.connect()
+    try:
+        tracks = await db.tracks_for_theme(theme)
+        ids = {t["id"] for t in tracks}
+        assert ids == {earliest, other}  # the later repost is gone
+        play = await db._fetchone("SELECT track_id FROM plays")
+        assert play["track_id"] == earliest  # repointed off the deleted row
+        # The backstop index now refuses a fresh repost outright.
+        assert await db.add_track(**_track_args(theme_id=theme, sender="carol")) is None
     finally:
         await db.close()
 

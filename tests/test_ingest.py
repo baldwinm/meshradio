@@ -112,6 +112,41 @@ async def test_dedupe_across_sources(db, bus):
     assert second == 0  # same 60s bucket -> deduped
 
 
+async def test_repost_same_day_does_not_duplicate_playlist(db, bus):
+    """A song reposted to the same day — by anyone, any time later — is a
+    no-op, so the playlist lists it once."""
+    service = make_service(db, bus)
+    await service.handle_message(
+        sender="alice", text="Theme: rain", ts=NOON_CDT, source="mesh"
+    )
+    first = await service.handle_message(
+        sender="bob", text=f"https://youtu.be/{VID}", ts=NOON_CDT + 600, source="mesh"
+    )
+    # Different sender, hours later (past the 60s dedupe bucket): still a repost
+    # of the same song into the same playlist.
+    second = await service.handle_message(
+        sender="carol", text=f"https://youtu.be/{VID}", ts=NOON_CDT + 7200, source="mesh"
+    )
+    assert first == 1
+    assert second == 0
+    theme = await db.latest_theme_for_date("2026-07-06")
+    assert len(await db.tracks_for_theme(theme["id"])) == 1
+
+
+async def test_same_song_allowed_on_a_different_day(db, bus):
+    """The one-per-playlist rule is per day; the same song can headline again
+    on another day."""
+    service = make_service(db, bus)
+    await service.handle_message(
+        sender="alice", text=f"https://youtu.be/{VID}", ts=NOON_CDT, source="mesh"
+    )
+    next_day = NOON_CDT + 86400
+    second = await service.handle_message(
+        sender="alice", text=f"https://youtu.be/{VID}", ts=next_day, source="mesh"
+    )
+    assert second == 1
+
+
 async def test_theme_message_with_link_ingests_both(db, bus):
     service = make_service(db, bus)
     inserted = await service.handle_message(

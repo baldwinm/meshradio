@@ -50,9 +50,10 @@ junk like `&si=...` is ignored. The song attaches to that day's theme,
 credited to your node name.
 
 **What gets ignored** — chatter without links (`@mentions`, emoji reactions,
-"great pick!") is skipped. Reposting a link someone already shared that day
-creates a second entry credited to you (it's a jukebox, not a democracy);
-the audio itself is only downloaded once.
+"great pick!") is skipped. Reposting a link someone already shared that day is
+a no-op: a song appears only once per day's playlist, so it never shows up
+twice no matter how many people (re)post it. The first post that day wins and
+keeps the credit.
 
 ---
 
