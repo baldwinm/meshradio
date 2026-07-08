@@ -98,7 +98,7 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .about { padding: 1rem 1.1rem; line-height: 1.65; }
 .about p { margin: 0 0 0.8rem; }
 .about strong { color: #cfd3dd; }
-.about-links { margin-top: 1rem; }
+.about-links { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .btn-link {
   display: inline-block;
   padding: 0.4rem 1rem;

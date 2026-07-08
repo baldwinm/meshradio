@@ -52,6 +52,14 @@ async def test_malformed_video_id_rejected(db: Database):
     assert await db.add_track(**_track_args()) is not None
 
 
+async def test_letsmesh_source_accepted(db: Database):
+    """The v5 schema allows the backup analyzer feed's 'letsmesh' source."""
+    theme = await db.create_theme("2026-07-06", "rain")
+    track = await db.add_track(**_track_args(theme_id=theme["id"], source="letsmesh"))
+    assert track is not None
+    assert track["source"] == "letsmesh"
+
+
 async def test_theme_unique_per_day(db: Database):
     theme_a = await db.create_theme("2026-07-06", "rain songs", set_by="alice")
     theme_b = await db.create_theme("2026-07-06", "rain songs", set_by="bob")

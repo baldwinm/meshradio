@@ -13,6 +13,13 @@ base_url = "https://scope.digitaino.com"
 channel = "#music"
 poll_interval_s = 180
 
+[letsmesh]
+# Backup feed (LetsMesh analyzer) — keeps ingest alive when CoreScope is down.
+enabled = true
+base_url = "https://analyzer.letsmesh.net"
+channel = "#music"
+poll_interval_s = 180
+
 [player]
 backend = "embed"
 

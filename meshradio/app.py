@@ -113,6 +113,16 @@ async def run(config, demo: bool = False) -> None:
         services.append(MeshIngest(config.mesh, ingest, bus))
     if config.corescope.enabled:
         services.append(CoreScopePoller(config.corescope, ingest, db, bus))
+    if config.letsmesh.enabled and config.letsmesh.base_url:
+        # Backup channel feed: the LetsMesh analyzer, same CoreScope API. Its
+        # own cursor/status ("letsmesh"); overlapping messages dedupe against
+        # the primary feed and the mesh node, so it's a no-op when CoreScope
+        # is healthy and keeps the archive alive when it isn't.
+        services.append(
+            CoreScopePoller(
+                config.letsmesh, ingest, db, bus, name="letsmesh", source="letsmesh"
+            )
+        )
     if config.relay.push_url and config.relay.token:
         services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
 
