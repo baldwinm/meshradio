@@ -1,4 +1,6 @@
-from meshradio.db import Database, dedupe_hash
+import aiosqlite
+
+from meshradio.db import MIGRATIONS, Database, dedupe_hash, utcnow
 
 VID = "dQw4w9WgXcQ"
 
@@ -54,6 +56,82 @@ async def test_theme_unique_per_day(db: Database):
     theme_a = await db.create_theme("2026-07-06", "rain songs", set_by="alice")
     theme_b = await db.create_theme("2026-07-06", "rain songs", set_by="bob")
     assert theme_a["id"] == theme_b["id"]
+
+
+async def _build_v3_db(path):
+    """A database migrated only through v3 (before the theme-merge migration)."""
+    conn = await aiosqlite.connect(path)
+    conn.row_factory = aiosqlite.Row
+    for i, script in enumerate(MIGRATIONS[:3], start=1):
+        await conn.executescript(script)
+        await conn.execute(f"PRAGMA user_version={i}")
+    await conn.commit()
+    return conn
+
+
+async def _add_theme_v3(conn, date, title, set_by=None):
+    cur = await conn.execute(
+        "INSERT INTO themes(date,title,set_by,created_at) VALUES(?,?,?,?) RETURNING id",
+        (date, title, set_by, utcnow()),
+    )
+    row = await cur.fetchone()
+    await conn.commit()
+    return row["id"]
+
+
+async def _add_track_v3(conn, theme_id, video_id):
+    await conn.execute(
+        "INSERT INTO tracks(video_id,url,ingested_at,source,dedupe_hash,theme_id) "
+        "VALUES(?,?,?,?,?,?)",
+        (video_id, f"https://y/{video_id}", utcnow(), "mesh", video_id, theme_id),
+    )
+    await conn.commit()
+
+
+async def test_v4_merges_duplicate_day_themes(tmp_path):
+    """The morning theme and a later rival for the same day collapse into one
+    locked playlist, and the rival's tracks come along."""
+    path = tmp_path / "legacy.db"
+    conn = await _build_v3_db(path)
+    morning = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
+    rival = await _add_theme_v3(conn, "2026-07-06", "hijack", set_by="mallory")
+    await _add_track_v3(conn, morning, "aaaaaaaaaaa")
+    await _add_track_v3(conn, rival, "bbbbbbbbbbb")
+    await conn.close()
+
+    db = Database(path)
+    await db.connect()
+    try:
+        themes = await db.themes_for_day("2026-07-06")
+        assert len(themes) == 1
+        assert themes[0]["title"] == "rain"
+        assert themes[0]["locked"] == 1
+        assert len(await db.tracks_for_theme(themes[0]["id"])) == 2
+    finally:
+        await db.close()
+
+
+async def test_v4_prefers_real_title_over_placeholder(tmp_path):
+    """When a day split into a placeholder and a real theme, the merge keeps
+    the real title (and locks it), regardless of insert order."""
+    path = tmp_path / "legacy.db"
+    conn = await _build_v3_db(path)
+    placeholder = await _add_theme_v3(conn, "2026-07-06", "Untitled — 2026-07-06")
+    real = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
+    await _add_track_v3(conn, placeholder, "aaaaaaaaaaa")
+    await _add_track_v3(conn, real, "bbbbbbbbbbb")
+    await conn.close()
+
+    db = Database(path)
+    await db.connect()
+    try:
+        themes = await db.themes_for_day("2026-07-06")
+        assert len(themes) == 1
+        assert themes[0]["title"] == "rain"
+        assert themes[0]["locked"] == 1
+        assert len(await db.tracks_for_theme(themes[0]["id"])) == 2
+    finally:
+        await db.close()
 
 
 async def test_latest_theme_for_date(db: Database):

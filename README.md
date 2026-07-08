@@ -28,9 +28,11 @@ Happy Friday Music Meshers! Today's theme is: Friends and friendship.
 theme for today: one hit wonders
 ```
 
-The first theme post of the day (America/Chicago) creates the day's theme;
-repeat posts of the same title are deduplicated. If nobody sets a theme,
-songs file under `Untitled — <date>`.
+The first theme post of the day (America/Chicago) creates the day's theme
+and locks it — later theme posts are ignored, so an accidental (or mischievous)
+second "theme" can't reset it or split the day into two playlists. If songs
+arrive before anyone sets a theme, they file under an `Untitled — <date>`
+placeholder that the day's first real theme post then renames in place.
 
 **Sharing a song** — post any message containing a YouTube or YouTube Music
 link. Supported forms:
@@ -44,8 +46,8 @@ https://youtube.com/shorts/VIDEOID
 
 Extra text around the link is fine ("this one goes hard →
 https://youtu.be/..."), multiple links in one message are fine, and tracking
-junk like `&si=...` is ignored. The song attaches to the most recent theme of
-that day, credited to your node name.
+junk like `&si=...` is ignored. The song attaches to that day's theme,
+credited to your node name.
 
 **What gets ignored** — chatter without links (`@mentions`, emoji reactions,
 "great pick!") is skipped. Reposting a link someone already shared that day

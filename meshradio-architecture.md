@@ -221,7 +221,7 @@ Poll the AUS CoreScope instance every 2–5 min for `#music` channel packets; sa
 
 ### Theme detection
 
-Proposal: adopt a lightweight channel convention — the daily theme post starts with `Theme:` (case-insensitive), e.g. `Theme: songs about rain`. Parser rule: first `Theme:` message of the day (America/Chicago) creates the theme row; every link message attaches to the most recent theme. Fallback when no theme is posted: auto-create `Untitled — <date>`. This costs the channel nothing (it matches how a human would post anyway) and makes parsing deterministic instead of vibes-based.
+Proposal: adopt a lightweight channel convention — the daily theme post starts with `Theme:` (case-insensitive), e.g. `Theme: songs about rain`. Parser rule: the first `Theme:` message of the day (America/Chicago) creates the theme row and **locks** it; every link message attaches to that day's theme. Once locked, a later `Theme:` message is ignored — it can't reset the theme or split the day into a second playlist. Fallback when no theme is posted first: auto-create an unlocked `Untitled — <date>` placeholder; the day's first real `Theme:` message then adopts that placeholder in place (renaming it and locking it) so early links stay in the one playlist. This costs the channel nothing (it matches how a human would post anyway) and makes parsing deterministic instead of vibes-based.
 
 ---
 

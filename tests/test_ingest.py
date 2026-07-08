@@ -51,6 +51,56 @@ async def test_link_without_theme_creates_untitled(db, bus):
     assert themes[0]["title"].startswith("Untitled")
 
 
+async def test_theme_locked_after_first_set(db, bus):
+    """A second theme message the same day is ignored — no reset, no rival."""
+    service = make_service(db, bus)
+    await service.handle_message(
+        sender="alice", text="Theme: rain", ts=NOON_CDT, source="mesh"
+    )
+    await service.handle_message(
+        sender="mallory", text="Theme: something else", ts=NOON_CDT + 3600, source="mesh"
+    )
+    themes = await db.themes_for_day("2026-07-06")
+    assert len(themes) == 1
+    assert themes[0]["title"] == "rain"
+
+
+async def test_link_after_theme_reset_stays_on_locked_theme(db, bus):
+    """Links after a rejected reset attach to the original locked theme."""
+    service = make_service(db, bus)
+    await service.handle_message(
+        sender="alice", text="Theme: rain", ts=NOON_CDT, source="mesh"
+    )
+    await service.handle_message(
+        sender="mallory", text="Theme: hijack", ts=NOON_CDT + 60, source="mesh"
+    )
+    sub = bus.subscribe(TRACK_DISCOVERED)
+    await service.handle_message(
+        sender="bob", text=f"https://youtu.be/{VID}", ts=NOON_CDT + 600, source="mesh"
+    )
+    _, payload = await asyncio.wait_for(sub.get(), 1)
+    theme = await db.theme_by_id(payload["track"]["theme_id"])
+    assert theme["title"] == "rain"
+
+
+async def test_theme_adopts_untitled_placeholder(db, bus):
+    """A theme set after early links renames the placeholder — one playlist,
+    and the early track keeps its place in it."""
+    service = make_service(db, bus)
+    await service.handle_message(
+        sender="bob", text=f"https://youtu.be/{VID}", ts=NOON_CDT, source="corescope"
+    )
+    await service.handle_message(
+        sender="alice", text="Theme: rain", ts=NOON_CDT + 600, source="mesh"
+    )
+    themes = await db.themes_for_day("2026-07-06")
+    assert len(themes) == 1
+    assert themes[0]["title"] == "rain"
+    assert themes[0]["set_by"] == "alice"
+    tracks = await db.tracks_for_theme(themes[0]["id"])
+    assert len(tracks) == 1
+
+
 async def test_dedupe_across_sources(db, bus):
     service = make_service(db, bus)
     text = f"https://youtu.be/{VID}"
