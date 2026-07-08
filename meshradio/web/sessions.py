@@ -93,10 +93,11 @@ class SessionManager:
                     await player.restore(json.loads(saved))
                 except Exception:
                     log.exception("session %s… restore failed; starting fresh", sid[:8])
-            if player.status == "idle" and player.current is None:
-                # Brand-new visitor (or a stale snapshot that restored to
-                # nothing): land with the newest day cued, not an empty player.
-                await self._cue_latest(player)
+            # Land on the newest day with songs — for brand-new visitors and
+            # for returning ones whose saved session is parked (idle or paused)
+            # on a day a newer one has since superseded. An actively-playing
+            # session is left as-is so we never interrupt playback.
+            await self._cue_latest(player)
             player.on_state = lambda: self._dirty.add(sid)
             log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
             if self._maintenance is None:
@@ -105,9 +106,18 @@ class SessionManager:
         return session
 
     async def _cue_latest(self, player: PlayerService) -> None:
+        """Cue the newest day that has songs. Skips a session that's actively
+        playing (don't interrupt it) and is a no-op when the player is already
+        parked on that newest day, so a paused listener keeps their spot."""
+        if player.status == "playing":
+            return
         for day in await self._db.archive_days():  # newest first
-            if day["tracks"] and await player.cue_day(day["date"]):
-                return
+            if not day["tracks"]:
+                continue
+            if player.day == day["date"] and player.current is not None:
+                return  # already on the newest day
+            await player.cue_day(day["date"])
+            return
 
     async def _maintenance_loop(self) -> None:
         ticks = 0

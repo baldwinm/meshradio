@@ -1,6 +1,8 @@
 """Per-visitor sessions (public embed hosting): each browser gets its own
 player, so visitors can't pause, skip, or steal audio from each other."""
 
+import time
+
 import httpx
 
 from meshradio.audio.routing import make_router
@@ -10,6 +12,20 @@ from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 from meshradio.web.server import create_app
 
 from .test_player import make_ready_track
+
+
+async def make_ready_on(db, video_id, date, duration=60):
+    """A ready track filed under a specific archive day."""
+    theme = await db.create_theme(date, f"theme {date}")
+    track = await db.add_track(
+        video_id=video_id,
+        url=f"https://www.youtube.com/watch?v={video_id}",
+        channel="#music", sender="alice", mesh_ts=time.time(),
+        source="mesh", theme_id=theme["id"],
+    )
+    await db.update_track_metadata(track["id"], title=video_id, duration=duration)
+    await db.set_cache_status(track["id"], "ready", f"/cache/{video_id}.opus")
+    return await db.track_by_id(track["id"])
 
 
 def embed_app(db, bus):
@@ -64,6 +80,48 @@ async def test_new_visitor_lands_with_newest_day_cued(db, bus):
         # One press starts the day (toggle_pause on the cued player).
         await client.post("/api/pause")
         assert (await client.get("/api/state")).json()["status"] == "playing"
+
+
+async def test_returning_session_moves_to_a_newer_day(db, bus):
+    """A visitor parked (paused) on the day they first landed should jump to
+    the newest day once a newer one exists, so the landing view stays current
+    instead of showing yesterday's songs."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        state = (await client.get("/api/state")).json()
+        assert state["day"] == "2026-07-06" and state["status"] == "paused"
+        sid = client.cookies["mr_sid"]
+        await app.state.sessions.flush()
+
+    # A newer day arrives; "redeploy" rebuilds the session from its snapshot.
+    await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+    app2 = embed_app(db, bus)
+    async with client_for(app2) as client:
+        client.cookies.set("mr_sid", sid)
+        state = (await client.get("/api/state")).json()
+        assert state["day"] == "2026-07-07"                 # re-cued to newest
+        assert state["current"]["video_id"] == "bbbbbbbbbbb"
+        assert state["status"] == "paused"
+
+
+async def test_returning_playing_session_is_not_interrupted(db, bus):
+    """An actively-playing returning session keeps its day even when a newer
+    one exists — we never yank a listener off what they're playing."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")
+        sid = client.cookies["mr_sid"]
+        await app.state.sessions.flush()
+
+    await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+    app2 = embed_app(db, bus)
+    async with client_for(app2) as client:
+        client.cookies.set("mr_sid", sid)
+        state = (await client.get("/api/state")).json()
+        assert state["status"] == "playing"
+        assert state["day"] == "2026-07-06"                 # untouched
 
 
 async def test_session_cookie_issued_once(db, bus):
