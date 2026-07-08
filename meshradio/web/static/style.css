@@ -774,8 +774,8 @@ html[data-skin="wmp"] .stat-n { color: #7fd0ff; text-shadow: 0 0 8px rgb(90 170 
 html[data-skin="wmp"] .badge { color: #ff9b2f; }
 html[data-skin="wmp"] select option { background: #17335a; color: #eaf3ff; }
 
-/* ---- Vaporwave (secret; unlocked by the Konami code) --------------------- */
-html[data-skin="vaporwave"] {
+/* ---- Alt theme ---------------------------------------------------------- */
+html[data-skin="aurora"] {
   --bg: #1a0b2e;
   --face: #3a1f5c; --face-hi: #ff77e1; --face-lo: #10071f;
   --lcd-bg: #170a2b;
@@ -783,7 +783,7 @@ html[data-skin="vaporwave"] {
   --amber: #ff6ec7; --text: #f2e9ff; --muted: #b98cff; --accent: #ff6ec7;
   --sb-thumb: linear-gradient(#ff6ec7, #7b3ff2);
 }
-html[data-skin="vaporwave"] body {
+html[data-skin="aurora"] body {
   background: linear-gradient(135deg, #2a1155, #7b2f8f, #b1367a, #2a1155);
   background-size: 400% 400%;
   animation: vw-pan 18s ease infinite;
@@ -797,55 +797,55 @@ html[data-skin="vaporwave"] body {
   100% { background-position: 0% 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  html[data-skin="vaporwave"] body { animation: none; }
+  html[data-skin="aurora"] body { animation: none; }
 }
-html[data-skin="vaporwave"] header,
-html[data-skin="vaporwave"] h2,
-html[data-skin="vaporwave"] h3,
-html[data-skin="vaporwave"] .help-titlebar,
-html[data-skin="vaporwave"] .eq-window summary {
+html[data-skin="aurora"] header,
+html[data-skin="aurora"] h2,
+html[data-skin="aurora"] h3,
+html[data-skin="aurora"] .help-titlebar,
+html[data-skin="aurora"] .eq-window summary {
   background: linear-gradient(#3a1f5c, #23123f);
   color: #29ffe3; border: 1px solid #ff77e1; border-radius: 6px;
   text-shadow: 0 0 8px rgb(41 255 227 / 45%);
 }
-html[data-skin="vaporwave"] nav a,
-html[data-skin="vaporwave"] .skin-select,
-html[data-skin="vaporwave"] button,
-html[data-skin="vaporwave"] .btn-link,
-html[data-skin="vaporwave"] select {
+html[data-skin="aurora"] nav a,
+html[data-skin="aurora"] .skin-select,
+html[data-skin="aurora"] button,
+html[data-skin="aurora"] .btn-link,
+html[data-skin="aurora"] select {
   background: linear-gradient(#5a2a8f, #34195f);
   border: 1px solid #ff6ec7; border-radius: 10px;
   color: #f2e9ff; text-shadow: 0 0 6px rgb(255 110 199 / 40%);
 }
-html[data-skin="vaporwave"] nav a:hover,
-html[data-skin="vaporwave"] button:hover,
-html[data-skin="vaporwave"] .btn-link:hover { color: #29ffe3; filter: brightness(1.1); }
-html[data-skin="vaporwave"] .card,
-html[data-skin="vaporwave"] .eq-body,
-html[data-skin="vaporwave"] #yt-window,
-html[data-skin="vaporwave"] dialog#help,
-html[data-skin="vaporwave"] .stat {
+html[data-skin="aurora"] nav a:hover,
+html[data-skin="aurora"] button:hover,
+html[data-skin="aurora"] .btn-link:hover { color: #29ffe3; filter: brightness(1.1); }
+html[data-skin="aurora"] .card,
+html[data-skin="aurora"] .eq-body,
+html[data-skin="aurora"] #yt-window,
+html[data-skin="aurora"] dialog#help,
+html[data-skin="aurora"] .stat {
   background: linear-gradient(#2a1550, #190a30);
   border: 1px solid #7b3ff2; border-radius: 8px;
   box-shadow: 0 0 18px rgb(123 63 242 / 30%);
 }
-html[data-skin="vaporwave"] .queue,
-html[data-skin="vaporwave"] .days,
-html[data-skin="vaporwave"] section.theme ol,
-html[data-skin="vaporwave"] .results,
-html[data-skin="vaporwave"] .board,
-html[data-skin="vaporwave"] .search-form input[type="search"] {
+html[data-skin="aurora"] .queue,
+html[data-skin="aurora"] .days,
+html[data-skin="aurora"] section.theme ol,
+html[data-skin="aurora"] .results,
+html[data-skin="aurora"] .board,
+html[data-skin="aurora"] .search-form input[type="search"] {
   background: #170a2b; border: 1px solid #7b3ff2; color: #29ffe3; border-radius: 4px;
 }
-html[data-skin="vaporwave"] .queue li:hover,
-html[data-skin="vaporwave"] .results li:hover,
-html[data-skin="vaporwave"] section.theme ol li:hover { background: #3a1f5c; }
-html[data-skin="vaporwave"] .stat-n { color: #29ffe3; text-shadow: 0 0 10px rgb(41 255 227 / 50%); }
-html[data-skin="vaporwave"] .badge { color: #ff6ec7; }
-html[data-skin="vaporwave"] select option { background: #23123f; color: #f2e9ff; }
+html[data-skin="aurora"] .queue li:hover,
+html[data-skin="aurora"] .results li:hover,
+html[data-skin="aurora"] section.theme ol li:hover { background: #3a1f5c; }
+html[data-skin="aurora"] .stat-n { color: #29ffe3; text-shadow: 0 0 10px rgb(41 255 227 / 50%); }
+html[data-skin="aurora"] .badge { color: #ff6ec7; }
+html[data-skin="aurora"] select option { background: #23123f; color: #f2e9ff; }
 
-/* -- easter eggs (hidden until triggered; see static/js/easter.js) --------- */
-.egg-toast {
+/* -- transient toast ------------------------------------------------------ */
+.mr-toast {
   position: fixed;
   left: 50%;
   bottom: 1.5rem;
@@ -863,4 +863,4 @@ html[data-skin="vaporwave"] select option { background: #23123f; color: #f2e9ff;
   opacity: 0;
   transition: opacity 0.35s, transform 0.35s;
 }
-.egg-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.mr-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
