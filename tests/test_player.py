@@ -5,7 +5,7 @@ from datetime import datetime
 from meshradio.bus import EventBus, PLAYER_STATE
 from meshradio.config import PlayerConfig
 from meshradio.db import Database
-from meshradio.media.player import NullBackend, PlayerService
+from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 
 
 async def make_ready_track(db: Database, video_id: str, duration: float = 0.05):
@@ -29,6 +29,30 @@ async def make_ready_track(db: Database, video_id: str, duration: float = 0.05):
 def make_player(db, bus, **config_overrides) -> PlayerService:
     config = PlayerConfig(**config_overrides)
     return PlayerService(config, db, bus, backend=NullBackend())
+
+
+def make_embed_player(db, bus, **config_overrides) -> PlayerService:
+    """A player whose backend streams in the browser — the public-hosting mode
+    where tracks are playable by video id without a downloaded file."""
+    config = PlayerConfig(**config_overrides)
+    return PlayerService(config, db, bus, backend=EmbedBackend())
+
+
+async def make_pending_track(db: Database, video_id: str):
+    """A channel track that never got a cached file or metadata — the state
+    most tracks sit in on the datacenter-hosted embed instance (oEmbed
+    throttled). Streamable by id all the same."""
+    theme = await db.create_theme("2026-07-06", "test theme")
+    track = await db.add_track(
+        video_id=video_id,
+        url=f"https://www.youtube.com/watch?v={video_id}",
+        channel="#music",
+        sender="alice",
+        mesh_ts=time.time(),
+        source="mesh",
+        theme_id=theme["id"],
+    )
+    return await db.track_by_id(track["id"])
 
 
 async def test_idle_live_autoplays(db, bus):
@@ -91,6 +115,40 @@ async def test_play_day_tracks_the_day(db, bus):
     await asyncio.sleep(0.1)  # replay ends → back to live, day cleared
     assert player.status == "idle"
     assert player.state()["day"] is None
+
+
+async def test_cue_day_embed_includes_uncached_tracks(db, bus):
+    """Embed hosting streams by video id, so a fresh visitor's cued day is the
+    whole playlist — not just the few tracks that got oEmbed metadata."""
+    ready = await make_ready_track(db, "aaaaaaaaaaa")
+    pending = await make_pending_track(db, "bbbbbbbbbbb")
+    player = make_embed_player(db, bus)
+    assert await player.cue_day("2026-07-06") is True
+    seen = [player.current["id"]] + [t["id"] for t in player.queue]
+    assert set(seen) == {ready["id"], pending["id"]}  # all songs, cached or not
+
+
+async def test_cue_day_appliance_needs_cached_audio(db, bus):
+    """The appliance plays local files, so an uncached track can't be cued —
+    the readiness gate stays for non-embed players."""
+    await make_ready_track(db, "aaaaaaaaaaa")
+    await make_pending_track(db, "bbbbbbbbbbb")
+    player = make_player(db, bus)  # NullBackend -> not embed
+    assert await player.cue_day("2026-07-06") is True
+    seen = [player.current["id"]] + [t["id"] for t in player.queue]
+    assert len(seen) == 1  # only the ready one
+
+
+async def test_cue_day_embed_skips_failed(db, bus):
+    """A row marked 'failed' (deleted/unavailable video) is still dropped in
+    embed mode — the IFrame can't play it."""
+    ready = await make_ready_track(db, "aaaaaaaaaaa")
+    failed = await make_pending_track(db, "bbbbbbbbbbb")
+    await db.set_cache_status(failed["id"], "failed")
+    player = make_embed_player(db, bus)
+    assert await player.cue_day("2026-07-06") is True
+    seen = [player.current["id"]] + [t["id"] for t in player.queue]
+    assert set(seen) == {ready["id"]}
 
 
 async def test_seek_without_track_is_noop(db, bus):
