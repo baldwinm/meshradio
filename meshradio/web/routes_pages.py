@@ -59,6 +59,31 @@ async def archive_day(request: Request, date: str):
     )
 
 
+@router.get("/search", response_class=HTMLResponse)
+async def search(request: Request, q: str = ""):
+    ctx = ctx_of(request)
+    q = q.strip()
+    results = await ctx.db.search_tracks(q) if q else []
+    return ctx.templates.TemplateResponse(
+        request, "search.html", {"q": q, "results": results}
+    )
+
+
+@router.get("/stats", response_class=HTMLResponse)
+async def stats(request: Request):
+    ctx = ctx_of(request)
+    return ctx.templates.TemplateResponse(
+        request,
+        "stats.html",
+        {
+            "totals": await ctx.db.overall_stats(),
+            "top_songs": await ctx.db.top_songs(),
+            "top_sharers": await ctx.db.top_sharers(),
+            "busiest_themes": await ctx.db.busiest_themes(),
+        },
+    )
+
+
 @router.get("/about", response_class=HTMLResponse)
 async def about(request: Request):
     return ctx_of(request).templates.TemplateResponse(

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Search</h2>
+<form class="search-form" method="get" action="/search" role="search">
+  <input type="search" name="q" value="{{ q }}" autofocus
+         placeholder="song, artist, sharer, or theme…" aria-label="Search the archive">
+  <button type="submit">Search</button>
+</form>
+{% if q %}
+  {% if results %}
+  <p class="search-count">{{ results|length }} {{ "match" if results|length == 1 else "matches" }} for “{{ q }}”</p>
+  <ol class="results">
+    {% for tr in results %}
+    <li>
+      <span class="title">{{ tr.title or tr.video_id }}</span>
+      {% if tr.artist %}<span class="artist">— {{ tr.artist }}</span>{% endif %}
+      <span class="sender">({{ tr.sender or "?" }})</span>
+      <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
+      {% if tr.cache_status == "ready" %}
+      <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty">No matches for “{{ q }}”.</p>
+  {% endif %}
+{% else %}
+<p class="empty">Search past songs by title, artist, the member who shared it, or a theme.</p>
+{% endif %}
+{% endblock %}

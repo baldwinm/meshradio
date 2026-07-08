@@ -15,6 +15,7 @@
   --text: #d8dce6;
   --muted: #8b93a5;
   --accent: #00e800;
+  --sb-thumb: linear-gradient(#3c3c4e, #23232f);   /* scrollbar thumb, per-skin */
 }
 
 * { box-sizing: border-box; }
@@ -116,6 +117,73 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
 .day-actions form { margin: 0; }
 .day-actions .btn-link { padding: 0.3rem 0.75rem; font-size: 0.95rem; }
+
+/* -- skin picker ---------------------------------------------------------- */
+.skin-select {
+  font-family: inherit;
+  font-size: 0.7rem;
+  color: var(--muted);
+  background: linear-gradient(#464658, #2a2a36);
+  border: 1px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  padding: 0.1rem 0.2rem;
+  cursor: pointer;
+}
+
+/* -- search --------------------------------------------------------------- */
+.search-form { display: flex; gap: 0.5rem; margin-bottom: 0.9rem; }
+.search-form input[type="search"] {
+  flex: 1; min-width: 0;
+  padding: 0.35rem 0.5rem;
+  background: var(--lcd-bg); color: var(--green);
+  border: 2px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+  font-family: "Lucida Console", "Courier New", monospace; font-size: 0.85rem;
+}
+.search-count { color: var(--muted); font-size: 0.75rem; margin: 0 0 0.5rem; }
+.results {
+  list-style: none; margin: 0; padding: 0.4rem 0.55rem;
+  background: var(--lcd-bg); border: 2px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+  font-family: "Lucida Console", "Courier New", monospace; font-size: 0.82rem;
+  color: var(--green);
+  max-height: min(65vh, 30rem); overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: thin; scrollbar-color: var(--face) var(--lcd-bg);
+}
+.results li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; padding: 0.2rem 0; }
+.results .title { color: var(--green); }
+.results .artist { color: var(--green-dim); }
+.results .sender { color: var(--amber); font-size: 0.75rem; }
+.results .day-link { color: var(--green-dark); margin-left: auto; font-size: 0.72rem; text-decoration: none; }
+.results .day-link:hover { color: var(--amber); }
+.results button { flex: none; }
+
+/* -- stats ---------------------------------------------------------------- */
+.stat-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.2rem; }
+.stat {
+  flex: 1 1 5rem; text-align: center; padding: 0.6rem 0.4rem;
+  background: linear-gradient(#343444, #26262f);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+}
+.stat-n { display: block; font-size: 1.5rem; color: var(--green);
+  font-family: "Lucida Console", "Courier New", monospace; text-shadow: 0 0 6px rgb(0 232 0 / 25%); }
+.stat-l { display: block; font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.board {
+  list-style: none; margin: 0 0 1.4rem; padding: 0.4rem 0.6rem;
+  background: var(--lcd-bg); border: 2px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+  font-family: "Lucida Console", "Courier New", monospace; font-size: 0.82rem;
+  counter-reset: brow;
+}
+.board li { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.22rem 0; white-space: nowrap; }
+.board li::before {
+  counter-increment: brow; content: counter(brow) "."; color: var(--green-dim);
+  min-width: 1.7em; text-align: right; flex: none;
+}
+.board-name { color: var(--green); overflow: hidden; text-overflow: ellipsis; text-decoration: none; }
+a.board-name:hover { color: var(--amber); }
+.board-val { margin-left: auto; color: var(--amber); font-size: 0.75rem; flex: none; }
 
 /* -- window chrome ------------------------------------------------------- */
 
@@ -406,7 +474,7 @@ section.theme ol::-webkit-scrollbar-track {
 .queue::-webkit-scrollbar-thumb,
 .days::-webkit-scrollbar-thumb,
 section.theme ol::-webkit-scrollbar-thumb {
-  background: linear-gradient(#3c3c4e, #23232f);
+  background: var(--sb-thumb);
   border: 2px solid;
   border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
 }
@@ -560,3 +628,141 @@ select {
   input[type="range"]::-webkit-slider-thumb { height: 18px; }
   input[type="range"]::-moz-range-thumb { height: 18px; }
 }
+
+/* ============================================================================
+   SKINS. The default look above is "winamp". Alternate skins re-theme mostly
+   by overriding the CSS variables (which recolors everything var-driven) plus
+   the handful of hardcoded structural gradients. Chosen via <html data-skin>
+   (server-rendered from a cookie; picker in the header).
+   ========================================================================== */
+
+/* ---- iTunes (early-2000s aqua / brushed metal) --------------------------- */
+html[data-skin="itunes"] {
+  --bg: #c9ccd1;
+  --face: #e2e4e8; --face-hi: #ffffff; --face-lo: #9298a3;
+  --lcd-bg: #ffffff;
+  --green: #1b1d21; --green-dim: #666c75; --green-dark: #2a67d6;
+  --amber: #2a67d6; --text: #1b1d21; --muted: #6a707a; --accent: #2a67d6;
+  --sb-thumb: linear-gradient(#f6f8fa, #c4c9d1);
+}
+html[data-skin="itunes"] body {
+  background: linear-gradient(#eceef1, #cdd0d5);
+  color: var(--text);
+  font-family: "Lucida Grande", "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+  accent-color: #2a67d6;
+}
+html[data-skin="itunes"] header {
+  background: linear-gradient(#f6f7f8, #cfd2d7);
+  border: 1px solid #9aa0aa; border-radius: 6px;
+}
+html[data-skin="itunes"] header h1,
+html[data-skin="itunes"] h2,
+html[data-skin="itunes"] h3,
+html[data-skin="itunes"] .help-titlebar,
+html[data-skin="itunes"] .eq-window summary { color: #3a3f47; text-shadow: 0 1px 0 #fff; }
+html[data-skin="itunes"] nav a,
+html[data-skin="itunes"] .skin-select,
+html[data-skin="itunes"] button,
+html[data-skin="itunes"] .btn-link,
+html[data-skin="itunes"] select {
+  background: linear-gradient(#ffffff, #dde5f1);
+  border: 1px solid #9db0cb; border-radius: 12px;
+  color: #26364d; text-shadow: 0 1px 0 rgb(255 255 255 / 70%);
+}
+html[data-skin="itunes"] nav a:hover,
+html[data-skin="itunes"] button:hover,
+html[data-skin="itunes"] .btn-link:hover { color: #2a67d6; filter: brightness(1.02); }
+html[data-skin="itunes"] .card,
+html[data-skin="itunes"] .eq-body,
+html[data-skin="itunes"] #yt-window,
+html[data-skin="itunes"] dialog#help,
+html[data-skin="itunes"] .stat {
+  background: linear-gradient(#ffffff, #eef0f3);
+  border: 1px solid #b7bcc5; border-radius: 6px; box-shadow: none;
+}
+html[data-skin="itunes"] h2,
+html[data-skin="itunes"] h3,
+html[data-skin="itunes"] .help-titlebar {
+  background: linear-gradient(#eef0f3, #d8dbe0);
+  border: 1px solid #b7bcc5; border-radius: 5px;
+}
+html[data-skin="itunes"] .queue,
+html[data-skin="itunes"] .days,
+html[data-skin="itunes"] section.theme ol,
+html[data-skin="itunes"] .results,
+html[data-skin="itunes"] .board,
+html[data-skin="itunes"] .search-form input[type="search"] {
+  background: #ffffff; border: 1px solid #b7bcc5; color: #1b1d21;
+  font-family: "Lucida Grande", Helvetica, Arial, sans-serif;
+}
+/* classic iTunes zebra rows + blue selection */
+html[data-skin="itunes"] .queue li:nth-child(even),
+html[data-skin="itunes"] .results li:nth-child(even),
+html[data-skin="itunes"] .board li:nth-child(even),
+html[data-skin="itunes"] section.theme ol li:nth-child(even) { background: #eef3fb; }
+html[data-skin="itunes"] .queue li:hover,
+html[data-skin="itunes"] .results li:hover,
+html[data-skin="itunes"] section.theme ol li:hover { background: #2a67d6; }
+html[data-skin="itunes"] .queue li:hover *,
+html[data-skin="itunes"] .results li:hover *,
+html[data-skin="itunes"] section.theme ol li:hover * { color: #eaf1ff; }
+html[data-skin="itunes"] .stat-n { color: #2a67d6; text-shadow: none; }
+html[data-skin="itunes"] .badge { color: #2a67d6; }
+
+/* ---- Windows Media Player (early-2000s blue/silver gloss) ---------------- */
+html[data-skin="wmp"] {
+  --bg: #0c1a2e;
+  --face: #2c4c78; --face-hi: #6f97c8; --face-lo: #08111f;
+  --lcd-bg: #0a1c34;
+  --green: #d3e6ff; --green-dim: #7fa8d8; --green-dark: #5f88bf;
+  --amber: #ff9b2f; --text: #dbe8fb; --muted: #89a6cc; --accent: #3b82e0;
+  --sb-thumb: linear-gradient(#6a9ad2, #274d80);
+}
+html[data-skin="wmp"] body {
+  background: radial-gradient(120% 80% at 50% 0%, #24406b 0%, #0a1526 65%);
+  color: var(--text);
+  font-family: Tahoma, "Segoe UI", Verdana, sans-serif;
+  accent-color: #3b82e0;
+}
+html[data-skin="wmp"] header,
+html[data-skin="wmp"] h2,
+html[data-skin="wmp"] h3,
+html[data-skin="wmp"] .help-titlebar,
+html[data-skin="wmp"] .eq-window summary {
+  background: linear-gradient(#4a76b0, #17325a);
+  color: #eaf3ff; border: 1px solid #12305a; border-radius: 7px;
+  text-shadow: 0 1px 2px #06122a;
+}
+html[data-skin="wmp"] nav a,
+html[data-skin="wmp"] .skin-select,
+html[data-skin="wmp"] button,
+html[data-skin="wmp"] .btn-link,
+html[data-skin="wmp"] select {
+  background: linear-gradient(#6a9ad2, #274f86);
+  border: 1px solid #12305a; border-radius: 10px;
+  color: #f2f8ff; text-shadow: 0 1px 2px #08182f;
+}
+html[data-skin="wmp"] nav a:hover,
+html[data-skin="wmp"] button:hover,
+html[data-skin="wmp"] .btn-link:hover { color: #ff9b2f; filter: brightness(1.08); }
+html[data-skin="wmp"] .card,
+html[data-skin="wmp"] .eq-body,
+html[data-skin="wmp"] #yt-window,
+html[data-skin="wmp"] dialog#help,
+html[data-skin="wmp"] .stat {
+  background: linear-gradient(#17335a, #0b1c33);
+  border: 1px solid #315f95; border-radius: 8px;
+}
+html[data-skin="wmp"] .queue,
+html[data-skin="wmp"] .days,
+html[data-skin="wmp"] section.theme ol,
+html[data-skin="wmp"] .results,
+html[data-skin="wmp"] .board,
+html[data-skin="wmp"] .search-form input[type="search"] {
+  background: #0a1c34; border: 1px solid #2b527f; color: #d3e6ff; border-radius: 4px;
+}
+html[data-skin="wmp"] .queue li:hover,
+html[data-skin="wmp"] .results li:hover,
+html[data-skin="wmp"] section.theme ol li:hover { background: #1d3f6d; }
+html[data-skin="wmp"] .stat-n { color: #7fd0ff; text-shadow: 0 0 8px rgb(90 170 255 / 40%); }
+html[data-skin="wmp"] .badge { color: #ff9b2f; }

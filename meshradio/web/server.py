@@ -34,6 +34,12 @@ log = logging.getLogger(__name__)
 
 _HERE = Path(__file__).parent
 
+# Selectable UI skins (see static/style.css). The chosen one rides in a cookie
+# and is rendered onto <html data-skin> server-side, so there's no flash of the
+# default skin on load.
+ALLOWED_SKINS = {"winamp", "itunes", "wmp"}
+DEFAULT_SKIN = "winamp"
+
 
 def _mmss(value) -> str:
     """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations."""
@@ -88,6 +94,12 @@ def create_app(
     # is set exactly when we're in embed mode (see app.py).
     templates.env.globals["embed_mode"] = player_factory is not None
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
+
+    @app.middleware("http")
+    async def skin_from_cookie(request: Request, call_next):
+        skin = request.cookies.get("skin", DEFAULT_SKIN)
+        request.state.skin = skin if skin in ALLOWED_SKINS else DEFAULT_SKIN
+        return await call_next(request)
 
     # Per-visitor sessions (public embed hosting) vs one communal player
     # (the appliance). A cookie names the session; each browser gets its own.

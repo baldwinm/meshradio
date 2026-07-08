@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-skin="{{ request.state.skin }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,8 +13,15 @@
     <nav>
       <a href="/">Now Playing</a>
       <a href="/archive">Archive</a>
+      <a href="/search">Search</a>
+      <a href="/stats">Stats</a>
       <a href="/about">About</a>
     </nav>
+    <select id="skin-select" class="skin-select" aria-label="Skin" title="Change skin">
+      <option value="winamp" {{ 'selected' if request.state.skin == 'winamp' else '' }}>Winamp</option>
+      <option value="itunes" {{ 'selected' if request.state.skin == 'itunes' else '' }}>iTunes</option>
+      <option value="wmp" {{ 'selected' if request.state.skin == 'wmp' else '' }}>Media Player</option>
+    </select>
     <button id="help-btn" class="help-btn" type="button" aria-label="How to use MeshRadio" title="Help">?</button>
   </header>
   <!-- Help dialog. Outside <main> so htmx partial swaps never remove it; the
@@ -70,5 +77,6 @@
   <script src="/static/js/eq.js?v={{ asset_v }}"></script>
   <script src="/static/js/playbar.js?v={{ asset_v }}"></script>
   <script src="/static/js/help.js?v={{ asset_v }}"></script>
+  <script src="/static/js/skin.js?v={{ asset_v }}"></script>
 </body>
 </html>

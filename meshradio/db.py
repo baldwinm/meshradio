@@ -299,6 +299,60 @@ class Database:
             (date,),
         )
 
+    # -- search & stats -------------------------------------------------------
+
+    async def search_tracks(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Channel tracks whose title, artist, sharer, or theme matches
+        ``query`` (case-insensitive substring), newest first."""
+        like = f"%{query.strip()}%"
+        return await self._fetchall(
+            "SELECT tr.*, t.date AS date, t.title AS theme_title "
+            "FROM tracks tr JOIN themes t ON tr.theme_id=t.id "
+            "WHERE tr.source != 'radio' AND ("
+            "  tr.title LIKE ? OR tr.artist LIKE ? OR tr.sender LIKE ? OR t.title LIKE ?) "
+            "ORDER BY tr.mesh_ts DESC LIMIT ?",
+            (like, like, like, like, limit),
+        )
+
+    async def overall_stats(self) -> dict[str, Any]:
+        row = await self._fetchone(
+            "SELECT "
+            " (SELECT COUNT(*) FROM tracks WHERE source!='radio') AS shares,"
+            " (SELECT COUNT(DISTINCT video_id) FROM tracks WHERE source!='radio') AS songs,"
+            " (SELECT COUNT(DISTINCT sender) FROM tracks WHERE source!='radio') AS sharers,"
+            " (SELECT COUNT(*) FROM themes) AS themes,"
+            " (SELECT COUNT(DISTINCT date) FROM themes) AS days"
+        )
+        return row or {}
+
+    async def top_songs(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Most-shared songs (each channel post counts, so reposts add up)."""
+        return await self._fetchall(
+            "SELECT video_id, COALESCE(MAX(title), video_id) AS title, MAX(artist) AS artist,"
+            " COUNT(*) AS shares, COUNT(DISTINCT sender) AS sharers "
+            "FROM tracks WHERE source!='radio' "
+            "GROUP BY video_id ORDER BY shares DESC, sharers DESC, title LIMIT ?",
+            (limit,),
+        )
+
+    async def top_sharers(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Most active members by tracks posted."""
+        return await self._fetchall(
+            "SELECT sender, COUNT(*) AS shares, COUNT(DISTINCT video_id) AS songs "
+            "FROM tracks WHERE source!='radio' AND sender IS NOT NULL AND sender!='' "
+            "GROUP BY sender ORDER BY shares DESC, songs DESC LIMIT ?",
+            (limit,),
+        )
+
+    async def busiest_themes(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Themes that drew the most songs."""
+        return await self._fetchall(
+            "SELECT t.date, t.title, COUNT(tr.id) AS tracks FROM themes t "
+            "JOIN tracks tr ON tr.theme_id=t.id AND tr.source!='radio' "
+            "GROUP BY t.id ORDER BY tracks DESC, t.date DESC LIMIT ?",
+            (limit,),
+        )
+
     # -- relay ----------------------------------------------------------------
 
     async def themes_since(self, ts: str, last_id: int = 0) -> list[dict[str, Any]]:

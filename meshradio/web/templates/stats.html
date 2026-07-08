@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Channel stats</h2>
+<div class="stat-tiles">
+  <div class="stat"><span class="stat-n">{{ totals.songs or 0 }}</span><span class="stat-l">songs</span></div>
+  <div class="stat"><span class="stat-n">{{ totals.shares or 0 }}</span><span class="stat-l">shares</span></div>
+  <div class="stat"><span class="stat-n">{{ totals.sharers or 0 }}</span><span class="stat-l">sharers</span></div>
+  <div class="stat"><span class="stat-n">{{ totals.days or 0 }}</span><span class="stat-l">days</span></div>
+  <div class="stat"><span class="stat-n">{{ totals.themes or 0 }}</span><span class="stat-l">themes</span></div>
+</div>
+
+<h3>Top sharers</h3>
+{% if top_sharers %}
+<ol class="board">
+  {% for s in top_sharers %}
+  <li><span class="board-name">{{ s.sender }}</span>
+    <span class="board-val">{{ s.shares }} shares · {{ s.songs }} songs</span></li>
+  {% endfor %}
+</ol>
+{% else %}<p class="empty">No shares yet.</p>{% endif %}
+
+<h3>Most-shared songs</h3>
+{% if top_songs %}
+<ol class="board">
+  {% for s in top_songs %}
+  <li>
+    <a class="board-name" href="https://youtu.be/{{ s.video_id }}" target="_blank" rel="noopener">
+      {{ s.title }}{% if s.artist %} — {{ s.artist }}{% endif %}</a>
+    <span class="board-val">{{ s.shares }}× · {{ s.sharers }} {{ "person" if s.sharers == 1 else "people" }}</span>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}<p class="empty">No songs yet.</p>{% endif %}
+
+<h3>Busiest themes</h3>
+{% if busiest_themes %}
+<ol class="board">
+  {% for t in busiest_themes %}
+  <li><a class="board-name" href="/archive/{{ t.date }}">{{ t.title }}</a>
+    <span class="board-val">{{ t.tracks }} songs</span></li>
+  {% endfor %}
+</ol>
+{% else %}<p class="empty">No themes yet.</p>{% endif %}
+{% endblock %}
