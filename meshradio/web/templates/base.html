@@ -21,6 +21,9 @@
       <option value="winamp" {{ 'selected' if request.state.skin == 'winamp' else '' }}>Winamp</option>
       <option value="itunes" {{ 'selected' if request.state.skin == 'itunes' else '' }}>iTunes</option>
       <option value="wmp" {{ 'selected' if request.state.skin == 'wmp' else '' }}>Media Player</option>
+      {% if request.state.skin == 'vaporwave' %}
+      <option value="vaporwave" selected>✨ Vaporwave</option>
+      {% endif %}
     </select>
     <button id="help-btn" class="help-btn" type="button" aria-label="How to use MeshRadio" title="Help">?</button>
   </header>

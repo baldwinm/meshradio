@@ -1,5 +1,5 @@
 // Easter eggs — all hidden until found, nothing added to the default UI.
-//   · Konami code (↑↑↓↓←→←→ B A) toggles a rainbow "disco" hue cycle
+//   · Konami code (↑↑↓↓←→←→ B A) unlocks the secret Vaporwave skin
 //   · type "llama" for the classic Winamp homage
 //   · leave the tab and the title winks at you
 //   · a greeting in the devtools console for the curious
@@ -27,12 +27,14 @@
     if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
     const key = e.key.toLowerCase();
 
-    // Konami → toggle disco
+    // Konami → unlock the secret Vaporwave skin
     ki = key === KONAMI[ki] ? ki + 1 : key === KONAMI[0] ? 1 : 0;
     if (ki === KONAMI.length) {
       ki = 0;
-      const on = document.documentElement.classList.toggle("egg-disco");
-      toast(on ? "🌈 disco mode engaged" : "back to normal");
+      if (window.unlockSecretSkin) {
+        window.unlockSecretSkin();
+        toast("✨ secret skin unlocked: Vaporwave");
+      }
     }
 
     // Typing "llama" → Winamp homage

@@ -37,7 +37,9 @@ _HERE = Path(__file__).parent
 # Selectable UI skins (see static/style.css). The chosen one rides in a cookie
 # and is rendered onto <html data-skin> server-side, so there's no flash of the
 # default skin on load.
-ALLOWED_SKINS = {"winamp", "itunes", "wmp"}
+# "vaporwave" is the secret skin unlocked by the Konami code (see easter.js);
+# it's allowed here so the cookie survives a reload once found.
+ALLOWED_SKINS = {"winamp", "itunes", "wmp", "vaporwave"}
 DEFAULT_SKIN = "winamp"
 
 
