@@ -277,6 +277,18 @@ class PlayerService(Service):
 
     # -- playback commands -------------------------------------------------
 
+    def _is_playable(self, track: dict[str, Any]) -> bool:
+        """Can this player start the track? The appliance needs a downloaded
+        file (cache_status 'ready'). Embed hosting streams every video by id in
+        the browser, so a track is playable the moment it's ingested — metadata
+        (oEmbed) is just for display, and its fetch is easily throttled from a
+        datacenter IP. Only rows marked 'failed' (deleted/unavailable) are
+        dropped there, so a whole day's playlist shows up, not just the handful
+        that happened to get metadata."""
+        if self.embed:
+            return track["cache_status"] != "failed"
+        return track["cache_status"] == "ready"
+
     async def play_track(self, track: dict[str, Any]) -> None:
         # Embed mode streams by video id in the browser; no local file needed.
         if not track.get("cache_path") and not self.embed:
@@ -335,7 +347,7 @@ class PlayerService(Service):
 
     async def enqueue_track_id(self, track_id: int, play_if_idle: bool = True) -> None:
         track = await self.db.track_by_id(track_id)
-        if not track or track["cache_status"] != "ready":
+        if not track or not self._is_playable(track):
             return
         if self.status == "idle" and play_if_idle:
             await self.play_track(track)
@@ -345,9 +357,7 @@ class PlayerService(Service):
 
     async def play_day(self, date: str) -> None:
         """Archive mode: replay a whole day's tracks in posted order."""
-        tracks = [
-            t for t in await self.db.tracks_for_day(date) if t["cache_status"] == "ready"
-        ]
+        tracks = [t for t in await self.db.tracks_for_day(date) if self._is_playable(t)]
         if not tracks:
             return
         await self.backend.stop()
@@ -360,9 +370,7 @@ class PlayerService(Service):
         """Load a day like play_day but parked at 0:00 in 'paused' — a new
         visitor lands with music ready instead of an empty player. No play
         row is recorded until something actually plays."""
-        tracks = [
-            t for t in await self.db.tracks_for_day(date) if t["cache_status"] == "ready"
-        ]
+        tracks = [t for t in await self.db.tracks_for_day(date) if self._is_playable(t)]
         if not tracks:
             return False
         self.mode = "archive"
@@ -558,13 +566,13 @@ class PlayerService(Service):
         queue: list[dict[str, Any]] = []
         for track_id in snap.get("queue_track_ids", []):
             track = await self.db.track_by_id(track_id)
-            if track and track["cache_status"] == "ready":
+            if track and self._is_playable(track):
                 queue.append(track)
         self.queue = queue
         current = None
         if snap.get("current_track_id") is not None:
             current = await self.db.track_by_id(snap["current_track_id"])
-            if current and current["cache_status"] != "ready":
+            if current and not self._is_playable(current):
                 current = None
         status = snap.get("status")
         if current and status in ("playing", "paused"):
