@@ -112,6 +112,11 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .btn-link:active { border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo); }
 .about-version { margin-top: 1rem; color: var(--muted); font-size: 0.75rem; }
 
+/* archive day: Play this day + Export to YouTube side by side */
+.day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
+.day-actions form { margin: 0; }
+.day-actions .btn-link { padding: 0.3rem 0.75rem; font-size: 0.95rem; }
+
 /* -- window chrome ------------------------------------------------------- */
 
 .bevel-out { border: 2px solid; border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi); }

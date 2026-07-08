@@ -12,6 +12,23 @@ router = APIRouter()
 
 GITHUB_URL = "https://github.com/baldwinm/meshradio"
 
+# YouTube's anonymous "make a playlist from these ids" endpoint. Undocumented
+# but long-standing; gets unreliable past ~50 ids, so we cap.
+YT_WATCH_VIDEOS = "https://www.youtube.com/watch_videos?video_ids="
+YT_EXPORT_CAP = 50
+
+
+def _yt_export_url(themes: list) -> str:
+    """A YouTube playlist link for a whole day's tracks, in posted order."""
+    ids: list[str] = []
+    for theme in themes:
+        for track in theme["tracks"]:
+            if track["video_id"] and track["video_id"] not in ids:
+                ids.append(track["video_id"])
+    if not ids:
+        return ""
+    return YT_WATCH_VIDEOS + ",".join(ids[:YT_EXPORT_CAP])
+
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -36,7 +53,9 @@ async def archive_day(request: Request, date: str):
     for theme in themes:
         theme["tracks"] = await ctx.db.tracks_for_theme(theme["id"])
     return ctx.templates.TemplateResponse(
-        request, "archive_day.html", {"date": date, "themes": themes}
+        request,
+        "archive_day.html",
+        {"date": date, "themes": themes, "yt_export_url": _yt_export_url(themes)},
     )
 
 

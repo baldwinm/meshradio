@@ -1,9 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>{{ date }}</h2>
-<form method="post" action="/api/play-day/{{ date }}">
-  <button type="submit">▶ Play this day</button>
-</form>
+<div class="day-actions">
+  <form method="post" action="/api/play-day/{{ date }}">
+    <button type="submit">▶ Play this day</button>
+  </form>
+  {% if yt_export_url %}
+  <a class="btn-link" href="{{ yt_export_url }}" target="_blank" rel="noopener"
+     title="Open this day's songs as a YouTube playlist you can save">
+    ⤴ Export to YouTube
+  </a>
+  {% endif %}
+</div>
 {% for theme in themes %}
 <section class="theme">
   <h3>{{ theme.title }} {% if theme.set_by %}<small>set by {{ theme.set_by }}</small>{% endif %}</h3>
