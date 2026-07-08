@@ -62,3 +62,29 @@ function scrubCommit(el) {                             // released: actually see
   if (ytPlayer && embedTrackId !== null) { try { ytPlayer.seekTo(pos, true); } catch (e) {} }
   fetch("/api/seek/" + pos, { method: "POST" });       // keep server clock + remotes in sync
 }
+
+// Volume + mute. Muting is just volume 0 (the server broadcasts it and every
+// speaker applies s.volume), so we remember the pre-mute level to restore.
+// preMuteVol survives the htmx swaps because it lives at module scope.
+let preMuteVol = null;
+
+function setVolume(v) {
+  v = Math.max(0, Math.min(100, Math.round(+v)));
+  const icon = document.getElementById("vol-icon");
+  if (icon) icon.textContent = v > 0 ? "🔊" : "🔇";
+  fetch("/api/volume/" + v, { method: "POST" });
+}
+
+function toggleMute() {
+  const range = document.getElementById("vol-range");
+  const cur = range ? +range.value : 0;
+  if (cur > 0) {                                       // mute: remember & drop to 0
+    preMuteVol = cur;
+    if (range) range.value = 0;
+    setVolume(0);
+  } else {                                             // unmute: restore last level
+    const restore = preMuteVol || 70;
+    if (range) range.value = restore;
+    setVolume(restore);
+  }
+}

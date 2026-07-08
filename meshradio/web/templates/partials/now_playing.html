@@ -50,8 +50,9 @@
                 title="Keep the music going: queue similar songs from a YouTube Mix of this track">📻 Start radio</button>
       {% endif %}
     {% endif %}
-    <span class="vol-icon" title="Volume">🔊</span>
-    <input type="range" min="0" max="100" value="{{ state.volume }}" title="Volume"
-           onchange="fetch('/api/volume/' + this.value, {method: 'POST'})">
+    <span class="vol-icon" id="vol-icon" title="Mute / unmute" onclick="toggleMute()"
+          role="button">{% if state.volume == 0 %}🔇{% else %}🔊{% endif %}</span>
+    <input type="range" id="vol-range" min="0" max="100" value="{{ state.volume }}" title="Volume"
+           onchange="setVolume(this.value)">
   </div>
 </div>

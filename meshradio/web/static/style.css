@@ -542,6 +542,11 @@ select {
   padding: 0.15rem 0.3rem;
   cursor: pointer;
 }
+/* The opened dropdown popup is drawn by the OS: without an explicit option
+   colour, light option text lands on a white popup and vanishes (notably the
+   WMP skin). Set both so each skin's list stays legible. */
+select option { background: #26262f; color: #d8dce6; }
+.vol-icon { cursor: pointer; user-select: none; }
 .eq-bands { display: flex; align-items: flex-end; }
 .eq-band { flex: 1; min-width: 0; }
 .eq-slider-wrap { width: 22px; height: 100px; position: relative; margin: 0 auto; }
@@ -708,6 +713,7 @@ html[data-skin="itunes"] .results li:hover *,
 html[data-skin="itunes"] section.theme ol li:hover * { color: #eaf1ff; }
 html[data-skin="itunes"] .stat-n { color: #2a67d6; text-shadow: none; }
 html[data-skin="itunes"] .badge { color: #2a67d6; }
+html[data-skin="itunes"] select option { background: #ffffff; color: #26364d; }
 
 /* ---- Windows Media Player (early-2000s blue/silver gloss) ---------------- */
 html[data-skin="wmp"] {
@@ -766,3 +772,4 @@ html[data-skin="wmp"] .results li:hover,
 html[data-skin="wmp"] section.theme ol li:hover { background: #1d3f6d; }
 html[data-skin="wmp"] .stat-n { color: #7fd0ff; text-shadow: 0 0 8px rgb(90 170 255 / 40%); }
 html[data-skin="wmp"] .badge { color: #ff9b2f; }
+html[data-skin="wmp"] select option { background: #17335a; color: #eaf3ff; }
