@@ -172,7 +172,7 @@ class Cacher(Service):
         if self.config.ffmpeg_location:
             cmd += ["--ffmpeg-location", self.config.ffmpeg_location]
         cmd += list(self.config.ytdlp_extra_args)
-        cmd.append(url)
+        cmd += ["--", url]   # end of options: never treat the URL as a flag
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

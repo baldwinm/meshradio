@@ -79,7 +79,7 @@ class RadioService:
             "--playlist-end", "25",
             "-J",
             *self.config.ytdlp_extra_args,
-            url,
+            "--", url,   # end of options: never treat the URL as a flag
         ]
         try:
             proc = await asyncio.create_subprocess_exec(

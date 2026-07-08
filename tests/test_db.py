@@ -41,6 +41,15 @@ async def test_repost_by_other_sender_is_new_track(db: Database):
     assert await db.add_track(**_track_args(sender="bob")) is not None
 
 
+async def test_malformed_video_id_rejected(db: Database):
+    """A video id becomes a cache filename and a yt-dlp argument, so anything
+    outside YouTube's 11-char id charset is refused at insert time."""
+    for bad in ("../../etc/passwd", "-oExec", "aaa/bbb/ccc", "short", "a" * 40, ""):
+        assert await db.add_track(**_track_args(video_id=bad)) is None
+    # A well-formed id still inserts.
+    assert await db.add_track(**_track_args()) is not None
+
+
 async def test_theme_unique_per_day(db: Database):
     theme_a = await db.create_theme("2026-07-06", "rain songs", set_by="alice")
     theme_b = await db.create_theme("2026-07-06", "rain songs", set_by="bob")

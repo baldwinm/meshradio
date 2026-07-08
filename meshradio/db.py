@@ -11,11 +11,21 @@ with a UNIQUE constraint; whichever path delivers first wins, the other no-ops.
 from __future__ import annotations
 
 import hashlib
+import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
+
+log = logging.getLogger(__name__)
+
+# A YouTube video id is exactly 11 chars of this set. A video id becomes both a
+# cache filename and a yt-dlp CLI argument, so enforcing the shape here — at the
+# one place tracks are inserted — keeps anything path-traversal- or
+# argument-injection-shaped out of those sinks regardless of the ingest source.
+_VIDEO_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{11}\Z")
 
 MIGRATIONS: list[str] = [
     # v1 — initial schema
@@ -210,7 +220,12 @@ class Database:
         title: str | None = None,
         artist: str | None = None,
     ) -> dict[str, Any] | None:
-        """Insert a track. Returns the new row, or None if deduped."""
+        """Insert a track. Returns the new row, or None if deduped or if the
+        video id is malformed (rejected before it can reach a cache path or a
+        yt-dlp argument)."""
+        if not _VIDEO_ID_RE.match(video_id):
+            log.warning("rejecting track with malformed video_id %r", video_id)
+            return None
         dh = dedupe_hash(channel, sender, video_id, mesh_ts)
         cur = await self.db.execute(
             "INSERT INTO tracks(video_id,url,title,artist,theme_id,sender,mesh_ts,"
