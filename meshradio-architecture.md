@@ -192,7 +192,7 @@ the DB through `db.py` only. The web WebSocket forwards bus payloads verbatim
 themes(  id, date, title, set_by, raw_message, created_at )
 tracks(  id, video_id, url, title, artist, duration,
          theme_id → themes, sender, mesh_ts, ingested_at,
-         source TEXT CHECK(source IN ('mesh','corescope','radio')),
+         source TEXT CHECK(source IN ('mesh','corescope','radio','letsmesh')),
          cache_path, cache_status,          -- pending|ready|failed
          dedupe_hash UNIQUE )
 plays(   id, track_id → tracks, played_at, output, completed )
@@ -218,6 +218,8 @@ Schema is applied through a **versioned migration list** in `db.py`, run in orde
 ### CoreScope path (fallback + backfill)
 
 Poll the AUS CoreScope instance every 2–5 min for `#music` channel packets; same parser, same dedupe. Serves two jobs: catching messages the local node missed (RF is RF), and **backfilling history on first boot** so a freshly built kit radio arrives with the channel's archive already populated. *(Exact endpoint/auth to be confirmed against the AUS instance's API — isolate in `corescope.py` so it's a one-file adaptation if the API shifts.)*
+
+**Backup feed (LetsMesh analyzer).** The LetsMesh MeshCore analyzer (`analyzer.letsmesh.net`) exposes the same CoreScope-family API by the same author, so it runs through the identical poller as a second instance — its own `name` (scoping the poll cursor and the `ingest.status` field) and `source='letsmesh'` for provenance. It exists so ingestion survives an AUS CoreScope outage. Because `dedupe_hash` keys on channel+sender+video+minute rather than on source, a message both feeds observe inserts exactly once; running the backup alongside a healthy CoreScope is a no-op, and when CoreScope is down it silently keeps the archive current. Enabled by default, `enabled = false` in `[letsmesh]` turns it off.
 
 ### Theme detection
 
@@ -325,7 +327,7 @@ Software impact is confined to `audio/routing.py`: on the full build, speaker/ja
 ### Ingestion & behavior tradeoffs (be honest in the docs)
 
 - **Latency:** live tracks arrive on the CoreScope poll cadence (2–5 min) instead of at RF speed. For a radio, this is nearly invisible — but it's not "watch the message land."
-- **Dependency:** the Lite is down if the AUS CoreScope instance is down. The full build keeps working off RF.
+- **Dependency:** the Lite relies on polled feeds rather than RF, so it's only as live as they are — but ingestion now falls back from the AUS CoreScope instance to the LetsMesh analyzer, so a single CoreScope outage no longer takes it dark. The full build additionally keeps working off RF.
 - **Not a mesh client:** the Lite doesn't strengthen the mesh or work off-grid; it's a listener to the channel's reflection, not the channel. Worth a plain-language note in the kit docs so builders pick with eyes open.
 - **Upgrade path:** add a Heltec V3 later via a powered micro-USB hub (or migrate the SD card to a Pi 4) — the `hardware_profile` setting and the disabled `ingest/mesh.py` module make this a config change, not a rebuild.
 

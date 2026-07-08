@@ -5,7 +5,7 @@ CoreScope instance, 2026-07): GET /api/channels/{hash}/messages ->
 import httpx
 import pytest
 
-from meshradio.config import CoreScopeConfig
+from meshradio.config import CoreScopeConfig, LetsMeshConfig
 from meshradio.db import Database
 from meshradio.ingest.corescope import CURSOR_KEY, CoreScopePoller
 from meshradio.ingest.service import IngestService
@@ -123,3 +123,40 @@ async def test_malformed_message_skipped(db, poller_factory):
     ]
     poller, client = poller_factory(messages)
     assert await poller.poll_once(client) == 1
+
+
+def _letsmesh_poller(db, bus, messages):
+    """A backup poller pointed at the LetsMesh analyzer (same API shape)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"messages": messages, "total": len(messages)})
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://analyzer.letsmesh.net"
+    )
+    config = LetsMeshConfig(channel="#music")
+    service = IngestService(db, bus, channel="#music")
+    poller = CoreScopePoller(config, service, db, bus, name="letsmesh", source="letsmesh")
+    return poller, client
+
+
+async def test_letsmesh_backup_stamps_source_and_own_cursor(db, bus):
+    """The backup feed keeps a separate cursor and stamps 'letsmesh' so tracks
+    are distinguishable and it never clobbers the primary CoreScope cursor."""
+    msg = corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")
+    poller, client = _letsmesh_poller(db, bus, [msg])
+    assert await poller.poll_once(client) == 1
+    assert await db.get_setting("letsmesh.cursor") == "2026-07-06T17:00:05Z"
+    assert await db.get_setting(CURSOR_KEY) is None  # primary cursor untouched
+    tracks = await db.tracks_for_day("2026-07-06")
+    assert tracks[0]["source"] == "letsmesh"
+
+
+async def test_letsmesh_backup_dedupes_against_corescope(db, bus, poller_factory):
+    """A message both feeds see inserts once — the backup no-ops CoreScope's
+    overlap instead of doubling every track."""
+    msg = corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")
+    primary, pclient = poller_factory([msg])
+    assert await primary.poll_once(pclient) == 1
+    backup, bclient = _letsmesh_poller(db, bus, [msg])
+    assert await backup.poll_once(bclient) == 0
+    assert len(await db.tracks_for_day("2026-07-06")) == 1
