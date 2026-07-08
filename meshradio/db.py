@@ -3,9 +3,12 @@
 Schema (architecture §5): themes / tracks / plays / settings. All access from
 other modules goes through the Database class — no raw SQL elsewhere.
 
-Dedupe: mesh and CoreScope ingestion coexist via
-``dedupe_hash = sha256(channel + sender + video_id + mesh_ts bucketed to 60s)``
-with a UNIQUE constraint; whichever path delivers first wins, the other no-ops.
+Dedupe happens on two levels. ``dedupe_hash = sha256(channel + sender +
+video_id + mesh_ts bucketed to 60s)`` (UNIQUE) lets mesh and CoreScope
+ingestion coexist: the *same message* arriving via both paths inserts once.
+Separately, a song is allowed only once per playlist — a repost of a video
+already under a theme is dropped so it can't list twice (enforced in
+``add_track`` and backed by a partial unique index on ``(theme_id, video_id)``).
 """
 
 from __future__ import annotations
@@ -176,6 +179,47 @@ MIGRATIONS: list[str] = [
     CREATE INDEX idx_tracks_status ON tracks(cache_status);
     PRAGMA foreign_keys=ON;
     """,
+    # v6 — one song per playlist. A song reposted to the same day used to
+    # insert a second track row (dedupe_hash only catches the *same message*
+    # arriving twice), so the playlist listed it twice. add_track now refuses a
+    # video already present under a theme; collapse the dupes that already
+    # accumulated and add a partial unique index as a hard backstop.
+    #
+    # Keep the earliest row per (theme_id, video_id) — by mesh time, then id —
+    # repoint any plays at the survivor, then drop the rest. Radio filler
+    # (theme_id NULL) is left alone: a mix legitimately echoes videos across
+    # days, and SQLite's partial index treats NULL theme rows as distinct.
+    """
+    CREATE TEMP TABLE _keep AS
+        SELECT t.id AS keep_id, t.theme_id AS theme_id, t.video_id AS video_id
+        FROM tracks t
+        WHERE t.theme_id IS NOT NULL
+          AND t.id = (
+              SELECT t2.id FROM tracks t2
+              WHERE t2.theme_id = t.theme_id AND t2.video_id = t.video_id
+              ORDER BY t2.mesh_ts, t2.id LIMIT 1
+          );
+
+    UPDATE plays SET track_id = (
+        SELECT k.keep_id FROM tracks d JOIN _keep k
+          ON k.theme_id = d.theme_id AND k.video_id = d.video_id
+        WHERE d.id = plays.track_id
+    )
+    WHERE track_id IN (
+        SELECT d.id FROM tracks d JOIN _keep k
+          ON k.theme_id = d.theme_id AND k.video_id = d.video_id
+        WHERE d.id <> k.keep_id
+    );
+
+    DELETE FROM tracks
+    WHERE theme_id IS NOT NULL
+      AND id NOT IN (SELECT keep_id FROM _keep);
+
+    DROP TABLE _keep;
+
+    CREATE UNIQUE INDEX idx_tracks_theme_video
+        ON tracks(theme_id, video_id) WHERE theme_id IS NOT NULL;
+    """,
 ]
 
 
@@ -318,19 +362,41 @@ class Database:
     ) -> dict[str, Any] | None:
         """Insert a track. Returns the new row, or None if deduped or if the
         video id is malformed (rejected before it can reach a cache path or a
-        yt-dlp argument)."""
+        yt-dlp argument).
+
+        Two dedupe rules apply. ``dedupe_hash`` (channel+sender+video+60s
+        bucket) collapses the *same message* arriving via more than one ingest
+        path. Separately, a song is only allowed once per playlist: if this
+        video already sits under ``theme_id``, the repost is dropped so it
+        can't show up twice in the day's list — no matter who reposts it or how
+        much later. Radio filler (``theme_id`` NULL) is exempt; a mix can echo
+        the same video across days."""
         if not _VIDEO_ID_RE.match(video_id):
             log.warning("rejecting track with malformed video_id %r", video_id)
             return None
+        if theme_id is not None:
+            already = await self._fetchone(
+                "SELECT 1 FROM tracks WHERE theme_id=? AND video_id=? LIMIT 1",
+                (theme_id, video_id),
+            )
+            if already is not None:
+                return None
         dh = dedupe_hash(channel, sender, video_id, mesh_ts)
-        cur = await self.db.execute(
-            "INSERT INTO tracks(video_id,url,title,artist,theme_id,sender,mesh_ts,"
-            "ingested_at,source,dedupe_hash) VALUES(?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(dedupe_hash) DO NOTHING RETURNING id",
-            (video_id, url, title, artist, theme_id, sender, mesh_ts, utcnow(), source, dh),
-        )
-        inserted = await cur.fetchone()
-        await self.db.commit()
+        try:
+            cur = await self.db.execute(
+                "INSERT INTO tracks(video_id,url,title,artist,theme_id,sender,mesh_ts,"
+                "ingested_at,source,dedupe_hash) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(dedupe_hash) DO NOTHING RETURNING id",
+                (video_id, url, title, artist, theme_id, sender, mesh_ts, utcnow(), source, dh),
+            )
+            inserted = await cur.fetchone()
+            await self.db.commit()
+        except aiosqlite.IntegrityError:
+            # The one-song-per-playlist index caught a repost that slipped past
+            # the check above (two ingest paths racing between our SELECT and
+            # INSERT). The playlist already has it; treat as a dedupe no-op.
+            await self.db.rollback()
+            return None
         if inserted is None:
             return None
         return await self.track_by_id(inserted["id"])
@@ -437,7 +503,8 @@ class Database:
         return row or {}
 
     async def top_songs(self, limit: int = 15) -> list[dict[str, Any]]:
-        """Most-shared songs (each channel post counts, so reposts add up)."""
+        """Most-shared songs. A song is one row per day it was posted (same-day
+        reposts collapse into one), so this counts distinct days it charted."""
         return await self._fetchall(
             "SELECT video_id, COALESCE(MAX(title), video_id) AS title, MAX(artist) AS artist,"
             " COUNT(*) AS shares, COUNT(DISTINCT sender) AS sharers "
