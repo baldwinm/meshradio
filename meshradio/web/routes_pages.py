@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from .. import __version__
-from .context import ctx_of, yt_export_url
+from .context import archive_calendar, ctx_of, yt_export_url
 
 router = APIRouter()
 
@@ -26,7 +26,9 @@ async def index(request: Request):
 async def archive(request: Request):
     ctx = ctx_of(request)
     days = await ctx.db.archive_days()
-    return ctx.templates.TemplateResponse(request, "archive.html", {"days": days})
+    return ctx.templates.TemplateResponse(
+        request, "archive.html", {"months": archive_calendar(days)}
+    )
 
 
 @router.get("/archive/{date}", response_class=HTMLResponse)

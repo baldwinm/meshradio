@@ -516,6 +516,73 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 .days a { color: var(--green); text-decoration: none; }
 .days a:hover { color: var(--amber); }
 
+/* -- archive calendar (days grouped by month) ------------------------------ */
+
+.cal-month { margin: 1rem 0 1.4rem; }
+
+/* month header, styled like the day-banner LCD strip */
+.cal-head {
+  display: flex;
+  gap: 0.7rem;
+  align-items: baseline;
+  background: var(--lcd-bg);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  font-family: "Lucida Console", "Courier New", monospace;
+  padding: 0.3rem 0.55rem;
+  margin-bottom: 0.4rem;
+}
+.cal-head .cal-label { color: var(--amber); font-size: 0.85rem; font-weight: 700; }
+.cal-head .badge { margin-left: auto; }
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  padding: 0.45rem;
+  background: var(--lcd-bg);
+  border: 2px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+  font-family: "Lucida Console", "Courier New", monospace;
+}
+.cal-wd {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  padding-bottom: 0.15rem;
+}
+
+.cal-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  font-size: 0.78rem;
+}
+.cal-blank { visibility: hidden; }
+
+/* a day with no archived songs — just a dim number, not a link */
+.cal-empty .cal-num { color: var(--muted); opacity: 0.55; }
+
+/* a day you can open — beveled LCD tile, count under the date */
+a.cal-day {
+  color: var(--green);
+  text-decoration: none;
+  border: 1px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  background: rgb(255 255 255 / 3%);
+}
+a.cal-day:hover { color: var(--amber); background: rgb(255 255 255 / 8%); }
+a.cal-day .cal-num { font-weight: 700; }
+a.cal-day .cal-count {
+  color: var(--amber);
+  font-size: 0.6rem;
+  line-height: 1;
+}
+a.cal-day:hover .cal-count { color: var(--green); }
+
 section.theme { margin-top: 0; }
 section.theme ol button { margin-left: auto; flex: none; }
 

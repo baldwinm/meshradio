@@ -1,15 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Archive</h2>
-{% if days %}
-<ul class="days">
-  {% for day in days %}
-  <li>
-    <a href="/archive/{{ day.date }}">{{ day.date }}</a>
-    <span class="badge">{{ day.tracks }} tracks</span>
-  </li>
-  {% endfor %}
-</ul>
+{% if months %}
+{% for month in months %}
+<section class="cal-month">
+  <div class="cal-head">
+    <span class="cal-label">{{ month.label }}</span>
+    <span class="badge">{{ month.tracks }} tracks · {{ month.active_days }} days</span>
+  </div>
+  <div class="cal-grid" role="grid" aria-label="{{ month.label }}">
+    {% for wd in ["S", "M", "T", "W", "T", "F", "S"] %}
+    <span class="cal-wd" role="columnheader">{{ wd }}</span>
+    {% endfor %}
+    {% for week in month.weeks %}
+      {% for cell in week %}
+        {% if cell is none %}
+        <span class="cal-cell cal-blank"></span>
+        {% elif cell.active %}
+        <a class="cal-cell cal-day" href="/archive/{{ cell.date }}"
+           title="{{ cell.date }} — {{ cell.tracks }} tracks">
+          <span class="cal-num">{{ cell.day }}</span>
+          <span class="cal-count">{{ cell.tracks }}</span>
+        </a>
+        {% else %}
+        <span class="cal-cell cal-day cal-empty"><span class="cal-num">{{ cell.day }}</span></span>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
 {% else %}
 <p class="empty">No history yet — the archive fills in as links land on the channel.</p>
 {% endif %}

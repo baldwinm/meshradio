@@ -8,8 +8,9 @@ single player otherwise.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import Request
@@ -24,6 +25,64 @@ from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry
 # but long-standing; gets unreliable past ~50 ids, so we cap.
 YT_WATCH_VIDEOS = "https://www.youtube.com/watch_videos?video_ids="
 YT_EXPORT_CAP = 50
+
+
+# Sunday-first weekday order for the archive calendar (Austin/US convention).
+WEEKDAY_HEADERS = ["S", "M", "T", "W", "T", "F", "S"]
+_CAL = calendar.Calendar(firstweekday=6)  # 6 == Sunday
+
+
+def archive_calendar(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group flat archive days into per-month calendar grids, newest first.
+
+    ``days`` is :meth:`Database.archive_days` output — dicts with ``date``
+    (``YYYY-MM-DD``), ``themes`` and ``tracks`` counts. Each returned month is::
+
+        {"year": 2026, "month": 7, "label": "July 2026",
+         "tracks": <total tracks>, "active_days": <days with an archive>,
+         "weeks": [[cell | None, ... x7], ...]}
+
+    A cell is ``None`` for padding (blank days from adjacent months) or
+    ``{"day", "date", "tracks", "active"}`` for a day in this month; ``active``
+    is true when that day has an archived entry to link to.
+    """
+    by_date = {d["date"]: d for d in days}
+    months: dict[tuple[int, int], list[dict[str, Any]]] = {}
+    for d in days:
+        year, month, _ = d["date"].split("-")
+        months.setdefault((int(year), int(month)), []).append(d)
+
+    out: list[dict[str, Any]] = []
+    for year, month in sorted(months, reverse=True):
+        weeks: list[list[dict[str, Any] | None]] = []
+        for week in _CAL.monthdatescalendar(year, month):
+            row: list[dict[str, Any] | None] = []
+            for dt in week:
+                if dt.month != month:
+                    row.append(None)  # spill from an adjacent month
+                    continue
+                info = by_date.get(dt.isoformat())
+                row.append(
+                    {
+                        "day": dt.day,
+                        "date": dt.isoformat(),
+                        "tracks": info["tracks"] if info else 0,
+                        "active": info is not None,
+                    }
+                )
+            weeks.append(row)
+        entries = months[(year, month)]
+        out.append(
+            {
+                "year": year,
+                "month": month,
+                "label": date(year, month, 1).strftime("%B %Y"),
+                "tracks": sum(e["tracks"] for e in entries),
+                "active_days": len(entries),
+                "weeks": weeks,
+            }
+        )
+    return out
 
 
 def yt_export_url(tracks: list[dict[str, Any]]) -> str:
