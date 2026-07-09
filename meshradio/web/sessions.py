@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from ..bus import EventBus
+from ..bus import EventBus, TRACK_READY
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
@@ -70,12 +70,16 @@ class SessionManager:
     seconds after changes, and a returning cookie (or the whole process,
     after a deploy) restores from there — reaping only evicts from memory."""
 
-    def __init__(self, factory: Callable[[EventBus], PlayerService], db: Database):
+    def __init__(self, factory: Callable[[EventBus], PlayerService], db: Database,
+                 bus: EventBus | None = None, tz=timezone.utc):
         self._factory = factory
         self._db = db
+        self._bus = bus                # shared bus: TRACK_READY announces new songs
+        self._tz = tz                  # channel-local day boundary
         self._sessions: dict[str, Session] = {}
         self._dirty: set[str] = set()
         self._maintenance: asyncio.Task | None = None
+        self._newest_day: str | None = None
 
     def count(self) -> int:
         return len(self._sessions)
@@ -102,6 +106,8 @@ class SessionManager:
             log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
             if self._maintenance is None:
                 self._maintenance = supervise("session-maintenance", self._maintenance_loop)
+                if self._bus is not None:
+                    supervise("session-day-watch", self._watch_new_days)
         elif session.player.status != "playing" and session.player.day != self._local_today(session.player):
             # Existing (warm) session that isn't mid-playback and is parked on an
             # older day: roll it forward if a newer day has appeared since (e.g.
@@ -125,6 +131,40 @@ class SessionManager:
                 return  # already on the newest day — keep their position
             await player.cue_day(day["date"])
             return
+
+    async def _watch_new_days(self) -> None:
+        """When the first song of a newer day lands, roll idle open tabs onto it
+        with no reload — the re-cue publishes state to each session's sockets."""
+        sub = self._bus.subscribe(TRACK_READY)
+        try:
+            async for _topic, payload in sub:
+                await self._advance_idle_to_newest(payload.get("track"))
+        finally:
+            sub.close()
+
+    async def _advance_idle_to_newest(self, track: dict | None) -> None:
+        if not track or track.get("source") == "radio" or not self._sessions:
+            return
+        # Cheap pre-filter: only a track on a day newer than the one we already
+        # track can change anything, so backfill of old days never hits the DB.
+        mesh_ts = track.get("mesh_ts")
+        if mesh_ts and self._newest_day is not None:
+            day = datetime.fromtimestamp(float(mesh_ts), timezone.utc).astimezone(
+                self._tz).date().isoformat()
+            if day <= self._newest_day:
+                return
+        newest = next((d["date"] for d in await self._db.archive_days() if d["tracks"]), None)
+        if newest is None or newest == self._newest_day:
+            return
+        self._newest_day = newest
+        moved = 0
+        for session in list(self._sessions.values()):
+            player = session.player
+            if player.status != "playing" and player.day != newest:
+                await self._cue_latest(player)   # publishes state → tab updates live
+                moved += 1
+        if moved:
+            log.info("new day %s: rolled %d idle session(s) forward", newest, moved)
 
     async def _maintenance_loop(self) -> None:
         ticks = 0

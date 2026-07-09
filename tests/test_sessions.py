@@ -1,6 +1,7 @@
 """Per-visitor sessions (public embed hosting): each browser gets its own
 player, so visitors can't pause, skip, or steal audio from each other."""
 
+import asyncio
 import time
 
 import httpx
@@ -151,6 +152,48 @@ async def test_warm_playing_session_is_not_interrupted(db, bus):
         state = (await client.get("/api/state")).json()
         assert state["status"] == "playing"
         assert state["day"] == "2026-07-06"                    # left alone
+
+
+async def test_new_day_song_rolls_idle_tabs_forward(db, bus):
+    """Auto safety net: when a newer day's first song lands on the shared bus,
+    an idle in-memory session advances on its own — no request or reload drives
+    it — so an open tab updates live."""
+    from meshradio.bus import TRACK_READY
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        assert (await client.get("/api/state")).json()["day"] == "2026-07-06"
+        sid = client.cookies["mr_sid"]
+        await asyncio.sleep(0.05)   # let the day-watcher subscribe to the bus
+
+        track = await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+        bus.publish(TRACK_READY, {"track": track})
+
+        player = app.state.sessions._sessions[sid].player
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if player.day == "2026-07-07":
+                break
+        assert player.day == "2026-07-07"                 # advanced with no request
+        assert player.current["video_id"] == "bbbbbbbbbbb"
+        assert player.status == "paused"
+
+
+async def test_playing_session_not_moved_by_new_day_song(db, bus):
+    """The watcher never yanks a session that's actively playing."""
+    from meshradio.bus import TRACK_READY
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")     # warm + playing
+        sid = client.cookies["mr_sid"]
+        await asyncio.sleep(0.05)
+        track = await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+        bus.publish(TRACK_READY, {"track": track})
+        await asyncio.sleep(0.1)
+        player = app.state.sessions._sessions[sid].player
+        assert player.day == "2026-07-06"                 # left playing where it was
+        assert player.status == "playing"
 
 
 async def test_session_cookie_issued_once(db, bus):

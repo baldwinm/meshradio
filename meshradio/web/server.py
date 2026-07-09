@@ -105,7 +105,7 @@ def create_app(
 
     # Per-visitor sessions (public embed hosting) vs one communal player
     # (the appliance). A cookie names the session; each browser gets its own.
-    sessions = SessionManager(player_factory, db) if player_factory else None
+    sessions = SessionManager(player_factory, db, bus, player.tz) if player_factory else None
 
     if sessions is not None:
         @app.middleware("http")
