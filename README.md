@@ -182,11 +182,16 @@ token    = "…"                                 # must match its MESHRADIO_INGE
 interval_s = 120
 ```
 
-The relay is self-healing: ephemeral hosting wipes its disk on every deploy
-and spin-down, so each push also reports the receiver's track count. When it
-drops below the home node's, the pusher resets its cursor and re-backfills the
-whole channel automatically. `/healthz` exposes liveness plus ingest freshness
-(Render's health check hits it; a stale `ingest_age_s` means the relay stopped).
+The relay is self-healing: each push reports the receiver's track count, and
+when it drops below the home node's (e.g. a fresh host with an empty disk) the
+pusher resets its cursor and re-backfills the whole channel automatically. This
+is now a safety net rather than the norm — the hosted instance keeps its
+archive on a persistent disk (`disk:` in [render.yaml](render.yaml)), so
+history survives deploys, restarts, and spin-downs on its own, and the host
+also polls CoreScope and the LetsMesh analyzer directly. The relay going down
+no longer costs the archive. `/healthz` exposes liveness plus ingest freshness
+(Render's health check hits it; a stale `ingest_age_s` means every ingest
+source stopped).
 
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
 for the unit and install/update commands.

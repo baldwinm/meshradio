@@ -1,19 +1,27 @@
 # Render blueprint: deploys meshradio in embed mode (no audio downloads;
 # each visitor's browser streams from YouTube via the IFrame player).
-# The disk is ephemeral on the free plan, so the archive DB rebuilds from
-# CoreScope polling after each deploy; attach a persistent disk at
-# /opt/render/project/src/data if you want history to survive deploys.
+# The archive DB lives on a persistent disk (below) so history survives
+# deploys, restarts, and idle spin-downs — it no longer depends on the Pi
+# relay re-pushing (or CoreScope re-ingesting) after a wipe. Render only
+# allows persistent disks on paid instances, hence the Starter plan.
 services:
   - type: web
     name: meshradio
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: pip install .
     startCommand: meshradio --config meshradio.render.toml --port $PORT
     # Deploy only after GitHub Actions is green; restart if /healthz stops
     # answering (dashboard equivalents: Settings -> Build & Deploy).
     autoDeployTrigger: checksPass
     healthCheckPath: /healthz
+    # Persists ./data (meshradio.db lives here; data_dir in
+    # meshradio.render.toml resolves to /opt/render/project/src/data). Small:
+    # embed mode stores only metadata rows, never downloaded audio.
+    disk:
+      name: meshradio-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
