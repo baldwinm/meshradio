@@ -196,6 +196,35 @@ async def test_playing_session_not_moved_by_new_day_song(db, bus):
         assert player.status == "playing"
 
 
+def test_yt_export_url_dedupes_and_caps():
+    from meshradio.web.context import yt_export_url, YT_EXPORT_CAP
+    assert yt_export_url([]) == ""
+    url = yt_export_url([{"video_id": "a"}, {"video_id": "b"}, {"video_id": "a"}])
+    assert url.endswith("video_ids=a,b")                       # order kept, deduped
+    many = yt_export_url([{"video_id": f"v{i:09d}"} for i in range(80)])
+    assert many.count(",") == YT_EXPORT_CAP - 1                # capped
+
+
+async def test_home_export_is_persistent_and_full_day(db, bus):
+    """The now-playing export covers the whole day's songs and stays put once
+    playback starts — not just what's still queued."""
+    import re
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    await make_ready_on(db, "bbbbbbbbbbb", "2026-07-06")
+    app = embed_app(db, bus)
+
+    def export_ids(html):
+        m = re.search(r"watch_videos\?video_ids=([A-Za-z0-9_,-]+)", html)
+        return set(m.group(1).split(",")) if m else set()
+
+    async with client_for(app) as client:
+        before = export_ids((await client.get("/")).text)
+        assert before == {"aaaaaaaaaaa", "bbbbbbbbbbb"}         # all songs, before playing
+        await client.post("/api/play-day/2026-07-06")          # start playing
+        after = export_ids((await client.get("/")).text)
+        assert after == {"aaaaaaaaaaa", "bbbbbbbbbbb"}          # still all songs
+
+
 async def test_session_cookie_issued_once(db, bus):
     app = embed_app(db, bus)
     async with client_for(app) as client:

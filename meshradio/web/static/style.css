@@ -416,6 +416,13 @@ button.subtle:hover { color: var(--amber); }
 }
 .day-banner .day-date { color: var(--green); font-size: 0.8rem; }
 .day-banner .day-theme { color: var(--amber); font-size: 0.85rem; font-weight: 700; }
+.day-banner .day-export {
+  margin-left: auto;               /* flush right, always visible */
+  align-self: center;
+  flex: none;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.72rem;
+}
 
 /* -- playlist (queue + archive) --------------------------------------------- */
 

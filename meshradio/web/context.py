@@ -20,6 +20,22 @@ from ..db import Database
 from ..media.player import PlayerService
 from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry
 
+# YouTube's anonymous "make a playlist from these ids" endpoint. Undocumented
+# but long-standing; gets unreliable past ~50 ids, so we cap.
+YT_WATCH_VIDEOS = "https://www.youtube.com/watch_videos?video_ids="
+YT_EXPORT_CAP = 50
+
+
+def yt_export_url(tracks: list[dict[str, Any]]) -> str:
+    """A YouTube playlist link for a day's tracks, in posted order, deduped.
+    Empty string when the day has no songs."""
+    ids: list[str] = []
+    for track in tracks:
+        vid = track.get("video_id")
+        if vid and vid not in ids:
+            ids.append(vid)
+    return YT_WATCH_VIDEOS + ",".join(ids[:YT_EXPORT_CAP]) if ids else ""
+
 
 @dataclass
 class WebContext:
@@ -56,6 +72,9 @@ class WebContext:
             "theme_titles": [t["title"] for t in themes],
             "prev_day": max((d for d in days if d < day), default=None),
             "next_day": min((d for d in days if day < d <= today), default=None),
+            # Whole-day export, independent of playback — every song for the day,
+            # not just what's still queued.
+            "yt_export_url": yt_export_url(await self.db.tracks_for_day(day)),
         }
 
     # -- partial renderers (shared by page and API routes) -------------------

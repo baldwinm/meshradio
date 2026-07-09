@@ -3,6 +3,10 @@
   <span class="day-date">{{ day }}</span>
   {% if theme_titles %}<span class="day-theme">{{ theme_titles|join(" · ") }}</span>{% endif %}
   {% if day == today %}<span class="badge">today</span>{% endif %}
+  {% if yt_export_url %}
+  <a class="btn-link day-export" href="{{ yt_export_url }}" target="_blank" rel="noopener"
+     title="Open this whole day's songs as a YouTube playlist">⤴ Export</a>
+  {% endif %}
 </div>
 <div class="card now-playing">
   {% if current %}
