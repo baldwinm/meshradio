@@ -255,7 +255,9 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
   flex-wrap: wrap;
 }
 .art {
-  width: 116px;
+  width: 168px;
+  align-self: stretch;          /* match the readout height — no letterbox gap */
+  object-fit: cover;
   border: 2px solid;
   border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
 }
@@ -264,6 +266,7 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
 .now-playing .meta {
   flex: 1;
   min-width: 0;
+  min-height: 92px;             /* floor for the readout (and the art beside it) */
   background: var(--lcd-bg);
   border: 2px solid;
   border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
@@ -288,7 +291,14 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
 @keyframes marquee { to { transform: translateX(-50%); } }
 
 /* spectrum analyzer canvas (drawn from real FFT data in the speaker tab) */
-.vis-canvas { display: block; margin-top: 0.2rem; image-rendering: pixelated; }
+.vis-canvas {
+  display: block;
+  flex: none;                   /* don't let the flex column stretch it tall */
+  width: 100%;
+  height: 30px;
+  margin-top: 0.2rem;
+  image-rendering: pixelated;
+}
 
 /* -- play bar (position slider + LCD times) -------------------------------- */
 
@@ -611,7 +621,7 @@ select option { background: #26262f; color: #d8dce6; }
 @media (max-width: 520px) {
   body { padding: 0 0.5rem 3rem; font-size: 12px; }
   header { flex-wrap: wrap; gap: 0.5rem; }
-  .art { width: 64px; }
+  .art { width: 112px; }
   .meta .title { font-size: 0.85rem; }
   .controls { flex-wrap: wrap; }
   .controls input[type="range"][title="Volume"] { flex: 1; min-width: 80px; }
