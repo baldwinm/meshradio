@@ -93,29 +93,36 @@ class SessionManager:
                     await player.restore(json.loads(saved))
                 except Exception:
                     log.exception("session %s… restore failed; starting fresh", sid[:8])
-            # Land on the newest day with songs — for brand-new visitors and
-            # for returning ones whose saved session is parked (idle or paused)
-            # on a day a newer one has since superseded. An actively-playing
-            # session is left as-is so we never interrupt playback.
+            # A brand-new or freshly-restored session lands on the newest day.
+            # A restored "playing" flag is stale — a page load never has audio
+            # going yet in embed mode — so we advance it too; only a warm,
+            # actually-playing session (handled below) is spared.
             await self._cue_latest(player)
             player.on_state = lambda: self._dirty.add(sid)
             log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
             if self._maintenance is None:
                 self._maintenance = supervise("session-maintenance", self._maintenance_loop)
+        elif session.player.status != "playing" and session.player.day != self._local_today(session.player):
+            # Existing (warm) session that isn't mid-playback and is parked on an
+            # older day: roll it forward if a newer day has appeared since (e.g.
+            # overnight), so "Now Playing" always shows the latest day. A session
+            # that's genuinely playing is left alone — never yank a listener.
+            await self._cue_latest(session.player)
         session.last_seen = time.monotonic()
         return session
 
+    def _local_today(self, player: PlayerService) -> str:
+        return datetime.now(player.tz).date().isoformat()
+
     async def _cue_latest(self, player: PlayerService) -> None:
-        """Cue the newest day that has songs. Skips a session that's actively
-        playing (don't interrupt it) and is a no-op when the player is already
-        parked on that newest day, so a paused listener keeps their spot."""
-        if player.status == "playing":
-            return
+        """Cue the newest day that has songs. A no-op when the player is already
+        parked on that newest day, so a listener keeps their spot; otherwise it
+        moves them forward. Callers decide whether to spare active playback."""
         for day in await self._db.archive_days():  # newest first
             if not day["tracks"]:
                 continue
             if player.day == day["date"] and player.current is not None:
-                return  # already on the newest day
+                return  # already on the newest day — keep their position
             await player.cue_day(day["date"])
             return
 

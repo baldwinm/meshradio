@@ -105,13 +105,14 @@ async def test_returning_session_moves_to_a_newer_day(db, bus):
         assert state["status"] == "paused"
 
 
-async def test_returning_playing_session_is_not_interrupted(db, bus):
-    """An actively-playing returning session keeps its day even when a newer
-    one exists — we never yank a listener off what they're playing."""
+async def test_returning_session_advances_even_if_snapshot_was_playing(db, bus):
+    """A returning session is rebuilt from a snapshot (reap/redeploy), so its
+    "playing" flag is stale — no audio is actually going on a fresh load. It
+    must still land on the newest day, parked, rather than showing yesterday."""
     await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
     app = embed_app(db, bus)
     async with client_for(app) as client:
-        await client.post("/api/play-day/2026-07-06")
+        await client.post("/api/play-day/2026-07-06")       # snapshot says playing
         sid = client.cookies["mr_sid"]
         await app.state.sessions.flush()
 
@@ -120,8 +121,36 @@ async def test_returning_playing_session_is_not_interrupted(db, bus):
     async with client_for(app2) as client:
         client.cookies.set("mr_sid", sid)
         state = (await client.get("/api/state")).json()
+        assert state["day"] == "2026-07-07"                 # rolled forward
+        assert state["current"]["video_id"] == "bbbbbbbbbbb"
+        assert state["status"] == "paused"
+
+
+async def test_warm_idle_session_advances_when_a_new_day_arrives(db, bus):
+    """The morning case: a live (in-memory) session parked on yesterday rolls
+    forward to today on the next page load, without a restart."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        state = (await client.get("/api/state")).json()
+        assert state["day"] == "2026-07-06" and state["status"] == "paused"
+
+        await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")   # new day, same session
+        state = (await client.get("/api/state")).json()
+        assert state["day"] == "2026-07-07"                    # rolled forward live
+        assert state["current"]["video_id"] == "bbbbbbbbbbb"
+
+
+async def test_warm_playing_session_is_not_interrupted(db, bus):
+    """A genuinely-playing live session is never yanked to a newer day."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")          # warm + playing
+        await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+        state = (await client.get("/api/state")).json()
         assert state["status"] == "playing"
-        assert state["day"] == "2026-07-06"                 # untouched
+        assert state["day"] == "2026-07-06"                    # left alone
 
 
 async def test_session_cookie_issued_once(db, bus):
