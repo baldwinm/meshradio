@@ -451,15 +451,14 @@ ol, ul { line-height: 1.75; }
 .queue .artist, section.theme .artist { color: var(--green-dim); overflow: hidden; text-overflow: ellipsis; }
 .queue .sender, section.theme .sender { color: var(--green-dark); font-size: 0.75rem; }
 .queue .duration { color: var(--green); }
-.row-actions {
-  margin-left: 0.2rem;
-  flex: none;
-  display: inline-flex;
-  gap: 0.25rem;
-  justify-content: flex-end;
-  min-width: 3.6rem;   /* rows without the play-next button still line up */
-}
+.queue li { cursor: pointer; }
 .queue li:hover { background: #101810; }
+.queue li.selected {
+  background: #1c2a1c;
+  outline: 1px solid var(--green-dim);
+  outline-offset: -1px;
+}
+.queue li.selected::before { color: var(--green); }
 
 /* Winamp playlist window: the queue and archive lists scroll inside their own
    LCD box (unlimited rows) instead of stretching the page. max-height only
@@ -498,9 +497,13 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 /* right-hand group, Winamp order: sender/badge, then duration flush right */
 .queue li .badge, .queue li .sender { order: 7; margin-left: auto; flex: none; }
 .queue li .duration { order: 8; }
-.queue li .row-actions { order: 9; }
 
-.queue-actions { margin: 0.35rem 0; display: flex; justify-content: flex-end; }
+.queue-actions {
+  margin: 0.35rem 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
 
 .days li { display: flex; gap: 0.6rem; align-items: center; }
 .days a { color: var(--green); text-decoration: none; }
@@ -638,7 +641,6 @@ select option { background: #26262f; color: #d8dce6; }
 @media (pointer: coarse) {
   button { padding: 0.45rem 0.9rem; }
   button.subtle { padding: 0.25rem 0.6rem; }
-  .row-actions { min-width: 4.6rem; }   /* two touch-sized buttons */
   input[type="range"] { height: 20px; }
   input[type="range"]::-webkit-slider-thumb { height: 18px; }
   input[type="range"]::-moz-range-thumb { height: 18px; }
@@ -716,11 +718,14 @@ html[data-skin="itunes"] .results li:nth-child(even),
 html[data-skin="itunes"] .board li:nth-child(even),
 html[data-skin="itunes"] section.theme ol li:nth-child(even) { background: #eef3fb; }
 html[data-skin="itunes"] .queue li:hover,
+html[data-skin="itunes"] .queue li.selected,
 html[data-skin="itunes"] .results li:hover,
 html[data-skin="itunes"] section.theme ol li:hover { background: #2a67d6; }
 html[data-skin="itunes"] .queue li:hover *,
+html[data-skin="itunes"] .queue li.selected *,
 html[data-skin="itunes"] .results li:hover *,
 html[data-skin="itunes"] section.theme ol li:hover * { color: #eaf1ff; }
+html[data-skin="itunes"] .queue li.selected { outline: 1px solid #eaf1ff; outline-offset: -1px; }
 html[data-skin="itunes"] .stat-n { color: #2a67d6; text-shadow: none; }
 html[data-skin="itunes"] .badge { color: #2a67d6; }
 html[data-skin="itunes"] select option { background: #ffffff; color: #26364d; }
@@ -778,8 +783,10 @@ html[data-skin="wmp"] .search-form input[type="search"] {
   background: #0a1c34; border: 1px solid #2b527f; color: #d3e6ff; border-radius: 4px;
 }
 html[data-skin="wmp"] .queue li:hover,
+html[data-skin="wmp"] .queue li.selected,
 html[data-skin="wmp"] .results li:hover,
 html[data-skin="wmp"] section.theme ol li:hover { background: #1d3f6d; }
+html[data-skin="wmp"] .queue li.selected { outline: 1px solid #6db3ff; outline-offset: -1px; }
 html[data-skin="wmp"] .stat-n { color: #7fd0ff; text-shadow: 0 0 8px rgb(90 170 255 / 40%); }
 html[data-skin="wmp"] .badge { color: #ff9b2f; }
 html[data-skin="wmp"] select option { background: #17335a; color: #eaf3ff; }
@@ -848,8 +855,10 @@ html[data-skin="aurora"] .search-form input[type="search"] {
   background: #170a2b; border: 1px solid #7b3ff2; color: #29ffe3; border-radius: 4px;
 }
 html[data-skin="aurora"] .queue li:hover,
+html[data-skin="aurora"] .queue li.selected,
 html[data-skin="aurora"] .results li:hover,
 html[data-skin="aurora"] section.theme ol li:hover { background: #3a1f5c; }
+html[data-skin="aurora"] .queue li.selected { outline: 1px solid #ff6ec7; outline-offset: -1px; }
 html[data-skin="aurora"] .stat-n { color: #29ffe3; text-shadow: 0 0 10px rgb(41 255 227 / 50%); }
 html[data-skin="aurora"] .badge { color: #ff6ec7; }
 html[data-skin="aurora"] select option { background: #23123f; color: #f2e9ff; }

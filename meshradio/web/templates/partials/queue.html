@@ -1,11 +1,16 @@
 {% if state.queue %}
 <div class="queue-actions">
+  <button class="subtle q-sel-action q-play-next" type="button" hidden
+          title="Play the selected track next">⤒ Play next</button>
+  <button class="subtle q-sel-action q-remove" type="button" hidden
+          title="Remove the selected track from the queue">✕ Remove</button>
   <button class="subtle" hx-post="/api/queue/clear" hx-target="#queue"
           title="Empty the queue (also stops radio mode)">Clear queue</button>
 </div>
 <ol class="queue">
   {% for track in state.queue %}
-  <li>
+  <li data-track-id="{{ track.id }}" tabindex="0" role="button" aria-pressed="false"
+      title="Select this track">
     <span class="title">{{ track.title or track.video_id }}</span>
     {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
     {% if track.duration %}<span class="duration">{{ track.duration|mmss }}</span>{% endif %}
@@ -14,14 +19,6 @@
     {% else %}
       <span class="sender">({{ track.sender or "?" }})</span>
     {% endif %}
-    <span class="row-actions">
-      {% if not loop.first %}
-      <button class="subtle" title="Play next"
-              hx-post="/api/queue/top/{{ loop.index0 }}/{{ track.id }}" hx-target="#queue">⤒</button>
-      {% endif %}
-      <button class="subtle" title="Remove from queue"
-              hx-post="/api/queue/remove/{{ loop.index0 }}/{{ track.id }}" hx-target="#queue">✕</button>
-    </span>
   </li>
   {% endfor %}
 </ol>
