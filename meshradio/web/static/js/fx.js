@@ -15,7 +15,9 @@
   }
 
   var q = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
-  var i = 0, s = "", w = u("bGxhbWE=");
+  var i = 0, s = "";
+  var w1 = u("bGxhbWE=");   // llama
+  var w2 = u("ZGlzY28=");   // disco toggle
 
   document.addEventListener("keydown", function (e) {
     var a = document.activeElement;
@@ -30,8 +32,13 @@
 
     var k = e.key;
     if (k && k.length === 1) {
-      s = (s + k.toLowerCase()).slice(-w.length);
-      if (s === w) n(u("8J+mmSBJdCByZWFsbHkgd2hpcHMgdGhlIGxsYW1hJ3MgYXNzIQ=="));
+      s = (s + k.toLowerCase()).slice(-16);
+      if (s.slice(-w1.length) === w1) {
+        n(u("8J+mmSBJdCByZWFsbHkgd2hpcHMgdGhlIGxsYW1hJ3MgYXNzIQ=="));
+      } else if (s.slice(-w2.length) === w2) {
+        document.documentElement.classList.toggle("mr-fx1");
+        n(u("8J+SgyBEYW5jaW5nIFF1ZWVuIOKAlCBkaXNjbyE="));
+      }
     }
   });
 
