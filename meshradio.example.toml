@@ -59,3 +59,13 @@ ingest_token = ""               # non-empty enables POST /api/ingest (relay rece
 push_url = ""                   # e.g. "https://meshradio.example.org"
 token = ""                      # must match the receiver's ingest token
 interval_s = 120
+
+[backup]
+# Rotating snapshots of the archive DB — a rollback point for a bad migration
+# or corruption. A snapshot is taken before migrations on each boot and then
+# every interval_s; the newest `keep` are retained. For whole-disk loss, pair
+# this with host-level disk snapshots or point `dir` at separate storage.
+enabled = true
+interval_s = 21600              # 6h between periodic snapshots
+keep = 8                        # snapshots to retain (older pruned)
+dir = ""                        # snapshot dir; empty = <data_dir>/backups

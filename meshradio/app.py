@@ -16,6 +16,8 @@ import uvicorn
 
 from . import __version__
 from .audio.routing import make_router
+from . import backup as backup_mod
+from .backup import BackupService
 from .bus import EventBus
 from .config import load_config
 from .db import Database
@@ -83,6 +85,19 @@ async def run(config, demo: bool = False) -> None:
     log.info("meshradio %s starting (profile=%s)", __version__, config.hardware_profile)
     config.data_dir.mkdir(parents=True, exist_ok=True)
 
+    # Snapshot the DB before migrations touch it — a bad migration then has a
+    # clean pre-migration copy to roll back to. No-op on first boot (no DB yet).
+    if config.backup.enabled and config.db_path.exists():
+        try:
+            dest = await asyncio.to_thread(
+                backup_mod.snapshot, config.db_path, config.backup_dir, "premigrate"
+            )
+            if dest is not None:
+                log.info("pre-migration db backup -> %s", dest.name)
+                await asyncio.to_thread(backup_mod.rotate, config.backup_dir, config.backup.keep)
+        except Exception:
+            log.exception("pre-migration backup failed (continuing)")
+
     db = Database(config.db_path)
     await db.connect()
     bus = EventBus()
@@ -125,6 +140,8 @@ async def run(config, demo: bool = False) -> None:
         )
     if config.relay.push_url and config.relay.token:
         services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
+    if config.backup.enabled:
+        services.append(BackupService(config.backup, config.db_path, config.backup_dir))
 
     for service in services:
         service.start()

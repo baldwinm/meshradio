@@ -87,6 +87,16 @@ class RelayConfig:
 
 
 @dataclass
+class BackupConfig:
+    """Rotating on-disk snapshots of the archive DB — a rollback point for a
+    bad migration or corruption, independent of any host-level disk snapshot."""
+    enabled: bool = True
+    interval_s: int = 21600        # 6h between periodic snapshots
+    keep: int = 8                  # how many snapshots to retain (older pruned)
+    dir: str = ""                  # snapshot dir; empty = <data_dir>/backups
+
+
+@dataclass
 class Config:
     hardware_profile: str = "dev"
     data_dir: Path = field(default_factory=lambda: Path("./data"))
@@ -97,6 +107,7 @@ class Config:
     cache: CacheConfig = field(default_factory=CacheConfig)
     web: WebConfig = field(default_factory=WebConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
+    backup: BackupConfig = field(default_factory=BackupConfig)
 
     @property
     def db_path(self) -> Path:
@@ -105,6 +116,10 @@ class Config:
     @property
     def cache_dir(self) -> Path:
         return self.data_dir / "cache"
+
+    @property
+    def backup_dir(self) -> Path:
+        return Path(self.backup.dir) if self.backup.dir else self.data_dir / "backups"
 
 
 def _apply(section_obj, data: dict) -> None:
@@ -128,7 +143,7 @@ def load_config(path: str | Path | None = None) -> Config:
         if candidate and Path(candidate).is_file():
             with open(candidate, "rb") as f:
                 raw = tomllib.load(f)
-            for section in ("mesh", "corescope", "letsmesh", "player", "cache", "web", "relay"):
+            for section in ("mesh", "corescope", "letsmesh", "player", "cache", "web", "relay", "backup"):
                 if section in raw:
                     _apply(getattr(cfg, section), raw[section])
             _apply(cfg, {k: v for k, v in raw.items() if not isinstance(v, dict)})

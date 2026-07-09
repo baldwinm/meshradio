@@ -193,6 +193,12 @@ no longer costs the archive. `/healthz` exposes liveness plus ingest freshness
 (Render's health check hits it; a stale `ingest_age_s` means every ingest
 source stopped).
 
+The DB is also snapshotted on a rotation (`[backup]` config): a copy is taken
+before migrations on each boot and every few hours after, so a bad migration or
+corruption has a clean rollback point. Snapshots default to `<data_dir>/backups`;
+for whole-disk loss, pair them with host-level disk snapshots (Render takes
+automatic daily ones on paid instances) or set `[backup].dir` to separate storage.
+
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
 for the unit and install/update commands.
 
