@@ -41,6 +41,9 @@
       </button>
     {% endif %}
     <button hx-post="/api/skip" hx-target="#now-playing" title="Next track">⏭</button>
+    {% if state.queue|length > 1 %}
+    <button hx-post="/api/queue/shuffle" hx-target="#queue" title="Shuffle the queue">🔀</button>
+    {% endif %}
     {% if not state.embed %}
       {% if state.radio %}
         <button class="radio-btn active" hx-post="/api/radio/stop" hx-target="#now-playing"

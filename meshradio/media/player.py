@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from datetime import datetime
 from typing import Any, Callable
@@ -412,6 +413,13 @@ class PlayerService(Service):
         self.queue.insert(0, self.queue.pop(index))
         self.publish_state()
         return True
+
+    async def shuffle_queue(self) -> None:
+        """Randomly reorder the upcoming queue. The current track keeps
+        playing untouched; only what comes next is shuffled."""
+        if len(self.queue) > 1:
+            random.shuffle(self.queue)
+            self.publish_state()
 
     async def clear_queue(self) -> None:
         """Empty the queue. Also switches radio off — otherwise it would

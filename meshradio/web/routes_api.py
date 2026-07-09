@@ -53,6 +53,13 @@ async def api_queue_clear(request: Request):
     return await ctx.render_queue(request)
 
 
+@router.post("/api/queue/shuffle")
+async def api_queue_shuffle(request: Request):
+    ctx = ctx_of(request)
+    await (await ctx.get_player(request)).shuffle_queue()
+    return await ctx.render_queue(request)
+
+
 @router.post("/api/queue/remove/{index}/{track_id}")
 async def api_queue_remove(request: Request, index: int, track_id: int):
     ctx = ctx_of(request)

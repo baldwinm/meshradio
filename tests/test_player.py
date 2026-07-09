@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 from datetime import datetime
 
@@ -149,6 +150,28 @@ async def test_cue_day_embed_skips_failed(db, bus):
     assert await player.cue_day("2026-07-06") is True
     seen = [player.current["id"]] + [t["id"] for t in player.queue]
     assert set(seen) == {ready["id"]}
+
+
+async def test_shuffle_queue_reorders_but_keeps_tracks(db, bus):
+    player = make_player(db, bus)
+    tracks = [await make_ready_track(db, "vid%08d" % i) for i in range(8)]
+    player.current = tracks[0]
+    player.queue = tracks[1:]
+    original = [t["id"] for t in player.queue]
+    random.seed(1234)
+    await player.shuffle_queue()
+    shuffled = [t["id"] for t in player.queue]
+    assert sorted(shuffled) == sorted(original)   # same songs, nothing lost
+    assert shuffled != original                   # actually reordered
+    assert player.current["id"] == tracks[0]["id"]  # now-playing untouched
+
+
+async def test_shuffle_queue_noop_when_too_small(db, bus):
+    player = make_player(db, bus)
+    t = await make_ready_track(db, "aaaaaaaaaaa")
+    player.queue = [t]
+    await player.shuffle_queue()
+    assert [x["id"] for x in player.queue] == [t["id"]]
 
 
 async def test_seek_without_track_is_noop(db, bus):
