@@ -39,9 +39,14 @@
          <strong>#music</strong> channel, against that day's theme.</p>
       <ul class="help-list">
         <li><strong>Now Playing</strong> — <span class="k">▶ / ⏸</span> play or pause,
-          <span class="k">⏭</span> skip, drag the bar to scrub, and set the volume slider.</li>
-        <li><strong>Queue</strong> — songs up next list below. <span class="k">⤒</span> plays one next,
-          <span class="k">✕</span> removes it, <span class="k">Clear queue</span> empties it.</li>
+          <span class="k">⏭</span> skip, <span class="k">🔀</span> shuffle what's up next,
+          drag the bar to scrub, and set the volume. It always shows the latest day,
+          rolling forward on its own when a new day's songs start arriving.</li>
+        <li><strong>Queue</strong> — the songs up next. Select a track to reveal
+          <span class="k">⤒ Play next</span> and <span class="k">✕ Remove</span> in the bar up top;
+          <span class="k">Clear queue</span> empties it.</li>
+        <li><strong>Export</strong> — <span class="k">⤴ Export</span> opens the whole day's songs
+          as a YouTube playlist (every song for the day, whatever's playing).</li>
         <li><strong>Archive</strong> — browse past days and themes. <span class="k">▶ Play this day</span>
           replays a whole day; <span class="k">+ queue</span> adds a single track.</li>
         {% if embed_mode %}

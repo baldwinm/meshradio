@@ -115,12 +115,18 @@ set. Secrets (the relay/ingest token) belong in the environment
 Open **http://localhost:8080** (or `http://<pi-address>:8080` /
 `http://meshradio.local` from another device on your LAN).
 
-- **Now Playing** — art, title, artist, and which mesh member shared it.
-  Controls: **▶/⏸ play-pause**, **⏭ next track**, **volume slider**, and the
-  **📻 Start radio** button (below). The queue is listed underneath — **⤒**
-  bumps a track to play next, **✕** removes it, and **Clear queue** empties
-  it (the current song keeps playing; radio mode switches off so it doesn't
-  refill what you just cleared).
+- **Now Playing** — art, title, artist, and which mesh member shared it, for
+  the latest day. It rolls forward to a new day on its own as that day's first
+  songs arrive — an open tab updates with no reload. Controls: **▶/⏸
+  play-pause**, **⏭ next track**, **🔀 shuffle** what's up next, **volume
+  slider**, and (web mode) **📻 Start radio**. **⤴ Export** opens the whole
+  day's songs as a YouTube playlist — every song for the day, whatever's
+  playing.
+- **Queue** — listed under the player. Select a track to reveal **⤒ Play next**
+  and **✕ Remove** in the bar up top; **Clear queue** empties it (the current
+  song keeps playing; radio mode switches off so it doesn't refill what you
+  just cleared). A song already on the day's playlist won't be added twice, no
+  matter how many people repost it.
 - **Live jukebox** — when a new song lands on the channel it auto-plays if
   the radio is idle, or joins the queue if something's already playing. A new
   arrival never interrupts the current song.

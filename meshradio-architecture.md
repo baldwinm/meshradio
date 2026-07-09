@@ -200,12 +200,16 @@ settings(    key, value )
 web_sessions(sid, updated_at, state )       -- per-visitor snapshot, JSON
 ```
 
-`dedupe_hash = sha256("channel|sender|video_id|mesh_ts_bucketed_to_60s")` — this is what lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the message first wins, the other no-ops on the UNIQUE constraint (an `ON CONFLICT … DO NOTHING` insert).
+Two dedupe rules apply. `dedupe_hash = sha256("channel|sender|video_id|mesh_ts_bucketed_to_60s")` lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the *same message* first wins, the other no-ops on the UNIQUE constraint (an `ON CONFLICT … DO NOTHING` insert). Separately, a **partial unique index on `(theme_id, video_id)`** enforces *one song per day's playlist* — a repost of a video already under a theme is refused, so a song never shows up twice no matter who reposts it. Radio filler (`theme_id` NULL) is exempt; the index's partial `WHERE theme_id IS NOT NULL` lets a Mix echo the same video across days.
 
-Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Two migrations landed after the initial design:
+Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Migrations that landed after the initial design:
 
-- **`radio` track source** — YouTube-Mix continuations queued by radio mode (§7). They keep `theme_id` NULL so they never appear in the channel archive. SQLite can't `ALTER` a `CHECK`, so the migration rebuilds the `tracks` table.
-- **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives an ephemeral-host redeploy. Keyed by the session cookie.
+- **`radio` / `letsmesh` track sources** — Mix continuations (§7) and the backup analyzer feed. SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table.
+- **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives a redeploy (which restarts the process). Keyed by the session cookie.
+- **Lockable themes** — a `locked` flag plus a backfill that merges same-day rival themes into one playlist, so a stray second "Theme:" post can't split a day.
+- **One-song-per-playlist** — collapses any duplicate `(theme_id, video_id)` rows that predate the rule (keeping the earliest, repointing plays) and adds the partial unique index above.
+
+Rotating snapshots of the whole DB (`backup.py`, §14) provide a rollback point for a bad migration or corruption, separate from disk durability.
 
 ---
 
@@ -270,6 +274,8 @@ Five screens, encoder-navigated: **Now Playing** (theme / title–artist marquee
 ### Web UI
 
 FastAPI serving Jinja2 + htmx at `http://meshradio.local` (avahi mDNS). WebSocket pushes player state. Pages: Now Playing (with album art fetched via oEmbed thumbnail — the one place the web UI beats the OLED), Archive browser, queue management, output/volume, settings (WiFi, channel key, quiet hours, CoreScope URL), and a log viewer. htmx keeps the frontend a set of HTML templates — no npm, no build step, which is a kit-maintainability feature, not a limitation.
+
+Now Playing always tracks the latest day: the server re-cues an idle session onto the newest day both on each visit and live (a bus watcher rolls open tabs forward the moment a new day's first song lands), while never interrupting one that's actively playing. Playback controls include **🔀 shuffle** (reorders the upcoming queue) and a persistent **⤴ Export** that opens the whole day's songs as an anonymous YouTube `watch_videos` playlist regardless of what's playing. The queue uses a selection model: click a track, then **⤒ Play next** / **✕ Remove** act on it from the bar beside **Clear queue** — one tap-target set instead of per-row buttons, which reads better on touch. The spectrum-analyzer canvas renders only where it can be driven (web-playback mode); embed hosting streams inside a cross-origin YouTube iframe, so it's omitted there rather than sitting blank.
 
 ---
 
@@ -404,11 +410,14 @@ re-pushes no-ops; the relay's cursor is an optimization, not a correctness
 requirement. Auth is a shared bearer token (`MESHRADIO_INGEST_TOKEN` on the host,
 `[relay].token` on the Pi), compared with `secrets.compare_digest`.
 
-**Self-healing against ephemeral disks.** Free-tier hosting wipes its disk on
-every deploy and spin-down. Each push reports the receiver's track count; when it
-drops below the home node's, the pusher resets its cursor and re-backfills the
-whole channel automatically. An empty push still goes out as a heartbeat so a
-wiped receiver is detected promptly.
+**Self-healing against a wiped receiver.** Each push reports the receiver's track
+count; when it drops below the home node's (a fresh host with an empty disk), the
+pusher resets its cursor and re-backfills the whole channel automatically. An
+empty push still goes out as a heartbeat so the wipe is detected promptly. This is
+now a safety net rather than the norm: the host keeps its archive on a **persistent
+disk** and polls CoreScope + the LetsMesh analyzer itself, so it depends on the
+relay for neither ingestion nor durability — the relay going down no longer costs
+the archive.
 
 ### Per-visitor sessions
 
@@ -421,17 +430,31 @@ still hearing the shared `track.ready` stream. Snapshots persist to the
 path there's no factory — it stays the single shared player with the
 "one-speaker-at-a-time" speaker registry.
 
+The manager keeps every session's landing view current. It cues the newest
+day-with-songs when a session is created or restored, re-checks on each visit for
+an idle/paused session parked on an older day, and — via a `track.ready` watcher —
+rolls idle sessions forward the moment a newer day's first song lands, pushing
+state to open tabs so they update with no reload. A session that's *actually*
+playing is always left alone; a restored "playing" flag is treated as stale
+(a page load has no audio going yet in embed mode), so it advances too.
+
 ### Deployment & operations
 
 - **Render blueprint** ([render.yaml](render.yaml)) — embed mode via
   [meshradio.render.toml](meshradio.render.toml); Python 3.11 to match CI;
-  `MESHRADIO_INGEST_TOKEN` generated as a secret.
+  `MESHRADIO_INGEST_TOKEN` generated as a secret. A **persistent disk** mounts at
+  the data dir so the archive survives deploys/restarts (disks need a paid
+  instance, hence the Starter plan).
 - **CI gate** ([.github/workflows/test.yml](.github/workflows/test.yml)) — Render
   deploys `main` only after the test suite is green (`autoDeployTrigger:
   checksPass`), so a red suite never reaches production.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
-  session count); Render's health check hits it, and a stale age means the relay
-  stopped pushing.
+  session count); Render's health check hits it, and a stale age means *every*
+  ingest source (relay, CoreScope, LetsMesh) went quiet.
+- **DB backups** (`backup.py`) — rotating whole-DB snapshots (before migrations on
+  each boot, then on an interval) for rollback from a bad migration or corruption,
+  independent of host disk snapshots. Restore with `meshradio --list-backups` /
+  `--restore-backup`, which snapshots the current DB first so it's reversible.
 - **The Pi relay** runs under systemd ([deploy/meshradio.service](deploy/meshradio.service)):
   `Restart=on-failure` rides out transient network/CoreScope hiccups.
 
