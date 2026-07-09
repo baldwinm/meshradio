@@ -198,6 +198,9 @@ before migrations on each boot and every few hours after, so a bad migration or
 corruption has a clean rollback point. Snapshots default to `<data_dir>/backups`;
 for whole-disk loss, pair them with host-level disk snapshots (Render takes
 automatic daily ones on paid instances) or set `[backup].dir` to separate storage.
+To restore, stop the service and run `meshradio --list-backups` then
+`meshradio --restore-backup latest` (or a specific filename/path); it snapshots
+the current DB first, so a restore is itself reversible.
 
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
 for the unit and install/update commands.

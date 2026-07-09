@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from .runtime import Service
 log = logging.getLogger(__name__)
 
 _PREFIX = "meshradio-"
+_REQUIRED_TABLES = ("tracks", "themes")
 
 
 def _stamp() -> str:
@@ -48,6 +50,10 @@ def snapshot(db_path: str | Path, dest_dir: str | Path, label: str = "auto") -> 
         dst = sqlite3.connect(str(tmp))
         try:
             src.backup(dst)          # online backup: page-by-page, writer-safe
+            # The live DB is WAL; a copy of a WAL header makes every later open
+            # spawn -wal/-shm sidecars next to the snapshot. Store snapshots in
+            # rollback-journal mode so each is a clean, self-contained file.
+            dst.execute("PRAGMA journal_mode=DELETE")
         finally:
             dst.close()
     finally:
@@ -67,6 +73,77 @@ def rotate(dest_dir: str | Path, keep: int) -> None:
             old.unlink()
         except OSError:
             log.warning("couldn't prune old backup %s", old.name)
+
+
+def list_snapshots(dest_dir: str | Path) -> list[Path]:
+    """Snapshots in ``dest_dir``, oldest first (names sort chronologically)."""
+    return sorted(Path(dest_dir).glob(f"{_PREFIX}*.db"))
+
+
+def resolve_snapshot(dest_dir: str | Path, which: str) -> Path | None:
+    """Pick a snapshot to restore. ``which`` is ``"latest"``, a bare filename
+    in ``dest_dir``, or a full path. Returns None if nothing matches."""
+    which = (which or "").strip()
+    if which in ("", "latest"):
+        snaps = list_snapshots(dest_dir)
+        return snaps[-1] if snaps else None
+    direct = Path(which)
+    if direct.is_file():
+        return direct
+    named = Path(dest_dir) / which
+    return named if named.is_file() else None
+
+
+def is_archive_db(path: str | Path) -> bool:
+    """True if ``path`` is an intact SQLite DB carrying the archive tables — a
+    guard against restoring a truncated/foreign file over the live DB."""
+    # immutable=1: read the file directly without locking or spawning -wal/-shm
+    # sidecars next to a snapshot we're only inspecting.
+    try:
+        conn = sqlite3.connect(f"file:{Path(path)}?immutable=1", uri=True)
+    except sqlite3.Error:
+        return False
+    try:
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            return False
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        return all(t in names for t in _REQUIRED_TABLES)
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+
+
+def restore(db_path: str | Path, snapshot_path: str | Path,
+            backup_dir: str | Path | None = None) -> Path | None:
+    """Replace the DB at ``db_path`` with ``snapshot_path``. Snapshots the
+    current DB first (label ``prerestore``) when ``backup_dir`` is given, so a
+    restore is itself reversible; returns that safety copy's path (or None).
+
+    Run with the service stopped. Refuses a snapshot that isn't a valid archive
+    DB, and clears the old WAL/SHM sidecars — they belong to the replaced file
+    and would corrupt the restored one on next open."""
+    db_path = Path(db_path)
+    snapshot_path = Path(snapshot_path)
+    if not snapshot_path.is_file():
+        raise FileNotFoundError(snapshot_path)
+    if not is_archive_db(snapshot_path):
+        raise ValueError(f"{snapshot_path.name} is not a valid meshradio archive DB")
+
+    safety = None
+    if db_path.exists() and backup_dir is not None:
+        safety = snapshot(db_path, backup_dir, label="prerestore")
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = db_path.with_name(db_path.name + ".restore")
+    shutil.copy2(snapshot_path, tmp)
+    tmp.replace(db_path)
+    for suffix in ("-wal", "-shm"):
+        try:
+            db_path.with_name(db_path.name + suffix).unlink()
+        except FileNotFoundError:
+            pass
+    return safety
 
 
 class BackupService(Service):

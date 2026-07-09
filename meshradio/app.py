@@ -197,6 +197,12 @@ def main() -> None:
     parser.add_argument("--profile", choices=("dev", "pi4", "lite"), help="override hardware_profile")
     parser.add_argument("--port", type=int, help="override web port")
     parser.add_argument("--demo", action="store_true", help="seed fake channel traffic (dev)")
+    parser.add_argument("--list-backups", action="store_true",
+                        help="list archive DB backup snapshots and exit")
+    parser.add_argument("--restore-backup", metavar="WHICH",
+                        help="restore the archive DB from a snapshot ('latest', a filename in "
+                             "the backup dir, or a path) and exit; the current DB is snapshotted "
+                             "first so it's reversible. Stop the service before running.")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -217,10 +223,41 @@ def main() -> None:
     if args.port:
         config.web.port = args.port
 
+    if args.list_backups or args.restore_backup is not None:
+        raise SystemExit(_run_backup_cli(config, args))
+
     try:
         asyncio.run(run(config, demo=args.demo))
     except KeyboardInterrupt:
         pass
+
+
+def _run_backup_cli(config, args) -> int:
+    """Handle --list-backups / --restore-backup, then exit (no server)."""
+    if args.list_backups:
+        snaps = backup_mod.list_snapshots(config.backup_dir)
+        if not snaps:
+            print(f"no backups in {config.backup_dir}")
+            return 0
+        print(f"backups in {config.backup_dir} (newest last):")
+        for s in snaps:
+            print(f"  {s.name}  ({s.stat().st_size:,} bytes)")
+        return 0
+
+    snap = backup_mod.resolve_snapshot(config.backup_dir, args.restore_backup)
+    if snap is None:
+        print(f"no backup matching {args.restore_backup!r} in {config.backup_dir}", file=sys.stderr)
+        return 1
+    try:
+        safety = backup_mod.restore(config.db_path, snap, config.backup_dir)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"restore failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"restored {config.db_path} from {snap.name}")
+    if safety is not None:
+        print(f"previous DB saved as {safety.name} — restore it to undo")
+    print("start the service to load the restored archive.")
+    return 0
 
 
 if __name__ == "__main__":
