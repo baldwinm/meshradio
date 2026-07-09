@@ -19,6 +19,32 @@
   var w1 = u("bGxhbWE=");   // llama
   var w2 = u("ZGlzY28=");   // disco toggle
 
+  // Toggle the full-page flourish and a floating YouTube guest (the official
+  // clip, so the artist gets the view + ad revenue). Mutes the in-app player
+  // while the guest is on so audio doesn't overlap, and restores it after.
+  var D = null;
+  function fx1(on) {
+    var h = document.documentElement;
+    if (on) {
+      h.classList.add("mr-fx1");
+      if (!D) {
+        D = document.createElement("div");
+        D.className = "mr-fx1-v";
+        var f = document.createElement("iframe");
+        f.src = "https://www.youtube.com/embed/" + u("eEZyR3V5dzFWOHM=") + "?autoplay=1&rel=0";
+        f.allow = "autoplay; encrypted-media; fullscreen";
+        f.setAttribute("allowfullscreen", "");
+        D.appendChild(f);
+        document.body.appendChild(D);
+      }
+      try { if (typeof ytPlayer !== "undefined" && ytPlayer) ytPlayer.mute(); } catch (e) {}
+    } else {
+      h.classList.remove("mr-fx1");
+      if (D) { D.remove(); D = null; }
+      try { if (typeof ytPlayer !== "undefined" && ytPlayer) ytPlayer.unMute(); } catch (e) {}
+    }
+  }
+
   document.addEventListener("keydown", function (e) {
     var a = document.activeElement;
     if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return;
@@ -36,7 +62,7 @@
       if (s.slice(-w1.length) === w1) {
         n(u("8J+mmSBJdCByZWFsbHkgd2hpcHMgdGhlIGxsYW1hJ3MgYXNzIQ=="));
       } else if (s.slice(-w2.length) === w2) {
-        document.documentElement.classList.toggle("mr-fx1");
+        fx1(!document.documentElement.classList.contains("mr-fx1"));
         n(u("8J+SgyBEYW5jaW5nIFF1ZWVuIOKAlCBkaXNjbyE="));
       }
     }

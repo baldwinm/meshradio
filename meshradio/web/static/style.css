@@ -887,3 +887,15 @@ html.mr-fx1 body::before {
   html.mr-fx1 body,
   html.mr-fx1 body::before { animation: none; }
 }
+.mr-fx1-v {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  width: min(42vw, 360px);
+  aspect-ratio: 16 / 9;
+  z-index: 10000;
+  background: #000;
+  border: 3px solid #ff2fd0;
+  box-shadow: 0 0 24px rgb(255 47 208 / 60%), 0 0 48px rgb(0 200 255 / 45%);
+}
+.mr-fx1-v iframe { display: block; width: 100%; height: 100%; border: 0; }
