@@ -45,6 +45,9 @@ class Cacher(Service):
         # oEmbed metadata and no cache file.
         self.embed = embed
         self._embed_attempts: dict[int, int] = {}
+        # Running estimate of cache-dir bytes, seeded once from disk off the
+        # event loop. Lets prune() skip the full walk while well under the cap.
+        self._cache_bytes: int | None = None
 
     def start(self) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -140,7 +143,7 @@ class Cacher(Service):
                 )
                 await self.db.set_cache_status(track_id, "ready", str(info["_filepath"]))
                 self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
-                await self.prune()
+                await self.prune(added_bytes=int(info.get("_filesize", 0)))
                 return
             if attempt < self.config.max_retries - 1:
                 await asyncio.sleep(self.config.retry_backoff_s * (attempt + 1))
@@ -159,8 +162,7 @@ class Cacher(Service):
         """Run yt-dlp; return its info JSON (plus _filepath) or None on failure."""
         target = self.cache_dir / f"{video_id}.{self.config.audio_format}"
         if target.exists():
-            info = {"_filepath": target}
-            return info
+            return {"_filepath": target, "_filesize": target.stat().st_size}
         cmd = [
             self.config.ytdlp_bin,
             "-f", "bestaudio",
@@ -197,14 +199,31 @@ class Cacher(Service):
             log.warning("yt-dlp succeeded but %s missing", target)
             return None
         info["_filepath"] = target
+        info["_filesize"] = target.stat().st_size
         return info
 
-    async def prune(self) -> None:
+    def _dir_size(self) -> int:
+        """Total bytes of cache files. Walks the dir with blocking stat calls —
+        always run this off the event loop via ``asyncio.to_thread``."""
+        return sum(f.stat().st_size for f in self.cache_dir.iterdir() if f.is_file())
+
+    async def prune(self, added_bytes: int = 0) -> None:
         """LRU-prune the cache back under the size cap. Pruned tracks return to
-        'pending' so they can be re-fetched on demand later."""
-        total = sum(f.stat().st_size for f in self.cache_dir.iterdir() if f.is_file())
-        if total <= self.config.max_bytes:
+        'pending' so they can be re-fetched on demand later.
+
+        The full cache dir is stat-walked only when a running byte estimate
+        (seeded once from disk, always off the event loop) says we've crossed
+        the cap — so the common under-cap case, hit after every download, no
+        longer blocks the loop stat-ing hundreds of files."""
+        if self._cache_bytes is None:
+            # The seed walk already reflects the file just written, so don't
+            # also add its bytes; accumulate added_bytes only on later calls.
+            self._cache_bytes = await asyncio.to_thread(self._dir_size)
+        else:
+            self._cache_bytes += added_bytes
+        if self._cache_bytes <= self.config.max_bytes:
             return
+        total = await asyncio.to_thread(self._dir_size)  # authoritative before evicting
         for track in await self.db.cached_tracks_lru():
             if total <= self.config.max_bytes:
                 break
@@ -215,3 +234,4 @@ class Cacher(Service):
                 total -= size
             await self.db.set_cache_status(track["id"], "pending")
             log.info("pruned %s from cache", track["video_id"])
+        self._cache_bytes = total

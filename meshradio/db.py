@@ -220,6 +220,12 @@ MIGRATIONS: list[str] = [
     CREATE UNIQUE INDEX idx_tracks_theme_video
         ON tracks(theme_id, video_id) WHERE theme_id IS NOT NULL;
     """,
+    # v7 — index tracks.video_id. cached_track_for_video / tracks_for_video key
+    # on it, and the cacher runs the reuse-existing-file check on every non-embed
+    # download; without this it was a full table scan per download.
+    """
+    CREATE INDEX idx_tracks_video ON tracks(video_id);
+    """,
 ]
 
 
