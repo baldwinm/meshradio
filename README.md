@@ -83,20 +83,13 @@ data_dir = "./data"                # the archive + audio cache live here
 base_url = "https://scope.digitaino.com"   # Austin CoreScope instance
 channel = "#music"
 
-[letsmesh]
-base_url = "https://analyzer.letsmesh.net" # backup feed; enabled = false to skip
-channel = "#music"
-
 [cache]
 ffmpeg_location = ""               # set to ffmpeg's folder if it's not on PATH
 ```
 
 On first start MeshRadio backfills the channel's entire history from
 CoreScope — themes, songs, senders — then polls every 3 minutes for new
-posts. It also polls the LetsMesh analyzer (`analyzer.letsmesh.net`) as a
-**backup feed**: same channel, same API, so anything both feeds see dedupes to
-one row, and the archive keeps filling if the Austin CoreScope instance goes
-down. Audio downloads into `data/cache/` in the background (a fresh backfill
+posts. Audio downloads into `data/cache/` in the background (a fresh backfill
 takes a few minutes). Run `pytest` if you want to check the install.
 
 Verify it's working: the log shows `CoreScope poll: N new tracks`, and the
@@ -194,7 +187,7 @@ pusher resets its cursor and re-backfills the whole channel automatically. This
 is now a safety net rather than the norm — the hosted instance keeps its
 archive on a persistent disk (`disk:` in [render.yaml](render.yaml)), so
 history survives deploys, restarts, and spin-downs on its own, and the host
-also polls CoreScope and the LetsMesh analyzer directly. The relay going down
+also polls CoreScope directly. The relay going down
 no longer costs the archive. `/healthz` exposes liveness plus ingest freshness
 (Render's health check hits it; a stale `ingest_age_s` means every ingest
 source stopped).
@@ -256,7 +249,6 @@ integration pending.**
 | Link/theme parsing (matches real channel usage) | ✅ working, tested |
 | Ingest pipeline + mesh/CoreScope dedupe | ✅ working, tested |
 | CoreScope poller (Austin instance) | ✅ working, verified against live channel |
-| LetsMesh analyzer backup feed (dedupes against CoreScope) | ✅ working, tested |
 | Cache-first downloader (yt-dlp) + self-healing retries | ✅ working, tested |
 | Player: live policy, queue, archive replay, quiet hours | ✅ working, tested |
 | Web player (browser audio, radio-station mode, EQ/analyzer) | ✅ working, tested |

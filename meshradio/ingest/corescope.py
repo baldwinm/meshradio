@@ -18,11 +18,10 @@ which doubles as the first-boot backfill. The poller keeps a cursor on
 messages; late-arriving RF duplicates and cursor ties fall through to the
 dedupe hash, which makes reprocessing a no-op.
 
-The LetsMesh MeshCore analyzer (analyzer.letsmesh.net) is the same API by the
-same author, so it runs through this exact poller as a backup feed — a second
-instance with its own ``name`` (cursor key, status field) and ``source``.
-Because dedupe keys on channel+sender+video+minute, not on source, the two
-feeds no-op each other's overlap; the backup only adds rows CoreScope missed.
+The ``name``/``source`` params keep the poller reusable for any additional
+CoreScope-compatible feed (its own cursor key, status field, and track
+provenance); because dedupe keys on channel+sender+video+minute rather than
+source, two such feeds no-op each other's overlap.
 """
 
 from __future__ import annotations
@@ -58,8 +57,8 @@ class CoreScopePoller(Service):
         source: str = "corescope",
     ):
         # ``name`` scopes the poll cursor and the INGEST_STATUS field so a
-        # second, identically-shaped feed (the LetsMesh backup) doesn't clobber
-        # the primary's cursor. ``source`` is the provenance stamped on tracks.
+        # second, identically-shaped feed doesn't clobber the primary's cursor.
+        # ``source`` is the provenance stamped on tracks.
         self.config = config
         self.service = service
         self.db = db

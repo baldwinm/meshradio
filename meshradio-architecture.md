@@ -204,7 +204,7 @@ Two dedupe rules apply. `dedupe_hash = sha256("channel|sender|video_id|mesh_ts_b
 
 Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Migrations that landed after the initial design:
 
-- **`radio` / `letsmesh` track sources** — Mix continuations (§7) and the backup analyzer feed. SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table.
+- **`radio` / `letsmesh` track sources** — Mix continuations (§7) and a since-retired backup analyzer feed (§6). SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table; `'letsmesh'` stays in the constraint because existing rows may carry it, even though nothing writes it now.
 - **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives a redeploy (which restarts the process). Keyed by the session cookie.
 - **Lockable themes** — a `locked` flag plus a backfill that merges same-day rival themes into one playlist, so a stray second "Theme:" post can't split a day.
 - **One-song-per-playlist** — collapses any duplicate `(theme_id, video_id)` rows that predate the rule (keeping the earliest, repointing plays) and adds the partial unique index above.
@@ -223,7 +223,7 @@ Rotating snapshots of the whole DB (`backup.py`, §14) provide a rollback point 
 
 Poll the AUS CoreScope instance every 2–5 min for `#music` channel packets; same parser, same dedupe. Serves two jobs: catching messages the local node missed (RF is RF), and **backfilling history on first boot** so a freshly built kit radio arrives with the channel's archive already populated. *(Exact endpoint/auth to be confirmed against the AUS instance's API — isolate in `corescope.py` so it's a one-file adaptation if the API shifts.)*
 
-**Backup feed (LetsMesh analyzer).** The LetsMesh MeshCore analyzer (`analyzer.letsmesh.net`) exposes the same CoreScope-family API by the same author, so it runs through the identical poller as a second instance — its own `name` (scoping the poll cursor and the `ingest.status` field) and `source='letsmesh'` for provenance. It exists so ingestion survives an AUS CoreScope outage. Because `dedupe_hash` keys on channel+sender+video+minute rather than on source, a message both feeds observe inserts exactly once; running the backup alongside a healthy CoreScope is a no-op, and when CoreScope is down it silently keeps the archive current. Enabled by default, `enabled = false` in `[letsmesh]` turns it off.
+**Retired backup feed (LetsMesh analyzer).** A second poll instance once ran against the LetsMesh MeshCore analyzer (`analyzer.letsmesh.net`) — a CoreScope-family API — as a fallback for an AUS CoreScope outage. That host retired the endpoint and moved its API behind a Cloudflare challenge a headless poller can't clear, so the feed was dropped rather than repointed. `CoreScopePoller` keeps its generic `name`/`source` parameters, so adding another CoreScope-compatible feed later is still a one-liner in `app.py`; dedupe on channel+sender+video+minute (not source) makes any two overlapping feeds no-op each other.
 
 ### Theme detection
 
@@ -333,7 +333,7 @@ Software impact is confined to `audio/routing.py`: on the full build, speaker/ja
 ### Ingestion & behavior tradeoffs (be honest in the docs)
 
 - **Latency:** live tracks arrive on the CoreScope poll cadence (2–5 min) instead of at RF speed. For a radio, this is nearly invisible — but it's not "watch the message land."
-- **Dependency:** the Lite relies on polled feeds rather than RF, so it's only as live as they are — but ingestion now falls back from the AUS CoreScope instance to the LetsMesh analyzer, so a single CoreScope outage no longer takes it dark. The full build additionally keeps working off RF.
+- **Dependency:** the Lite relies on the AUS CoreScope poll rather than RF, so it's only as live as that feed and goes dark if CoreScope is down (the poller takes any number of CoreScope-compatible feeds, but no second public one is currently wired). The full build additionally keeps working off RF.
 - **Not a mesh client:** the Lite doesn't strengthen the mesh or work off-grid; it's a listener to the channel's reflection, not the channel. Worth a plain-language note in the kit docs so builders pick with eyes open.
 - **Upgrade path:** add a Heltec V3 later via a powered micro-USB hub (or migrate the SD card to a Pi 4) — the `hardware_profile` setting and the disabled `ingest/mesh.py` module make this a config change, not a rebuild.
 
@@ -415,7 +415,7 @@ count; when it drops below the home node's (a fresh host with an empty disk), th
 pusher resets its cursor and re-backfills the whole channel automatically. An
 empty push still goes out as a heartbeat so the wipe is detected promptly. This is
 now a safety net rather than the norm: the host keeps its archive on a **persistent
-disk** and polls CoreScope + the LetsMesh analyzer itself, so it depends on the
+disk** and polls CoreScope itself, so it depends on the
 relay for neither ingestion nor durability — the relay going down no longer costs
 the archive.
 
@@ -450,7 +450,7 @@ playing is always left alone; a restored "playing" flag is treated as stale
   checksPass`), so a red suite never reaches production.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
   session count); Render's health check hits it, and a stale age means *every*
-  ingest source (relay, CoreScope, LetsMesh) went quiet.
+  ingest source (relay, CoreScope) went quiet.
 - **DB backups** (`backup.py`) — rotating whole-DB snapshots (before migrations on
   each boot, then on an interval) for rollback from a bad migration or corruption,
   independent of host disk snapshots. Restore with `meshradio --list-backups` /

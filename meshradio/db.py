@@ -149,10 +149,11 @@ MIGRATIONS: list[str] = [
 
     UPDATE themes SET locked = 1 WHERE title NOT LIKE 'Untitled — %';
     """,
-    # v5 — 'letsmesh' track source: the backup analyzer feed
-    # (analyzer.letsmesh.net), polled with the same CoreScope-compatible
-    # adapter. SQLite can't alter a CHECK, so rebuild the table (as v2 did for
-    # 'radio').
+    # v5 — 'letsmesh' track source: a since-retired backup analyzer feed
+    # (analyzer.letsmesh.net; the host moved its API behind a Cloudflare
+    # challenge a headless poller can't clear). The value stays in the CHECK
+    # because existing rows may carry it — nothing writes it now. SQLite can't
+    # alter a CHECK, so rebuild the table (as v2 did for 'radio').
     """
     PRAGMA foreign_keys=OFF;
     CREATE TABLE tracks_v5(

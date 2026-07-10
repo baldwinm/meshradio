@@ -34,17 +34,6 @@ class CoreScopeConfig:
 
 
 @dataclass
-class LetsMeshConfig(CoreScopeConfig):
-    """Backup channel feed — the LetsMesh MeshCore analyzer
-    (analyzer.letsmesh.net), a CoreScope-compatible API polled exactly like the
-    primary. Keeps the archive filling when the Austin CoreScope instance is
-    down; messages both feeds (and the local mesh node) see dedupe against each
-    other, so running it alongside a healthy CoreScope costs nothing."""
-    enabled: bool = True
-    base_url: str = "https://analyzer.letsmesh.net"
-
-
-@dataclass
 class PlayerConfig:
     backend: str = "auto"          # auto | mpv | web | embed | null; auto = mpv on pi4/lite,
                                    # web on dev. embed = YouTube IFrame in the browser, no
@@ -102,7 +91,6 @@ class Config:
     data_dir: Path = field(default_factory=lambda: Path("./data"))
     mesh: MeshConfig = field(default_factory=MeshConfig)
     corescope: CoreScopeConfig = field(default_factory=CoreScopeConfig)
-    letsmesh: LetsMeshConfig = field(default_factory=LetsMeshConfig)
     player: PlayerConfig = field(default_factory=PlayerConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     web: WebConfig = field(default_factory=WebConfig)
@@ -143,7 +131,7 @@ def load_config(path: str | Path | None = None) -> Config:
         if candidate and Path(candidate).is_file():
             with open(candidate, "rb") as f:
                 raw = tomllib.load(f)
-            for section in ("mesh", "corescope", "letsmesh", "player", "cache", "web", "relay", "backup"):
+            for section in ("mesh", "corescope", "player", "cache", "web", "relay", "backup"):
                 if section in raw:
                     _apply(getattr(cfg, section), raw[section])
             _apply(cfg, {k: v for k, v in raw.items() if not isinstance(v, dict)})

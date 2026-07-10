@@ -68,8 +68,7 @@ def create_app(
     player_factory: Callable[[EventBus], PlayerService] | None = None,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
-    # via the lifespan watcher below, by any successful analyzer poll (the
-    # primary CoreScope feed or the LetsMesh backup).
+    # via the lifespan watcher below, by any successful CoreScope poll.
     health: dict = {"last_ingest": None}
 
     @asynccontextmanager
@@ -78,7 +77,7 @@ def create_app(
             sub = bus.subscribe(INGEST_STATUS)
             try:
                 async for _topic, payload in sub:
-                    if payload.get("corescope") == "ok" or payload.get("letsmesh") == "ok":
+                    if payload.get("corescope") == "ok":
                         health["last_ingest"] = time.time()
             finally:
                 sub.close()
