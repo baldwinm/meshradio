@@ -50,14 +50,25 @@
     {% if state.queue|length > 1 %}
     <button hx-post="/api/queue/shuffle" hx-target="#queue" title="Shuffle the queue">🔀</button>
     {% endif %}
+    {# Radio needs yt-dlp and a residential IP to fetch a Mix, so the public
+       embed host can't offer it — the archive station below is the one that
+       works everywhere, and there it's what keeps a finished day from
+       dropping into silence. #}
     {% if not state.embed %}
-      {% if state.radio %}
-        <button class="radio-btn active" hx-post="/api/radio/stop" hx-target="#now-playing"
+      {% if state.station == "radio" %}
+        <button class="radio-btn active" hx-post="/api/station/off" hx-target="#now-playing"
                 title="Stop fetching more songs — already-queued ones stay">◼ Radio on</button>
       {% else %}
-        <button class="radio-btn" hx-post="/api/radio/start" hx-target="#now-playing"
+        <button class="radio-btn" hx-post="/api/station/radio" hx-target="#now-playing"
                 title="Keep the music going: queue similar songs from a YouTube Mix of this track">📻 Start radio</button>
       {% endif %}
+    {% endif %}
+    {% if state.station == "archive" %}
+      <button class="radio-btn active" hx-post="/api/station/off" hx-target="#now-playing"
+              title="Stop topping the queue up — already-queued songs stay">◼ Keep playing</button>
+    {% else %}
+      <button class="radio-btn" hx-post="/api/station/archive" hx-target="#now-playing"
+              title="Never run out: when the queue empties, keep going with random songs from the archive">🎲 Keep playing</button>
     {% endif %}
     <span class="vol-icon" id="vol-icon" title="Mute / unmute" onclick="toggleMute()"
           role="button">{% if state.volume == 0 %}🔇{% else %}🔊{% endif %}</span>

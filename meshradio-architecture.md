@@ -255,7 +255,12 @@ Proposal: adopt a lightweight channel convention — the daily theme post starts
 
 **mpv** via `python-mpv` handles decode/output — battle-tested, gapless, and it outputs to whatever PipeWire sink is current, so output switching requires zero player logic. The `web` and `embed` backends emit the same `player.state` events; the browser is the output device instead of mpv.
 
-**Radio mode (`media/radio.py`).** When the queue runs dry, the player can seed a "station" from the current (or last-played) track using its YouTube Mix: `radio.py` fetches similar tracks in batches (`radio_batch`), the cacher caches them, and they queue with `source='radio'` (theme_id NULL, so they never pollute the archive). The station keeps topping itself up until stopped. Channel posts always queue ahead of radio filler.
+**Stations — filling the queue when the day runs out.** Two of them, mutually exclusive (`PlayerService.station` is `None | "radio" | "archive"`):
+
+- **Radio (`media/radio.py`).** Seeds a "station" from the current (or last-played) track using its YouTube Mix: `radio.py` fetches similar tracks in batches (`radio_batch`), the cacher caches them, and they queue with `source='radio'` (theme_id NULL, so they never pollute the archive). Needs yt-dlp and a residential IP, so it's an appliance/LAN feature — omitted in embed mode.
+- **Archive.** Replays random channel history (`Database.random_channel_tracks`, `ORDER BY RANDOM()`) as filler, tagged with a per-queue-entry `filler` flag rather than a distinct source (the rows are ordinary channel tracks). It's pure local SQL — no fetch, no cacher round trip, refilled synchronously right inside `_advance` — so it's the station that works on the **public embed host**, where a finished day otherwise dropped every visitor into silence. This is the default "Keep playing" on that deployment.
+
+Either way the station keeps topping itself up until stopped, and channel posts always queue ahead of station filler (`_is_filler`).
 
 ---
 
@@ -274,6 +279,8 @@ Five screens, encoder-navigated: **Now Playing** (theme / title–artist marquee
 ### Web UI
 
 FastAPI serving Jinja2 + htmx at `http://meshradio.local` (avahi mDNS). WebSocket pushes player state. Pages: Now Playing (with album art fetched via oEmbed thumbnail — the one place the web UI beats the OLED), Archive browser, queue management, output/volume, settings (WiFi, channel key, quiet hours, CoreScope URL), and a log viewer. htmx keeps the frontend a set of HTML templates — no npm, no build step, which is a kit-maintainability feature, not a limitation.
+
+The **Archive** browser is a month calendar (`context.calendar_months`): every day the channel played is a lit, tappable tile carrying its theme title and song count; quiet days render blank. It replaced a flat reverse-chronological list so the channel's rhythm — which days were busy, which went quiet — is visible at a glance.
 
 Now Playing always tracks the latest day: the server re-cues an idle session onto the newest day both on each visit and live (a bus watcher rolls open tabs forward the moment a new day's first song lands), while never interrupting one that's actively playing. Playback controls include **🔀 shuffle** (reorders the upcoming queue) and a persistent **⤴ Export** that opens the whole day's songs as an anonymous YouTube `watch_videos` playlist regardless of what's playing. The queue uses a selection model: click a track, then **⤒ Play next** / **✕ Remove** act on it from the bar beside **Clear queue** — one tap-target set instead of per-row buttons, which reads better on touch. The spectrum-analyzer canvas renders only where it can be driven (web-playback mode); embed hosting streams inside a cross-origin YouTube iframe, so it's omitted there rather than sitting blank.
 

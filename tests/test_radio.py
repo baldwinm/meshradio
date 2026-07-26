@@ -64,8 +64,8 @@ async def test_start_radio_seeds_from_current(db, bus):
     seed = await make_ready_track(db, SEED, duration=60)
     player.radio = FakeRadio(db, bus, [{"id": "bbbbbbbbbbb", "title": "Song B"}])
     await player.on_track_ready(seed)
-    assert await player.start_radio() is True
-    assert player.radio_active
+    assert await player.start_station("radio") is True
+    assert player.station == "radio"
     assert player.radio.fetched_seeds == [SEED]
 
 
@@ -76,14 +76,14 @@ async def test_start_radio_seeds_from_last_played_when_idle(db, bus):
     await player.on_track_ready(seed)
     await asyncio.sleep(0.1)  # track finishes; player idle
     assert player.status == "idle"
-    assert await player.start_radio() is True
+    assert await player.start_station("radio") is True
     assert player.radio.fetched_seeds == [SEED]
 
 
 async def test_start_radio_without_history_fails(db, bus):
     player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
     player.radio = FakeRadio(db, bus, [])
-    assert await player.start_radio() is False
+    assert await player.start_station("radio") is False
 
 
 async def test_stop_radio_keeps_queued_tracks(db, bus):
@@ -94,9 +94,9 @@ async def test_stop_radio_keeps_queued_tracks(db, bus):
     player.queue.append({"id": 99, "video_id": "x", "source": "radio"})
     channel_track = await make_ready_track(db, "ddddddddddd", duration=60)
     player.queue.append(channel_track)
-    player.radio_active = True
-    await player.stop_radio()
-    assert not player.radio_active
+    player.station = "radio"
+    await player.stop_station()
+    assert player.station is None
     assert [t["id"] for t in player.queue] == [99, channel_track["id"]]
 
 
@@ -107,8 +107,8 @@ async def test_late_radio_track_still_enqueued_after_stop(db, bus):
     seed = await make_ready_track(db, SEED, duration=60)
     await player.on_track_ready(seed)
 
-    player.radio_active = True
-    await player.stop_radio()
+    player.station = "radio"
+    await player.stop_station()
     radio_track = dict(await make_ready_track(db, "bbbbbbbbbbb", duration=60))
     radio_track["source"] = "radio"
     await player.on_track_ready(radio_track)  # late arrival from the cacher
@@ -147,4 +147,4 @@ async def test_state_flags(db, bus):
     player = PlayerService(PlayerConfig(), db, bus, backend=WebBackend())
     state = player.state()
     assert state["web_audio"] is True
-    assert state["radio"] is False
+    assert state["station"] is None

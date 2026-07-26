@@ -236,6 +236,38 @@ async def test_session_cookie_issued_once(db, bus):
         assert client.cookies["mr_sid"] == sid
 
 
+async def test_forged_session_cookie_is_reissued(db, bus):
+    """An attacker-chosen sid (wrong shape/length) must never become a session
+    key or a DB row — the server ignores it and issues its own."""
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        client.cookies.set("mr_sid", "x" * 4096)
+        resp = await client.get("/api/state")
+        assert "mr_sid" in resp.cookies                # reissued
+        new_sid = resp.cookies["mr_sid"]
+        assert new_sid != "x" * 4096
+        assert "x" * 4096 not in app.state.sessions._sessions
+
+
+async def test_session_cap_evicts_stalest(db, bus):
+    """Cookie-spraying bots can't grow the process without bound: at the cap,
+    the stalest session is flushed to disk and evicted to make room."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    app.state.sessions.MAX_SESSIONS = 2
+    async with client_for(app) as c1, client_for(app) as c2, client_for(app) as c3:
+        await c1.get("/api/state")
+        sid1 = c1.cookies["mr_sid"]
+        await c2.get("/api/state")
+        await c3.get("/api/state")                     # cap hit: c1 evicted
+        assert app.state.sessions.count() == 2
+        assert sid1 not in app.state.sessions._sessions
+        assert await db.load_web_session(sid1) is not None   # snapshot kept
+        # The evicted visitor comes back: session restores from disk.
+        state = (await c1.get("/api/state")).json()
+        assert state["current"]["video_id"] == "aaaaaaaaaaa"
+
+
 async def test_session_state_stays_off_global_bus(db, bus):
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)
     app = embed_app(db, bus)

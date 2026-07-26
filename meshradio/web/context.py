@@ -8,12 +8,17 @@ single player otherwise.
 
 from __future__ import annotations
 
+from calendar import Calendar, month_name
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+
+# Sunday-first weeks (US convention; the channel is Austin-local).
+WEEKDAY_HEADERS = ["S", "M", "T", "W", "T", "F", "S"]
+_CAL = Calendar(firstweekday=6)
 
 from ..bus import EventBus
 from ..db import Database
@@ -35,6 +40,41 @@ def yt_export_url(tracks: list[dict[str, Any]]) -> str:
         if vid and vid not in ids:
             ids.append(vid)
     return YT_WATCH_VIDEOS + ",".join(ids[:YT_EXPORT_CAP]) if ids else ""
+
+
+def calendar_months(days: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group archive days (newest first, as ``Database.archive_days`` returns)
+    into month calendar grids for the Archive page.
+
+    Each month is ``{label, year, month, weeks}`` where ``weeks`` is a list of
+    7-cell rows. A cell is ``None`` where the week spills into an adjacent month
+    (rendered blank), otherwise ``{day, iso, info}`` — ``info`` being that day's
+    archive row (title, track count) or ``None`` for a day the channel was
+    quiet. Months come newest first so the page opens on recent history."""
+    by_date = {d["date"]: d for d in days}
+    months: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    for d in days:  # newest first; first sighting of each month fixes the order
+        year_s, month_s, _ = d["date"].split("-")
+        key = (int(year_s), int(month_s))
+        if key in seen:
+            continue
+        seen.add(key)
+        year, month = key
+        weeks: list[list[dict[str, Any] | None]] = []
+        for week in _CAL.monthdatescalendar(year, month):
+            row: list[dict[str, Any] | None] = []
+            for dt in week:
+                if dt.month != month:
+                    row.append(None)  # spillover day owned by the neighbor month
+                    continue
+                iso = dt.isoformat()
+                row.append({"day": dt.day, "iso": iso, "info": by_date.get(iso)})
+            weeks.append(row)
+        months.append(
+            {"label": f"{month_name[month]} {year}", "year": year, "month": month, "weeks": weeks}
+        )
+    return months
 
 
 @dataclass

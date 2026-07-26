@@ -11,7 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ..bus import OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
 from ..media.player import PlayerService
 from .context import ctx_of
-from .sessions import SESSION_COOKIE, SpeakerRegistry
+from .sessions import SESSION_COOKIE, SpeakerRegistry, valid_sid
 
 log = logging.getLogger(__name__)
 
@@ -20,11 +20,12 @@ router = APIRouter()
 
 async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
     """Push fresh state to a session's pages (speaker role may have moved)."""
+    state = p.state()  # snapshot once; only the speaker flag is per-connection
     for conn in reg.clients():
         try:
             await conn.send_json({
                 "topic": PLAYER_STATE,
-                "data": {**p.state(), "speaker": reg.is_speaker(conn)},
+                "data": {**state, "speaker": reg.is_speaker(conn)},
             })
         except Exception:
             pass
@@ -36,7 +37,10 @@ async def ws(websocket: WebSocket):
     await websocket.accept()
     if ctx.sessions is not None:
         # Per-visitor session: this browser's own player/bus/speakers.
-        sid = websocket.cookies.get(SESSION_COOKIE) or secrets.token_hex(16)
+        # A forged cookie sid is ignored, same as the HTTP middleware.
+        sid = websocket.cookies.get(SESSION_COOKIE)
+        if not valid_sid(sid):
+            sid = secrets.token_hex(16)
         session = await ctx.sessions.get(sid)
         reg, p = session.speakers, session.player
         sub = session.bus.subscribe(PLAYER_STATE)

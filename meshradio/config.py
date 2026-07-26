@@ -43,6 +43,7 @@ class PlayerConfig:
     timezone: str = "America/Chicago"
     volume: int = 70
     radio_batch: int = 10          # tracks pulled per YouTube Mix fetch in radio mode
+    station_batch: int = 10        # archived songs queued per archive-station top-up
     live_window_s: int = 1800      # only tracks posted within this window auto-play;
                                    # older ones are backfill and stay archive-only
 

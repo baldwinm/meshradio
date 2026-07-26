@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,14 @@ from ..runtime import supervise
 log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "mr_sid"
+
+# Session ids are always server-issued secrets.token_hex(16). Anything else in
+# the cookie is forged — reject it before it becomes a dict key and a DB row.
+_SID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
+
+
+def valid_sid(sid: str | None) -> bool:
+    return bool(sid) and _SID_RE.match(sid) is not None
 
 
 class SpeakerRegistry:
@@ -70,6 +79,12 @@ class SessionManager:
     seconds after changes, and a returning cookie (or the whole process,
     after a deploy) restores from there — reaping only evicts from memory."""
 
+    # Hard ceiling on live in-memory sessions. Every session carries a
+    # PlayerService plus a supervised task, so without a cap a bot spraying
+    # fresh cookies grows the process without bound. Legit idle visitors are
+    # reaped long before this matters; hitting it evicts the stalest session.
+    MAX_SESSIONS = 512
+
     def __init__(self, factory: Callable[[EventBus], PlayerService], db: Database,
                  bus: EventBus | None = None, tz=timezone.utc):
         self._factory = factory
@@ -79,7 +94,8 @@ class SessionManager:
         self._sessions: dict[str, Session] = {}
         self._dirty: set[str] = set()
         self._maintenance: asyncio.Task | None = None
-        self._newest_day: str | None = None
+        self._newest_day: str | None = None   # newest-day query cache
+        self._rolled_day: str | None = None   # last day the watcher rolled tabs to
 
     def count(self) -> int:
         return len(self._sessions)
@@ -87,6 +103,8 @@ class SessionManager:
     async def get(self, sid: str) -> Session:
         session = self._sessions.get(sid)
         if session is None:
+            if len(self._sessions) >= self.MAX_SESSIONS:
+                await self._evict_one()
             out_bus = EventBus()
             player = self._factory(out_bus)
             session = Session(player=player, bus=out_bus)
@@ -120,17 +138,48 @@ class SessionManager:
     def _local_today(self, player: PlayerService) -> str:
         return datetime.now(player.tz).date().isoformat()
 
+    async def _evict_one(self) -> None:
+        """Drop the stalest session to make room (cap reached). Prefer one with
+        no connected sockets; fall back to oldest last_seen. State is flushed
+        first, so a legit visitor caught in an eviction just restores."""
+        candidates = sorted(self._sessions.items(), key=lambda kv: kv[1].last_seen)
+        sid, session = next(
+            ((s, sess) for s, sess in candidates if not sess.speakers.clients()),
+            candidates[0],
+        )
+        await self._db.save_web_session(sid, json.dumps(session.player.snapshot()))
+        self._dirty.discard(sid)
+        del self._sessions[sid]
+        await session.player.stop()
+        log.warning("session cap %d hit: evicted %s…", self.MAX_SESSIONS, sid[:8])
+
+    async def _newest_day_with_tracks(self, refresh: bool = False) -> str | None:
+        """Newest archive day that has songs. This backs every request from an
+        idle session, so it's cached — but only while the known newest day IS
+        the local today: nothing newer can exist until midnight, and before
+        that (a session parked on yesterday) it must re-query so a page load
+        still rolls forward the moment today's first song lands."""
+        if (
+            not refresh
+            and self._newest_day is not None
+            and self._newest_day == datetime.now(self._tz).date().isoformat()
+        ):
+            return self._newest_day
+        newest = next((d["date"] for d in await self._db.archive_days() if d["tracks"]), None)
+        if newest is not None:
+            self._newest_day = newest
+        return newest
+
     async def _cue_latest(self, player: PlayerService) -> None:
         """Cue the newest day that has songs. A no-op when the player is already
         parked on that newest day, so a listener keeps their spot; otherwise it
         moves them forward. Callers decide whether to spare active playback."""
-        for day in await self._db.archive_days():  # newest first
-            if not day["tracks"]:
-                continue
-            if player.day == day["date"] and player.current is not None:
-                return  # already on the newest day — keep their position
-            await player.cue_day(day["date"])
+        newest = await self._newest_day_with_tracks()
+        if newest is None:
             return
+        if player.day == newest and player.current is not None:
+            return  # already on the newest day — keep their position
+        await player.cue_day(newest)
 
     async def _watch_new_days(self) -> None:
         """When the first song of a newer day lands, roll idle open tabs onto it
@@ -145,18 +194,22 @@ class SessionManager:
     async def _advance_idle_to_newest(self, track: dict | None) -> None:
         if not track or track.get("source") == "radio" or not self._sessions:
             return
-        # Cheap pre-filter: only a track on a day newer than the one we already
-        # track can change anything, so backfill of old days never hits the DB.
+        # Cheap pre-filter: only a track on a day newer than the last one we
+        # rolled to can change anything, so backfill of old days never hits
+        # the DB. Dedup state is ``_rolled_day``, deliberately separate from
+        # the ``_newest_day`` query cache that requests also refresh —
+        # otherwise a request racing this event could make the watcher skip
+        # rolling the other idle tabs.
         mesh_ts = track.get("mesh_ts")
-        if mesh_ts and self._newest_day is not None:
+        if mesh_ts and self._rolled_day is not None:
             day = datetime.fromtimestamp(float(mesh_ts), timezone.utc).astimezone(
                 self._tz).date().isoformat()
-            if day <= self._newest_day:
+            if day <= self._rolled_day:
                 return
-        newest = next((d["date"] for d in await self._db.archive_days() if d["tracks"]), None)
-        if newest is None or newest == self._newest_day:
+        newest = await self._newest_day_with_tracks(refresh=True)
+        if newest is None or newest == self._rolled_day:
             return
-        self._newest_day = newest
+        self._rolled_day = newest
         moved = 0
         for session in list(self._sessions.values()):
             player = session.player
@@ -176,14 +229,15 @@ class SessionManager:
                 await self.reap()
 
     async def flush(self) -> None:
-        """Persist snapshots for sessions whose state changed."""
+        """Persist snapshots for sessions whose state changed — one commit for
+        the whole batch, not one per session."""
+        batch: list[tuple[str, str]] = []
         while self._dirty:
             sid = self._dirty.pop()
             session = self._sessions.get(sid)
             if session is not None:
-                await self._db.save_web_session(
-                    sid, json.dumps(session.player.snapshot())
-                )
+                batch.append((sid, json.dumps(session.player.snapshot())))
+        await self._db.save_web_sessions(batch)
 
     async def reap(self, max_idle_s: float = 1800) -> None:
         """Evict idle sessions from memory (their snapshots stay on disk for

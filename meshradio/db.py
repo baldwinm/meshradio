@@ -227,6 +227,12 @@ MIGRATIONS: list[str] = [
     """
     CREATE INDEX idx_tracks_video ON tracks(video_id);
     """,
+    # v8 — index tracks.ingested_at. The relay pusher calls tracks_since on
+    # every push interval (default 120s); its cursor predicate and ORDER BY
+    # both key on ingested_at, which was a full table scan per push.
+    """
+    CREATE INDEX idx_tracks_ingested ON tracks(ingested_at);
+    """,
 ]
 
 
@@ -446,6 +452,13 @@ class Database:
             "SELECT * FROM tracks WHERE video_id=?", (video_id,)
         )
 
+    async def last_played_track(self) -> dict[str, Any] | None:
+        """The most recently played track, if any (radio-mode seed fallback)."""
+        return await self._fetchone(
+            "SELECT tr.* FROM tracks tr JOIN plays p ON p.track_id=tr.id "
+            "ORDER BY p.played_at DESC LIMIT 1"
+        )
+
     async def cached_track_for_video(self, video_id: str) -> dict[str, Any] | None:
         """Another track row with the same video already cached (same song reposted)."""
         return await self._fetchone(
@@ -457,10 +470,45 @@ class Database:
     # -- archive queries ----------------------------------------------------
 
     async def archive_days(self) -> list[dict[str, Any]]:
+        """One row per archived day, newest first: theme count, song count, and
+        the theme title(s) — enough for the Archive calendar to label a cell
+        without a query per day. ``titles`` is comma-joined on the rare day that
+        predates locked themes and still carries more than one."""
         return await self._fetchall(
-            "SELECT t.date AS date, COUNT(DISTINCT t.id) AS themes, COUNT(tr.id) AS tracks "
+            "SELECT t.date AS date, COUNT(DISTINCT t.id) AS themes, COUNT(tr.id) AS tracks, "
+            "GROUP_CONCAT(DISTINCT t.title) AS titles "
             "FROM themes t LEFT JOIN tracks tr ON tr.theme_id=t.id "
             "GROUP BY t.date ORDER BY t.date DESC"
+        )
+
+    async def random_channel_tracks(
+        self,
+        limit: int = 10,
+        exclude_video_ids: list[str] | tuple[str, ...] = (),
+        ready_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """A random sample of songs the channel actually shared.
+
+        Feeds the player's archive station (§7): unlike radio mode this needs no
+        network, so it works on the public embed host where YouTube is
+        unreachable. Radio filler and themeless rows are excluded — this replays
+        the channel, not a Mix. ``ready_only`` demands a downloaded file (the
+        appliance's rule); embed hosting streams by video id, so there only
+        'failed' rows are skipped. Both mirror ``PlayerService._is_playable``,
+        pushed into SQL so a random sample can't come back all-unplayable."""
+        clauses = ["source != 'radio'", "theme_id IS NOT NULL"]
+        if ready_only:
+            clauses += ["cache_status = 'ready'", "cache_path IS NOT NULL"]
+        else:
+            clauses.append("cache_status != 'failed'")
+        params: list[Any] = []
+        if exclude_video_ids:
+            clauses.append(f"video_id NOT IN ({','.join('?' * len(exclude_video_ids))})")
+            params.extend(exclude_video_ids)
+        params.append(limit)
+        return await self._fetchall(
+            f"SELECT * FROM tracks WHERE {' AND '.join(clauses)} ORDER BY RANDOM() LIMIT ?",
+            tuple(params),
         )
 
     async def themes_for_day(self, date: str) -> list[dict[str, Any]]:
@@ -487,13 +535,18 @@ class Database:
 
     async def search_tracks(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
         """Channel tracks whose title, artist, sharer, or theme matches
-        ``query`` (case-insensitive substring), newest first."""
-        like = f"%{query.strip()}%"
+        ``query`` (case-insensitive substring), newest first. LIKE wildcards
+        in the query are escaped so "100%" searches for the literal text."""
+        escaped = (
+            query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        like = f"%{escaped}%"
         return await self._fetchall(
             "SELECT tr.*, t.date AS date, t.title AS theme_title "
             "FROM tracks tr JOIN themes t ON tr.theme_id=t.id "
             "WHERE tr.source != 'radio' AND ("
-            "  tr.title LIKE ? OR tr.artist LIKE ? OR tr.sender LIKE ? OR t.title LIKE ?) "
+            "  tr.title LIKE ? ESCAPE '\\' OR tr.artist LIKE ? ESCAPE '\\' "
+            "  OR tr.sender LIKE ? ESCAPE '\\' OR t.title LIKE ? ESCAPE '\\') "
             "ORDER BY tr.mesh_ts DESC LIMIT ?",
             (like, like, like, like, limit),
         )
@@ -571,11 +624,18 @@ class Database:
     # -- web sessions ----------------------------------------------------------
 
     async def save_web_session(self, sid: str, state: str) -> None:
-        await self.db.execute(
+        await self.save_web_sessions([(sid, state)])
+
+    async def save_web_sessions(self, items: list[tuple[str, str]]) -> None:
+        """Upsert several session snapshots in one commit (periodic flush)."""
+        if not items:
+            return
+        now = utcnow()
+        await self.db.executemany(
             "INSERT INTO web_sessions(sid, updated_at, state) VALUES(?,?,?) "
             "ON CONFLICT(sid) DO UPDATE SET updated_at=excluded.updated_at, "
             "state=excluded.state",
-            (sid, utcnow(), state),
+            [(sid, now, state) for sid, state in items],
         )
         await self.db.commit()
 

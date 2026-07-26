@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -121,17 +123,16 @@ async def api_duration(request: Request, track_id: int, seconds: float):
     return JSONResponse({"ok": True})
 
 
-@router.post("/api/radio/start")
-async def api_radio_start(request: Request):
+@router.post("/api/station/{kind}")
+async def api_station(request: Request, kind: Literal["radio", "archive", "off"]):
+    """Pick what plays once the queue runs dry: a YouTube Mix ('radio'), random
+    channel history ('archive'), or nothing ('off')."""
     ctx = ctx_of(request)
-    await (await ctx.get_player(request)).start_radio()
-    return await ctx.render_now_playing(request)
-
-
-@router.post("/api/radio/stop")
-async def api_radio_stop(request: Request):
-    ctx = ctx_of(request)
-    await (await ctx.get_player(request)).stop_radio()
+    p = await ctx.get_player(request)
+    if kind == "off":
+        await p.stop_station()
+    else:
+        await p.start_station(kind)
     return await ctx.render_now_playing(request)
 
 

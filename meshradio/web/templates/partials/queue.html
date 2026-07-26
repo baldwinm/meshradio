@@ -5,7 +5,7 @@
   <button class="subtle q-sel-action q-remove" type="button" hidden
           title="Remove the selected track from the queue">✕ Remove</button>
   <button class="subtle" hx-post="/api/queue/clear" hx-target="#queue"
-          title="Empty the queue (also stops radio mode)">Clear queue</button>
+          title="Empty the queue (also switches the station off)">Clear queue</button>
 </div>
 <ol class="queue">
   {% for track in state.queue %}
@@ -17,11 +17,14 @@
     {% if track.source == "radio" %}
       <span class="badge">radio</span>
     {% else %}
+      {% if track.filler %}
+      <span class="badge" title="Pulled from the archive to keep the music going">archive</span>
+      {% endif %}
       <span class="sender">({{ track.sender or "?" }})</span>
     {% endif %}
   </li>
   {% endfor %}
 </ol>
 {% else %}
-<p class="empty">Queue is empty{% if state.radio %} — radio is fetching more…{% endif %}.</p>
+<p class="empty">Queue is empty{% if state.station == "radio" %} — radio is fetching more…{% endif %}.</p>
 {% endif %}

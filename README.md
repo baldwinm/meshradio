@@ -123,9 +123,17 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
 - **Live jukebox** — when a new song lands on the channel it auto-plays if
   the radio is idle, or joins the queue if something's already playing. A new
   arrival never interrupts the current song.
-- **Archive** — browse by day → theme → tracks. **▶ Play this day** replays a
-  whole day in posted order; **+ queue** adds a single track. New visitors
-  land with the newest day cued up so there's something to press play on.
+- **Archive** — a month calendar; every day the channel played is a lit tile
+  (theme + song count on hover), quiet days are blank. Tap a day for its
+  theme → tracks: **▶ Play this day** replays a whole day in posted order,
+  **+ queue** adds a single track. New visitors land with the newest day cued
+  up so there's something to press play on.
+- **🎲 Keep playing** — never run out: when the queue empties, this keeps the
+  music going with random songs pulled from the archive. Unlike **Start radio**
+  it needs no YouTube access, so it's the "don't stop at the end of the day"
+  button that works on the public embed instance too. Filler songs show an
+  `archive` badge in the queue; a freshly posted channel song still jumps ahead
+  of them. Press **◼ Keep playing** to stop.
 - **📻 Start radio** — when the queue runs dry, this seeds a "station" from
   the current (or last-played) track using its YouTube Mix: similar songs are
   fetched, cached, and queued, and the station keeps topping itself up until

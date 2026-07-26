@@ -1,15 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Archive</h2>
-{% if days %}
-<ul class="days">
-  {% for day in days %}
-  <li>
-    <a href="/archive/{{ day.date }}">{{ day.date }}</a>
-    <span class="badge">{{ day.tracks }} tracks</span>
-  </li>
-  {% endfor %}
-</ul>
+{% if months %}
+<p class="cal-hint">{{ day_count }} {{ "day" if day_count == 1 else "days" }} on the
+  channel. Tap a lit day to play or browse it.</p>
+{% for m in months %}
+<section class="cal-month">
+  <h3>{{ m.label }}</h3>
+  <div class="cal-grid" role="grid" aria-label="{{ m.label }}">
+    {% for h in weekday_headers %}
+    <div class="cal-head" role="columnheader">{{ h }}</div>
+    {% endfor %}
+    {% for week in m.weeks %}
+      {% for cell in week %}
+        {% if cell is none %}
+        <div class="cal-cell cal-blank" role="gridcell" aria-hidden="true"></div>
+        {% elif cell.info %}
+        <a class="cal-cell cal-on" role="gridcell"
+           href="/archive/{{ cell.iso }}"
+           title="{{ cell.info.titles or 'songs' }} — {{ cell.info.tracks }} {{ 'song' if cell.info.tracks == 1 else 'songs' }}">
+          <span class="cal-day">{{ cell.day }}</span>
+          <span class="cal-count">{{ cell.info.tracks }}</span>
+        </a>
+        {% else %}
+        <div class="cal-cell cal-off" role="gridcell">
+          <span class="cal-day">{{ cell.day }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
 {% else %}
 <p class="empty">No history yet — the archive fills in as links land on the channel.</p>
 {% endif %}

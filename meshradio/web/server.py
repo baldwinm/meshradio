@@ -28,7 +28,7 @@ from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
 from .context import WebContext
-from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry
+from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry, valid_sid
 
 log = logging.getLogger(__name__)
 
@@ -110,15 +110,25 @@ def create_app(
         @app.middleware("http")
         async def ensure_session_cookie(request: Request, call_next):
             sid = request.cookies.get(SESSION_COOKIE)
-            fresh = sid is None
+            # A forged/garbage sid never becomes a session key — reissue.
+            fresh = not valid_sid(sid)
             if fresh:
                 sid = secrets.token_hex(16)
             request.state.sid = sid
             response = await call_next(request)
             if fresh:
+                # Secure when the visitor reached us over HTTPS (hosted embed
+                # deployments sit behind a TLS-terminating proxy); plain-HTTP
+                # LAN/appliance use keeps working without it.
+                https = (
+                    request.url.scheme == "https"
+                    or request.headers.get("x-forwarded-proto", "")
+                    .split(",")[0].strip() == "https"
+                )
                 response.set_cookie(
                     SESSION_COOKIE, sid,
                     max_age=365 * 24 * 3600, httponly=True, samesite="lax",
+                    secure=https,
                 )
             return response
 

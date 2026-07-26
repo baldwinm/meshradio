@@ -47,6 +47,11 @@ async def api_ingest(request: Request):
     supplied = request.headers.get("authorization", "")
     if not secrets.compare_digest(supplied, f"Bearer {ctx.ingest_token}"):
         raise HTTPException(401, "bad token")
+    # A full backfill batch (5000 short messages + metadata) is well under a
+    # megabyte; anything huge is a mistake or abuse — refuse before parsing.
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > 16 * 1024 * 1024:
+        raise HTTPException(413, "batch too large")
     try:
         payload = await request.json()
     except Exception:

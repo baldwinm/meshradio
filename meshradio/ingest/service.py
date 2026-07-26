@@ -47,6 +47,7 @@ class IngestService:
         text = text[:4096]
         date = self.local_date(ts)
 
+        theme = None
         theme_title = parse.parse_theme(text)
         if theme_title:
             existing = await self.db.latest_theme_for_date(date)
@@ -65,6 +66,7 @@ class IngestService:
                     "theme for %s already locked (%r); ignoring reset to %r by %s",
                     date, existing["title"], theme_title, sender,
                 )
+                theme = existing
             else:
                 # Links arrived before the theme, so an "Untitled —"
                 # placeholder holds them. Adopt the real title into it (one
@@ -82,7 +84,8 @@ class IngestService:
         if not links:
             return 0
 
-        theme = await self.db.latest_theme_for_date(date)
+        if theme is None:
+            theme = await self.db.latest_theme_for_date(date)
         if theme is None:
             theme = await self.db.create_theme(date, parse.untitled_theme(date))
             self.bus.publish(THEME_CREATED, {"theme": theme})

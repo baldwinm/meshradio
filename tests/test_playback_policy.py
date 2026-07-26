@@ -84,13 +84,13 @@ async def test_move_to_front(db, bus):
     assert [t["id"] for t in player.queue] == [3, 1, 2]
 
 
-async def test_clear_queue_also_stops_radio(db, bus):
+async def test_clear_queue_also_stops_station(db, bus):
     player = make_player(db, bus)
     player.queue = [{"id": 1, "video_id": "a", "source": "radio"}]
-    player.radio_active = True
+    player.station = "radio"
     await player.clear_queue()
     assert player.queue == []
-    assert player.radio_active is False
+    assert player.station is None
 
 
 def test_speaker_registry_newest_wins():

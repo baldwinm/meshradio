@@ -291,3 +291,30 @@ async def test_settings_roundtrip(db: Database):
     await db.set_setting("k", "v2")
     assert await db.get_setting("k") == "v2"
     assert await db.get_setting("missing", "dflt") == "dflt"
+
+
+async def test_ingested_at_indexed(db: Database):
+    """tracks_since (relay pusher, every push interval) keys on ingested_at;
+    an index must exist (migration v8)."""
+    rows = await db._fetchall(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tracks'"
+    )
+    assert "idx_tracks_ingested" in {r["name"] for r in rows}
+
+
+async def test_search_escapes_like_wildcards(db: Database):
+    """A query containing % or _ searches for the literal characters instead
+    of degenerating into a match-everything wildcard."""
+    theme = await db.create_theme("2026-07-06", "t")
+    plain = await db.add_track(**_track_args(theme_id=theme["id"]))
+    pct = await db.add_track(
+        **_track_args(theme_id=theme["id"], video_id="abcdefghijk", sender="bob")
+    )
+    await db.update_track_metadata(plain["id"], title="Plain Song")
+    await db.update_track_metadata(pct["id"], title="100% Done")
+
+    assert [t["id"] for t in await db.search_tracks("100%")] == [pct["id"]]
+    # A bare % finds titles with a literal %, not every row in the table.
+    assert [t["id"] for t in await db.search_tracks("%")] == [pct["id"]]
+    assert await db.search_tracks("____") == []
+    assert len(await db.search_tracks("Song")) == 1   # normal search still works

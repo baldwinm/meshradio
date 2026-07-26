@@ -24,6 +24,15 @@ from ..runtime import Service, spawn
 log = logging.getLogger(__name__)
 
 
+def _is_filler(track: dict[str, Any]) -> bool:
+    """Is this queue entry station padding rather than a channel post?
+
+    Radio tracks are filler by source (their rows exist only as Mix
+    continuations). Archive-station entries are ordinary channel rows replayed
+    as padding, so the row can't say — the queue entry carries a flag instead."""
+    return track.get("source") == "radio" or bool(track.get("filler"))
+
+
 class NullBackend:
     """Simulated playback for dev machines and tests: 'plays' a track for its
     duration (or a few seconds if unknown), then fires on_end."""
@@ -195,7 +204,11 @@ class PlayerService(Service):
         self.current: dict[str, Any] | None = None
         self.queue: list[dict[str, Any]] = []
         self.volume: int = config.volume
-        self.radio_active: bool = False
+        # The station filling the queue when it runs dry, if any. "radio" pulls
+        # a YouTube Mix from the seed track; "archive" replays random channel
+        # history. Mutually exclusive: both answer "what plays after the last
+        # queued song", so only one can be on.
+        self.station: str | None = None    # None | "radio" | "archive"
         self.radio: Any = None             # RadioService, injected by app.py
         self.on_state: Callable[[], None] | None = None  # session persistence hook
         self._play_id: int | None = None
@@ -232,13 +245,12 @@ class PlayerService(Service):
         return (time.time() - float(mesh_ts)) <= self.config.live_window_s
 
     def _enqueue(self, track: dict[str, Any]) -> None:
-        """Channel tracks go ahead of radio filler; radio appends at the end."""
-        if track.get("source") == "radio":
+        """Channel posts go ahead of station filler; filler appends at the end."""
+        if _is_filler(track):
             self.queue.append(track)
         else:
             idx = next(
-                (i for i, t in enumerate(self.queue) if t.get("source") == "radio"),
-                len(self.queue),
+                (i for i, t in enumerate(self.queue) if _is_filler(t)), len(self.queue)
             )
             self.queue.insert(idx, track)
 
@@ -422,17 +434,38 @@ class PlayerService(Service):
             self.publish_state()
 
     async def clear_queue(self) -> None:
-        """Empty the queue. Also switches radio off — otherwise it would
+        """Empty the queue. Also switches the station off — otherwise it would
         immediately refill what the user just cleared."""
         self.queue = []
-        self.radio_active = False
+        self.station = None
         self.publish_state()
 
-    # -- radio mode -----------------------------------------------------------
+    # -- stations (queue filler when the day runs out) --------------------------
 
-    async def start_radio(self, track_id: int | None = None) -> bool:
-        """Start a YouTube Mix 'radio station' seeded from a track (default:
-        whatever is playing, else the most recently played track)."""
+    async def start_station(self, kind: str, track_id: int | None = None) -> bool:
+        """Turn on a station, so the music keeps going once the queue is empty.
+
+        ``radio`` seeds a YouTube Mix off a track (default: whatever is playing,
+        else the last thing played) — it needs yt-dlp and a residential IP.
+        ``archive`` replays random channel history and needs neither, which is
+        what makes it the one that works on the public embed host.
+
+        Starting from idle plays immediately: a visitor who reaches the end of a
+        day and presses this wants music now, not on the next advance."""
+        if kind == "radio":
+            return await self._start_radio(track_id)
+        if kind != "archive":
+            log.warning("unknown station %r", kind)
+            return False
+        self.station = "archive"
+        await self._extend_from_archive()
+        if self.status == "idle" and self.queue:
+            await self.play_track(self.queue.pop(0))
+        else:
+            self.publish_state()
+        return bool(self.queue or self.current)
+
+    async def _start_radio(self, track_id: int | None = None) -> bool:
         if self.radio is None:
             return False
         seed = None
@@ -441,26 +474,40 @@ class PlayerService(Service):
         elif self.current is not None:
             seed = await self.db.track_by_id(self.current["id"])
         else:
-            rows = await self.db._fetchall(
-                "SELECT tr.* FROM tracks tr JOIN plays p ON p.track_id=tr.id "
-                "ORDER BY p.played_at DESC LIMIT 1"
-            )
-            seed = rows[0] if rows else None
+            seed = await self.db.last_played_track()
         if seed is None:
             return False
-        self.radio_active = True
+        self.station = "radio"
         self.publish_state()
         await self.radio.extend(seed, limit=self.config.radio_batch)
         return True
 
-    async def stop_radio(self) -> None:
-        """Stop fetching new mix batches. Radio tracks already queued (or
-        still downloading) are kept — clear_queue is the way to drop them."""
-        self.radio_active = False
+    async def stop_station(self) -> None:
+        """Stop topping the queue up. Whatever the station already queued (or is
+        still downloading) stays — clear_queue is the way to drop it."""
+        self.station = None
         self.publish_state()
 
+    async def _extend_from_archive(self) -> int:
+        """Append a batch of random archived songs to the queue as filler.
+
+        Synchronous and offline: the rows are already in the archive, so unlike
+        radio mode there's no fetch, no cacher round trip, and nothing to wait
+        for — the next song is ready the instant the last one ends."""
+        seen = [t["video_id"] for t in (self.current, *self.queue) if t]
+        tracks = await self.db.random_channel_tracks(
+            limit=self.config.station_batch,
+            exclude_video_ids=seen,
+            ready_only=not self.embed,
+        )
+        for track in tracks:
+            self.queue.append(dict(track, filler=True))
+        if not tracks:
+            log.info("archive station: nothing playable to queue")
+        return len(tracks)
+
     def _maybe_extend_radio(self, seed: dict[str, Any] | None) -> None:
-        if self.radio_active and self.radio is not None and seed is not None:
+        if self.station == "radio" and self.radio is not None and seed is not None:
             spawn("radio-extend", self.radio.extend(seed, limit=self.config.radio_batch))
 
     # -- browser playback signal ------------------------------------------------
@@ -498,6 +545,11 @@ class PlayerService(Service):
         self._play_id = None
         last = self.current
         self.current = None
+        # The archive station refills right here, with no network round trip, so
+        # the last song of a day rolls straight into the next pick instead of
+        # dropping the listener into silence.
+        if not self.queue and self.station == "archive":
+            await self._extend_from_archive()
         if self.queue:
             next_track = self.queue.pop(0)
             # Keep the radio rolling: top up when the queue is nearly dry.
@@ -528,6 +580,7 @@ class PlayerService(Service):
                 "sender": t.get("sender"),
                 "duration": t.get("duration"),
                 "source": t.get("source"),
+                "filler": bool(t.get("filler")),
             }
 
         return {
@@ -537,7 +590,7 @@ class PlayerService(Service):
             "position": round(self.position(), 1),
             "volume": self.volume,
             "output": self.output_getter(),
-            "radio": self.radio_active,
+            "station": self.station,
             "web_audio": isinstance(self.backend, WebBackend),
             "embed": self.embed,
             "current": brief(self.current),
@@ -558,6 +611,7 @@ class PlayerService(Service):
             "mode": self.mode,
             "status": self.status,
             "volume": self.volume,
+            "station": self.station,
             "current_track_id": self.current["id"] if self.current else None,
             "position": round(self.position(), 1),
             "saved_at": time.time(),
@@ -571,6 +625,10 @@ class PlayerService(Service):
         self.volume = int(snap.get("volume", self.volume))
         self.mode = snap.get("mode") if snap.get("mode") in ("live", "archive") else "live"
         self.day = snap.get("day")
+        # A station survives the restart that dropped the session; the queue's
+        # per-entry filler flags don't (only track ids are stored), which at
+        # worst costs a restored session one mis-ordered live post.
+        self.station = snap.get("station") if snap.get("station") in ("radio", "archive") else None
         queue: list[dict[str, Any]] = []
         for track_id in snap.get("queue_track_ids", []):
             track = await self.db.track_by_id(track_id)
