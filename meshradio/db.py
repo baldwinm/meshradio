@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -233,11 +233,33 @@ MIGRATIONS: list[str] = [
     """
     CREATE INDEX idx_tracks_ingested ON tracks(ingested_at);
     """,
+    # v9 — themes.updated_at, so theme *adoptions* reach the relay receiver.
+    #
+    # adopt_theme renames a placeholder in place, leaving created_at alone. The
+    # relay's themes cursor is keyed on created_at, and the placeholder was
+    # already skipped-but-passed on an earlier push — so the adopted row never
+    # came back from themes_since and the receiver kept its own "Untitled —"
+    # for that day forever. themes_since now keys on COALESCE(updated_at,
+    # created_at), which an adoption moves forward. NULL on existing rows means
+    # "never adopted since this migration" and reads as created_at.
+    """
+    ALTER TABLE themes ADD COLUMN updated_at TEXT;
+    """,
 ]
 
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _next_second(ts: str) -> str:
+    """The second after ``ts``. Our timestamps are second-resolution, so this
+    is how a row is nudged strictly past a cursor sitting on it."""
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return ts
+    return (dt + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def dedupe_hash(channel: str, sender: str, video_id: str, mesh_ts: float) -> str:
@@ -339,10 +361,21 @@ class Database:
 
         Used when links arrived before the theme was announced: the day's
         "Untitled —" placeholder is renamed in place so every early track stays
-        in the one playlist instead of being stranded on a separate theme."""
+        in the one playlist instead of being stranded on a separate theme.
+
+        Stamps ``updated_at`` so the relay re-pushes the adoption: created_at
+        stays put (it still says when the day's playlist opened), and
+        ``themes_since`` orders on updated_at when present. It is forced past
+        created_at because the relay's cursor is usually sitting on exactly
+        this row — the push that skipped the placeholder — and an equal
+        second would leave the adoption invisible to it."""
+        row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
+        assert row is not None
+        updated_at = max(utcnow(), _next_second(row["created_at"]))
         await self.db.execute(
-            "UPDATE themes SET title=?, set_by=?, raw_message=?, locked=1 WHERE id=?",
-            (title, set_by, raw_message, theme_id),
+            "UPDATE themes SET title=?, set_by=?, raw_message=?, locked=1, updated_at=? "
+            "WHERE id=?",
+            (title, set_by, raw_message, updated_at, theme_id),
         )
         await self.db.commit()
         row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
@@ -594,12 +627,20 @@ class Database:
     # -- relay ----------------------------------------------------------------
 
     async def themes_since(self, ts: str, last_id: int = 0) -> list[dict[str, Any]]:
-        """Themes created after the (timestamp, id) cursor, oldest first.
-        The id tiebreaker means rows sharing the cursor's second (timestamps
-        are second-resolution) are neither skipped nor re-sent forever."""
+        """Themes created *or adopted* after the (timestamp, id) cursor, oldest
+        first, each carrying the ``relay_ts`` the cursor should record.
+
+        Keying on updated_at-else-created_at is what lets an adopted
+        placeholder relay: it was skipped as an untitled placeholder on an
+        earlier push, and only the adoption moves it back in front of the
+        cursor. The id tiebreaker means rows sharing the cursor's second
+        (timestamps are second-resolution) are neither skipped nor re-sent
+        forever."""
         return await self._fetchall(
-            "SELECT * FROM themes WHERE created_at > ? "
-            "OR (created_at = ? AND id > ?) ORDER BY created_at, id",
+            "SELECT *, COALESCE(updated_at, created_at) AS relay_ts FROM themes "
+            "WHERE COALESCE(updated_at, created_at) > ? "
+            "OR (COALESCE(updated_at, created_at) = ? AND id > ?) "
+            "ORDER BY relay_ts, id",
             (ts, ts, last_id),
         )
 

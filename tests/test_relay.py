@@ -6,6 +6,7 @@ import json
 import httpx
 
 from meshradio.audio.routing import make_router
+from meshradio.bus import EventBus
 from meshradio.config import PlayerConfig, RelayConfig
 from meshradio.db import Database
 from meshradio.ingest.relay import CURSOR_KEY, RelayPusher
@@ -108,6 +109,65 @@ async def test_same_second_rows_not_skipped_nor_resent(db, bus):
     assert [m["sender"] for m in messages] == ["carol"]   # not skipped
     messages, _ = await pusher.collect(cursor2)
     assert messages == []                                 # not re-sent forever
+
+
+async def test_adopted_theme_is_recollected(db, bus):
+    """A placeholder skipped by an earlier push must come back once adopted —
+    even when the adoption lands in the same second the placeholder was
+    created, with the cursor sitting on exactly that row."""
+    placeholder = await db.create_theme("2026-07-06", "Untitled — 2026-07-06")
+    pusher = RelayPusher(RelayConfig(), db)
+    messages, cursor = await pusher.collect("")
+    assert messages == []                                  # placeholder skipped
+    assert json.loads(cursor)["themes"] == [placeholder["created_at"], placeholder["id"]]
+
+    await db.adopt_theme(placeholder["id"], "games", set_by="alice", raw_message="Theme: games")
+    messages, cursor2 = await pusher.collect(cursor)
+    assert [m["text"] for m in messages] == ["Theme: games"]
+    messages, _ = await pusher.collect(cursor2)
+    assert messages == []                                  # and not re-sent forever
+
+
+async def test_adopted_theme_reaches_receiver(db, bus, tmp_path):
+    """Links before the theme: the day opens with an "Untitled —" placeholder,
+    which the relay skips, so the receiver builds its own. When the real
+    "Theme: …" message adopts the placeholder, that adoption has to reach the
+    receiver too — otherwise the hosted instance is stuck showing "Untitled"
+    for the day until a wipe forces a full re-backfill."""
+    day, ts = "2026-07-06", 1_783_400_000.0
+    home = IngestService(db, bus, channel="#music")
+    await home.handle_message(
+        sender="bob", text="https://youtu.be/aaaaaaaaaaa", ts=ts, source="mesh"
+    )
+
+    receiver_db = Database(tmp_path / "receiver.db")
+    await receiver_db.connect()
+    receiver_bus = EventBus()
+    pusher = RelayPusher(RelayConfig(push_url="http://receiver", token="s3cret"), db)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=make_app(receiver_db, receiver_bus, "s3cret")),
+            headers={"Authorization": "Bearer s3cret"},
+        ) as client:
+            await pusher.push_once(client)
+            remote = await receiver_db.latest_theme_for_date(day)
+            assert remote["title"] == f"Untitled — {day}"   # its own placeholder
+
+            await home.handle_message(
+                sender="alice", text="Theme: games", ts=ts + 60, source="mesh"
+            )
+            assert (await db.latest_theme_for_date(day))["title"] == "games"
+
+            await pusher.push_once(client)
+            remote = await receiver_db.latest_theme_for_date(day)
+            assert remote["title"] == "games"
+            assert remote["set_by"] == "alice"
+            # Adopted in place, so the day still has one playlist holding the
+            # link that arrived before the theme.
+            days = await receiver_db.archive_days()
+            assert len(days) == 1 and days[0]["tracks"] == 1
+    finally:
+        await receiver_db.close()
 
 
 async def test_legacy_plain_timestamp_cursor_still_works(db, bus):

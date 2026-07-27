@@ -189,7 +189,8 @@ the DB through `db.py` only. The web WebSocket forwards bus payloads verbatim
 ## 5. Data model
 
 ```sql
-themes(  id, date, title, set_by, raw_message, created_at )
+themes(  id, date, title, set_by, raw_message, created_at, locked,
+         updated_at )                        -- set when a placeholder is adopted
 tracks(  id, video_id, url, title, artist, duration,
          theme_id → themes, sender, mesh_ts, ingested_at,
          source TEXT CHECK(source IN ('mesh','corescope','radio','letsmesh')),
@@ -416,6 +417,14 @@ receiver funnels them through the *same* ingest pipeline, so its dedupe makes
 re-pushes no-ops; the relay's cursor is an optimization, not a correctness
 requirement. Auth is a shared bearer token (`MESHRADIO_INGEST_TOKEN` on the host,
 `[relay].token` on the Pi), compared with `secrets.compare_digest`.
+
+Auto-created "Untitled —" placeholder themes are *not* relayed — the receiver
+makes its own when the day's first link lands. So when the real theme message
+turns up later and adopts the placeholder (§6), that rename has to be pushed as
+its own message, or the host stays on "Untitled" for the day. `adopt_theme`
+therefore stamps `themes.updated_at`, and the relay's themes cursor keys on
+`COALESCE(updated_at, created_at)` — an in-place rename moves the row back in
+front of the cursor instead of vanishing behind it.
 
 **Self-healing against a wiped receiver.** Each push reports the receiver's track
 count; when it drops below the home node's (a fresh host with an empty disk), the

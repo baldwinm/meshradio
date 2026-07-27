@@ -111,7 +111,10 @@ class RelayPusher(Service):
         messages: list[dict[str, Any]] = []
         for theme in themes:
             # Auto-created placeholder themes carry no message; the receiver
-            # regenerates its own when the day's first link arrives.
+            # regenerates its own when the day's first link arrives. If the
+            # day's real theme turns up later, adopt_theme stamps updated_at
+            # and themes_since hands the row back — that's how the receiver's
+            # placeholder ever gets a title.
             if not theme.get("raw_message") and not theme.get("set_by"):
                 continue
             messages.append({
@@ -133,7 +136,7 @@ class RelayPusher(Service):
             })
         messages.sort(key=lambda m: m["ts"])
         newest = json.dumps({
-            "themes": [themes[-1]["created_at"], themes[-1]["id"]] if themes else cur["themes"],
+            "themes": [themes[-1]["relay_ts"], themes[-1]["id"]] if themes else cur["themes"],
             "tracks": [tracks[-1]["ingested_at"], tracks[-1]["id"]] if tracks else cur["tracks"],
         })
         return messages, newest
