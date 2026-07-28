@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- The 📻 from the site header, drawn as text so the browser uses its own
+       color emoji font — no binary asset and no build step (architecture §9). -->
+  <text x="50" y="50" font-size="90" text-anchor="middle" dominant-baseline="central">📻</text>
+</svg>
