@@ -28,6 +28,11 @@ Happy Friday Music Meshers! Today's theme is: Friends and friendship.
 theme for today: one hit wonders
 ```
 
+The colon is what marks the title, and it has to be a real one — a smiley
+(`theme is planes :-) or trains?`), a link, or a time (`theme at 8:30`) is
+punctuation, not a delimiter, so those messages set no theme at all rather
+than a garbled one. Say `theme … : <title>` and you'll be understood.
+
 The first theme post of the day (America/Chicago) creates the day's theme
 and locks it — later theme posts are ignored, so an accidental (or mischievous)
 second "theme" can't reset it or split the day into two playlists. If songs

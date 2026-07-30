@@ -1,3 +1,5 @@
+import pytest
+
 from meshradio.ingest.parse import extract_links, parse_theme, untitled_theme
 
 VID = "dQw4w9WgXcQ"
@@ -95,6 +97,67 @@ def test_theme_mid_message_line():
 
 def test_theme_empty_title():
     assert parse_theme("Theme:   ") is None
+
+
+def test_theme_emoticon_is_not_a_delimiter():
+    """The 2026-07-30 regression: a colon-less "theme is …" plus a smiley left
+    the day titled "-) or trains? (Which I really like)". A mention with no
+    real colon declares nothing."""
+    text = "Today's theme is planes :-) or trains? (Which I really like)"
+    assert parse_theme(text) is None
+
+
+@pytest.mark.parametrize("face", [":-)", ":)", ":D", ":P", ":/", ":|", ":3", ":-("])
+def test_theme_emoticons_never_delimit(face):
+    assert parse_theme(f"today's theme is trains {face} anyway") is None
+
+
+def test_theme_survives_an_emoticon_before_the_real_colon():
+    assert parse_theme("morning :-) today's theme is: rain") == "rain"
+
+
+def test_theme_keeps_an_emoticon_inside_the_title():
+    # Past the delimiter it's just title text, punctuation and all.
+    assert parse_theme("Theme: songs that make you go :-)") == "songs that make you go :-)"
+
+
+def test_theme_url_scheme_is_not_a_delimiter():
+    text = f"todays theme is this one https://youtu.be/{VID}"
+    assert parse_theme(text) is None
+
+
+def test_theme_clock_time_is_not_a_delimiter():
+    assert parse_theme("theme at 8:30 tonight") is None
+    assert parse_theme("theme at 8:30 tonight is: slow jams") == "slow jams"
+
+
+def test_theme_numbered_title_still_delimits():
+    # Only a digit on *both* sides means a clock, so these are real titles.
+    assert parse_theme("theme for day 3: water") == "water"
+    assert parse_theme("Theme:80s hits") == "80s hits"
+
+
+@pytest.mark.parametrize("title", ["dance", "optimism", "pop punk", "3 chord songs", "Dad rock"])
+def test_theme_unspaced_title_is_not_read_as_a_face(title):
+    """":D"/":P"/":o" only count as faces when the colon starts its own token —
+    otherwise "Theme:dance" would lose its title to a phantom smiley."""
+    assert parse_theme(f"Theme:{title}") == title
+
+
+def test_theme_face_jammed_against_a_word_still_skipped():
+    assert parse_theme("today's theme is planes:-) or trains") is None
+
+
+def test_theme_second_mention_wins_when_the_first_declares_nothing():
+    text = "is there a theme today?\nTheme: one hit wonders"
+    assert parse_theme(text) == "one hit wonders"
+
+
+def test_theme_far_from_the_colon_is_ignored():
+    # The colon has to be near "theme" — otherwise any later sentence with a
+    # colon would retitle the day.
+    text = "theme " + "x" * 60 + ": not the title"
+    assert parse_theme(text) is None
 
 
 def test_untitled_theme():
