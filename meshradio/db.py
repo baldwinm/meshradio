@@ -382,6 +382,38 @@ class Database:
         assert row is not None
         return row
 
+    async def rename_theme(self, theme_id: int, title: str) -> dict[str, Any]:
+        """Retitle a theme by hand, keeping it locked and keeping its playlist.
+
+        The escape hatch for a title the channel got wrong: a mangled parse (a
+        ``:-)`` in the post splits before the real title), a typo, a theme
+        announced under the wrong words. Ingest can't fix these — the day's
+        theme locks on the first ``Theme:`` post and every later one is
+        ignored — and the row can't just be replaced either, because the day's
+        tracks hang off this ``id``.
+
+        ``set_by`` and ``created_at`` are left alone: they still record who
+        opened the day and when. ``raw_message`` is rewritten to a canonical
+        ``Theme: <title>``, because the relay replays it verbatim as the
+        channel message — leaving the original there would re-broadcast the
+        bad title to any receiver rebuilding its archive from the relay.
+
+        Raises ``sqlite3.IntegrityError`` if the date already has a theme with
+        this title (UNIQUE(date, title)); callers report that as a no-op."""
+        row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
+        assert row is not None
+        # Same nudge as adopt_theme: strictly past created_at, so a relay
+        # cursor parked on this row still sees the change.
+        updated_at = max(utcnow(), _next_second(row["created_at"]))
+        await self.db.execute(
+            "UPDATE themes SET title=?, raw_message=?, locked=1, updated_at=? WHERE id=?",
+            (title, f"Theme: {title}", updated_at, theme_id),
+        )
+        await self.db.commit()
+        row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
+        assert row is not None
+        return row
+
     async def latest_theme_for_date(self, date: str) -> dict[str, Any] | None:
         return await self._fetchone(
             "SELECT * FROM themes WHERE date=? ORDER BY created_at DESC, id DESC LIMIT 1",

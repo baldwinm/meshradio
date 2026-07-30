@@ -34,6 +34,9 @@ second "theme" can't reset it or split the day into two playlists. If songs
 arrive before anyone sets a theme, they file under an `Untitled — <date>`
 placeholder that the day's first real theme post then renames in place.
 
+Because the lock also blocks corrections, the operator can retitle a day from
+the command line — see [Fixing a theme](#fixing-a-theme).
+
 **Sharing a song** — post any message containing a YouTube or YouTube Music
 link. Supported forms:
 
@@ -211,6 +214,26 @@ the current DB first, so a restore is itself reversible.
 
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
 for the unit and install/update commands.
+
+### Fixing a theme
+
+A day's theme locks on the channel's first `Theme:` post, so a bad title —
+a typo, or a parse that split on the wrong colon (`theme is: planes :-) or
+trains?`) — can't be corrected by posting again. Retitle it directly:
+
+```
+meshradio --set-theme "water"                          # today
+meshradio --set-theme "water" --theme-date 2026-07-06  # any day
+```
+
+It renames the day's existing theme in place, so the songs already filed
+under it stay put, and leaves it locked. If the day has no theme yet, it
+creates one, and links arriving later that day attach to it.
+
+This edits whichever archive the config points at, and a rename does **not**
+travel over the relay — the hosted receiver has its own locked theme for that
+day and ignores the replayed message, exactly like a corrected repost on the
+channel. Run it once per instance you want fixed (the Pi and the host).
 
 ---
 

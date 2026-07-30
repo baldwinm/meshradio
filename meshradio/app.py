@@ -10,7 +10,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import sqlite3
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import uvicorn
 
@@ -193,6 +196,14 @@ def main() -> None:
                         help="restore the archive DB from a snapshot ('latest', a filename in "
                              "the backup dir, or a path) and exit; the current DB is snapshotted "
                              "first so it's reversible. Stop the service before running.")
+    parser.add_argument("--set-theme", metavar="TITLE",
+                        help="retitle a day's theme in this archive and exit. For fixing a "
+                             "title the channel got wrong — ingest locks the day's theme on "
+                             "the first 'Theme:' post, so a corrected repost is ignored. "
+                             "Defaults to today; see --theme-date.")
+    parser.add_argument("--theme-date", metavar="YYYY-MM-DD",
+                        help="which day --set-theme applies to (default: today, in the "
+                             "configured player timezone)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -215,6 +226,11 @@ def main() -> None:
 
     if args.list_backups or args.restore_backup is not None:
         raise SystemExit(_run_backup_cli(config, args))
+
+    if args.set_theme is not None:
+        raise SystemExit(asyncio.run(_run_set_theme(config, args)))
+    if args.theme_date is not None:
+        parser.error("--theme-date only applies with --set-theme")
 
     try:
         asyncio.run(run(config, demo=args.demo))
@@ -248,6 +264,59 @@ def _run_backup_cli(config, args) -> int:
         print(f"previous DB saved as {safety.name} — restore it to undo")
     print("start the service to load the restored archive.")
     return 0
+
+
+async def _run_set_theme(config, args) -> int:
+    """Handle --set-theme: retitle (or create) a day's theme, then exit.
+
+    Acts on whatever archive this config points at, so it has to be run once
+    per instance you want corrected. A rename does *not* propagate over the
+    relay to a hosted receiver: the receiver's own theme for that day is
+    locked, so it ignores the replayed theme message the same way it ignores a
+    corrected repost on the channel."""
+    title = args.set_theme.strip()
+    if not title:
+        print("--set-theme needs a non-empty title", file=sys.stderr)
+        return 1
+
+    if args.theme_date:
+        try:
+            date = datetime.strptime(args.theme_date, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            print(f"--theme-date must be YYYY-MM-DD, got {args.theme_date!r}", file=sys.stderr)
+            return 1
+    else:
+        date = datetime.now(ZoneInfo(config.player.timezone)).strftime("%Y-%m-%d")
+
+    db = Database(config.db_path)
+    await db.connect()
+    try:
+        existing = await db.latest_theme_for_date(date)
+        if existing is None:
+            # No posts that day yet. Open the playlist with this title so links
+            # arriving later attach to it instead of an "Untitled —" placeholder.
+            theme = await db.create_theme(
+                date, title, raw_message=f"Theme: {title}", locked=True
+            )
+            print(f"{date}: no theme existed — created {theme['title']!r}")
+            return 0
+        if existing["title"] == title:
+            print(f"{date}: theme is already {title!r} — nothing to do")
+            return 0
+        try:
+            theme = await db.rename_theme(existing["id"], title)
+        except sqlite3.IntegrityError:
+            print(f"{date} already has a different theme row titled {title!r}; "
+                  f"rename or remove it first", file=sys.stderr)
+            return 1
+        count = len(await db.tracks_for_theme(theme["id"]))
+        plural = "" if count == 1 else "s"
+        print(f"{date}: {existing['title']!r} -> {theme['title']!r} ({count} song{plural} kept)")
+        print("Reload the site to see it. Run this on each instance (relay hosts "
+              "keep their own locked theme and won't pick this up).")
+        return 0
+    finally:
+        await db.close()
 
 
 if __name__ == "__main__":
