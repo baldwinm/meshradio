@@ -6,7 +6,14 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from .. import __version__
-from .context import WEEKDAY_HEADERS, calendar_months, ctx_of, yt_export_url
+from .context import (
+    WEEKDAY_HEADERS,
+    archive_months,
+    calendar_month,
+    ctx_of,
+    month_step,
+    yt_export_url,
+)
 
 router = APIRouter()
 
@@ -23,14 +30,20 @@ async def index(request: Request):
 
 
 @router.get("/archive", response_class=HTMLResponse)
-async def archive(request: Request):
+async def archive(request: Request, m: str = ""):
+    """One month at a time. ``m`` (``YYYY-MM``) picks it; anything unrecognised
+    falls back to the newest month with songs in it."""
     ctx = ctx_of(request)
     days = await ctx.db.archive_days()
+    months = archive_months(days)
+    i = months.index(m) if m in months else len(months) - 1
     return ctx.templates.TemplateResponse(
         request,
         "archive.html",
         {
-            "months": calendar_months(days),
+            "month": calendar_month(days, months[i]) if months else None,
+            "prev_month": month_step(months[i - 1] if i > 0 else None),
+            "next_month": month_step(months[i + 1] if 0 <= i < len(months) - 1 else None),
             "day_count": len(days),
             "weekday_headers": WEEKDAY_HEADERS,
         },

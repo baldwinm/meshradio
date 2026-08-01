@@ -515,6 +515,30 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 /* -- archive calendar ------------------------------------------------------- */
 .cal-hint { color: var(--muted); font-size: 0.78rem; margin: 0 0 0.9rem; }
 .cal-month { margin-bottom: 1.3rem; }
+/* Month nav: one month at a time, arrows step to the next month with songs. */
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.cal-nav h3 { margin: 0; text-align: center; }
+.cal-step {
+  color: var(--green);
+  text-decoration: none;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid transparent;
+}
+.cal-step:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+/* Ends of history: kept in place so the label doesn't shift, but dead. */
+.cal-step-off { color: var(--green-dark); opacity: 0.4; }
+.cal-step-off:hover { color: var(--green-dark); border-color: transparent; background: none; }
 .cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);

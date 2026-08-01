@@ -1,17 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Archive</h2>
-{% if months %}
+{% if month %}
 <p class="cal-hint">{{ day_count }} {{ "day" if day_count == 1 else "days" }} on the
   channel. Tap a lit day to play or browse it.</p>
-{% for m in months %}
 <section class="cal-month">
-  <h3>{{ m.label }}</h3>
-  <div class="cal-grid" role="grid" aria-label="{{ m.label }}">
+  <div class="cal-nav">
+    {% if prev_month %}
+    <a class="cal-step" href="/archive?m={{ prev_month.key }}"
+       title="{{ prev_month.label }}" rel="prev">←</a>
+    {% else %}
+    <span class="cal-step cal-step-off" aria-hidden="true">←</span>
+    {% endif %}
+    <h3>{{ month.label }}</h3>
+    {% if next_month %}
+    <a class="cal-step" href="/archive?m={{ next_month.key }}"
+       title="{{ next_month.label }}" rel="next">→</a>
+    {% else %}
+    <span class="cal-step cal-step-off" aria-hidden="true">→</span>
+    {% endif %}
+  </div>
+  <div class="cal-grid" role="grid" aria-label="{{ month.label }}">
     {% for h in weekday_headers %}
     <div class="cal-head" role="columnheader">{{ h }}</div>
     {% endfor %}
-    {% for week in m.weeks %}
+    {% for week in month.weeks %}
       {% for cell in week %}
         {% if cell is none %}
         <div class="cal-cell cal-blank" role="gridcell" aria-hidden="true"></div>
@@ -31,7 +44,6 @@
     {% endfor %}
   </div>
 </section>
-{% endfor %}
 {% else %}
 <p class="empty">No history yet — the archive fills in as links land on the channel.</p>
 {% endif %}
