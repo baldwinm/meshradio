@@ -1,6 +1,7 @@
 """How pages reach the browser: compression, asset caching, 404s, and the
 per-page identity (title, current nav item) that history and tabs rely on."""
 
+import re
 import time
 
 import pytest
@@ -149,6 +150,67 @@ async def test_archive_days_are_cached_between_calls(db, bus):
         assert calls == 2
     finally:
         db.archive_days = original
+
+
+def meta_of(body: str) -> dict[str, str]:
+    """The page's link-preview tags, by property/name."""
+    return dict(
+        re.findall(r'<meta (?:property|name)="([^"]+)" content="([^"]*)"', body)
+    )
+
+
+async def test_a_day_previews_with_its_theme_and_art(db, bus):
+    """A day is what gets pasted into a chat; the card has to say something."""
+    theme = await db.create_theme("2026-08-01", "Rain songs")
+    await db.add_track(
+        video_id="aaaaaaaaaaa", url="u", channel="#music", sender="ana",
+        mesh_ts=time.time(), source="mesh", theme_id=theme["id"],
+    )
+    async with client_for(page_app(db, bus)) as client:
+        meta = meta_of((await client.get("/archive/2026-08-01")).text)
+    assert meta["og:title"] == "2026-08-01 — Rain songs"
+    assert "1 song" in meta["og:description"] and "Rain songs" in meta["og:description"]
+    assert meta["og:image"] == "https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg"
+    assert meta["twitter:card"] == "summary_large_image"
+    assert meta["og:url"].endswith("/archive/2026-08-01")
+
+
+async def test_pages_without_art_still_carry_a_card(db, bus):
+    async with client_for(page_app(db, bus)) as client:
+        meta = meta_of((await client.get("/about")).text)
+    assert meta["og:title"] == "About"
+    assert meta["twitter:card"] == "summary"        # no image to show
+    assert "og:image" not in meta
+    assert meta["description"].startswith("Songs shared each day")
+
+
+async def test_the_404_declares_nothing_canonical(db, bus):
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/archive/nope", headers=HTML)).text
+    meta = meta_of(body)
+    assert meta["robots"] == "noindex"
+    assert meta["og:url"].endswith("/")             # the site, not the bad path
+    assert "nope" not in body
+
+
+async def test_crawlers_get_the_pages_and_not_the_machinery(db, bus):
+    await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
+    async with client_for(page_app(db, bus)) as client:
+        robots = (await client.get("/robots.txt")).text
+        sitemap = (await client.get("/sitemap.xml")).text
+    for blocked in ("/api/", "/partials/", "/audio/", "/search"):
+        assert f"Disallow: {blocked}" in robots
+    assert "Sitemap: http" in robots and "/sitemap.xml" in robots
+    assert "/archive/2026-08-01</loc>" in sitemap   # every archived day
+    assert "/archive/themes</loc>" in sitemap
+    assert sitemap.startswith("<?xml")
+
+
+async def test_forwarded_https_survives_the_proxy(db, bus):
+    """Hosted deployments terminate TLS upstream; the app sees plain http."""
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/about", headers={"x-forwarded-proto": "https"})).text
+    assert meta_of(body)["og:url"].startswith("https://")
 
 
 async def test_search_says_when_the_list_is_cut_off(db, bus):

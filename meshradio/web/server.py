@@ -29,7 +29,7 @@ from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
-from .context import WebContext
+from .context import WebContext, absolute_url
 from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry, valid_sid
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,8 @@ def create_app(
     app.add_middleware(GZipMiddleware, minimum_size=500)
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
+    # base.html builds every page's link-preview tags from the live request.
+    templates.env.globals["absolute_url"] = absolute_url
     templates.env.globals["asset_v"] = _asset_version()
     # Public embed hosting only: the Buy-Me-a-Coffee button pulls an external
     # CDN script, so keep it off the offline LAN/appliance skin. player_factory
@@ -191,7 +193,12 @@ def create_app(
         if not wants_html:
             return JSONResponse({"detail": detail or "Not Found"}, status_code=404)
         return templates.TemplateResponse(
-            request, "404.html", {"detail": detail}, status_code=404
+            request,
+            "404.html",
+            # Not a document: no indexing, and no canonical/og:url built from
+            # the path that missed — that path is whatever a stranger typed.
+            {"detail": detail, "meta_url": absolute_url(request, "/"), "meta_noindex": True},
+            status_code=404,
         )
 
     app.include_router(routes_pages.router)

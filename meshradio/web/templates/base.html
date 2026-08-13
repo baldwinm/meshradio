@@ -6,6 +6,34 @@
   {# Per-page titles: tabs, history and bookmarks are otherwise all "MeshRadio".
      htmx picks this up on boosted navigation too. #}
   <title>{% block title %}MeshRadio{% endblock %}</title>
+  {# Link previews. A day of the channel gets shared into a chat far more often
+     than it gets browsed, and an unfurled card is the only thing most people
+     will ever see of it. Routes pass meta_description / meta_image where they
+     have something specific to say; everything else falls back to the page
+     title and the site blurb. #}
+  {# meta_url lets a page that isn't a real document (the 404) point elsewhere
+     rather than declare itself canonical — and never reflect the URL that
+     produced it. #}
+  {% set page_url = meta_url or absolute_url(request) %}
+  {% if meta_noindex %}<meta name="robots" content="noindex">{% endif %}
+  {% set og_title = self.title()|replace(" · MeshRadio", "") %}
+  {% set og_desc = meta_description or
+     "Songs shared each day on the Austin MeshCore #music channel, played against that day's theme." %}
+  <meta name="description" content="{{ og_desc }}">
+  <link rel="canonical" href="{{ page_url }}">
+  <meta property="og:site_name" content="MeshRadio">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ og_desc }}">
+  <meta property="og:url" content="{{ page_url }}">
+  {% if meta_image %}
+  <meta property="og:image" content="{{ meta_image }}">
+  <meta name="twitter:card" content="summary_large_image">
+  {% else %}
+  <meta name="twitter:card" content="summary">
+  {% endif %}
+  <meta name="twitter:title" content="{{ og_title }}">
+  <meta name="twitter:description" content="{{ og_desc }}">
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {# defer: htmx only needs the DOM at DOMContentLoaded, and nothing calls its

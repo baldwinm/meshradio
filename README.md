@@ -143,6 +143,15 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   day. A title used on more than one day carries an `N×` badge, so it's easy to
   see what's been done before picking tomorrow's. Days that never got a theme
   aren't listed.
+- **Stats** — the channel's numbers, plus what's actually been playing:
+  recently played, most played (with how often people sit through it — the
+  `plays` record, not the posting record), top sharers, busiest themes.
+- **Member pages** — every sharer's name is a link: what they've shared, the
+  days they named, the artists they keep coming back to, and the span they've
+  been on the channel.
+- **Shareable links** — a day pasted into a chat unfurls with its theme, song
+  count, and cover art, so a link to `/archive/2026-08-11` says something
+  before anyone clicks it.
 - **🎲 Keep playing** — never run out: when the queue empties, this keeps the
   music going with random songs pulled from the archive. Unlike **Start radio**
   it needs no YouTube access, so it's the "don't stop at the end of the day"
