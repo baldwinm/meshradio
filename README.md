@@ -143,9 +143,8 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   day. A title used on more than one day carries an `N×` badge, so it's easy to
   see what's been done before picking tomorrow's. Days that never got a theme
   aren't listed.
-- **Stats** — the channel's numbers, plus what's actually been playing:
-  recently played, most played (with how often people sit through it — the
-  `plays` record, not the posting record), top sharers, busiest themes.
+- **Stats** — the channel's numbers: songs, shares, sharers, days, themes and
+  plays, plus top sharers, most-shared songs, and the busiest themes.
 - **Member pages** — every sharer's name is a link: what they've shared, the
   days they named, the artists they keep coming back to, and the span they've
   been on the channel.

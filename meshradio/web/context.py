@@ -11,7 +11,7 @@ from __future__ import annotations
 from calendar import Calendar, month_name
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from time import monotonic
 from typing import Any
 
@@ -99,25 +99,6 @@ def absolute_url(request: Request, path: str | None = None) -> str:
     if forwarded:
         url = url.replace(scheme=forwarded)
     return str(url)
-
-
-def local_play_time(played_at: str, tz, today: str) -> str:
-    """A play's timestamp as the channel would say it.
-
-    Plays are stamped UTC (``db.utcnow``) but everything else on the site is
-    channel-local, so a bare ``played_at[:10]`` shows the wrong day for anything
-    after 7pm in Austin. Today's plays read as a clock time, older ones as their
-    local date."""
-    try:
-        stamped = datetime.fromisoformat(played_at.replace("Z", "+00:00"))
-    except ValueError:
-        return played_at[:10]
-    if stamped.tzinfo is None:
-        stamped = stamped.replace(tzinfo=timezone.utc)
-    local = stamped.astimezone(tz)
-    return local.strftime("%H:%M") if local.date().isoformat() == today else (
-        local.date().isoformat()
-    )
 
 
 def yt_thumbnail(video_id: str | None) -> str:

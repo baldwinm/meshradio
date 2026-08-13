@@ -662,39 +662,6 @@ class Database:
             (limit,),
         )
 
-    async def recent_plays(self, limit: int = 15) -> list[dict[str, Any]]:
-        """What actually came out of the speakers lately, newest first.
-
-        Grouped by video so a song replayed twice in an hour takes one row
-        instead of pushing the rest of the list off the page. SQLite takes the
-        bare columns from the row that produced the ``MAX`` — the query relies
-        on that, so it must stay the only min/max aggregate here.
-
-        This is plays, not shares: radio filler and archive-station songs count,
-        because they played. Rows carry ``source`` so the page can say which."""
-        return await self._fetchall(
-            "SELECT tr.id, tr.video_id, tr.title, tr.artist, tr.sender, tr.source, "
-            " tr.duration, t.date AS date, t.title AS theme_title, "
-            " MAX(p.played_at) AS played_at "
-            "FROM plays p JOIN tracks tr ON tr.id=p.track_id "
-            "LEFT JOIN themes t ON t.id=tr.theme_id "
-            "GROUP BY tr.video_id ORDER BY played_at DESC LIMIT ?",
-            (limit,),
-        )
-
-    async def most_played(self, limit: int = 15) -> list[dict[str, Any]]:
-        """Songs by play count — the listening chart, as opposed to
-        ``top_songs``, which is the posting chart. ``finished`` counts the plays
-        that ran to the end, so a song that's always skipped can't hide."""
-        return await self._fetchall(
-            "SELECT tr.video_id, COALESCE(MAX(tr.title), tr.video_id) AS title, "
-            " MAX(tr.artist) AS artist, COUNT(p.id) AS plays, "
-            " COALESCE(SUM(p.completed), 0) AS finished "
-            "FROM plays p JOIN tracks tr ON tr.id=p.track_id "
-            "GROUP BY tr.video_id HAVING plays > 1 ORDER BY plays DESC, title LIMIT ?",
-            (limit,),
-        )
-
     async def play_totals(self) -> dict[str, Any]:
         """Plays, distinct songs played, and how many ran to the end."""
         row = await self._fetchone(

@@ -15,7 +15,6 @@ from .context import (
     archive_years,
     calendar_month,
     ctx_of,
-    local_play_time,
     month_step,
     theme_history,
     theme_key,
@@ -167,22 +166,13 @@ async def search(request: Request, q: str = ""):
 
 @router.get("/stats", response_class=HTMLResponse)
 async def stats(request: Request):
-    """The channel's numbers, plus what has actually been playing — the plays
-    table is the only record of listening, as opposed to posting."""
     ctx = ctx_of(request)
-    today = ctx.today()
-    recent = [
-        {**row, "when": local_play_time(row["played_at"], ctx.player.tz, today)}
-        for row in await ctx.db.recent_plays()
-    ]
     return ctx.templates.TemplateResponse(
         request,
         "stats.html",
         {
             "totals": await ctx.db.overall_stats(),
             "plays": await ctx.db.play_totals(),
-            "recent_plays": recent,
-            "most_played": await ctx.db.most_played(),
             "top_songs": await ctx.db.top_songs(),
             "top_sharers": await ctx.db.top_sharers(),
             "busiest_themes": await ctx.db.busiest_themes(),

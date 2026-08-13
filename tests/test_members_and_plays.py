@@ -24,54 +24,29 @@ async def share(db, date, video_id, sender, title="Song", artist=None, theme=Non
     return await db.track_by_id(track["id"])
 
 
-async def test_recent_plays_are_newest_first_and_deduped(db):
-    one = await share(db, "2026-08-01", "aaaaaaaaaaa", "ana", title="First")
-    two = await share(db, "2026-08-01", "bbbbbbbbbbb", "bob", title="Second")
-    await db.record_play(one["id"], "speaker")
-    await db.record_play(two["id"], "speaker")
-    await db.record_play(one["id"], "speaker")      # replayed: one row, not two
-    recent = await db.recent_plays()
-    assert [r["title"] for r in recent] == ["First", "Second"]
-    assert recent[0]["date"] == "2026-08-01"        # carries its archive day
-    assert recent[0]["sender"] == "ana"             # …and the row that played
-
-
-async def test_most_played_counts_plays_not_shares(db):
+async def test_play_totals_count_what_was_played(db):
     once = await share(db, "2026-08-01", "aaaaaaaaaaa", "ana", title="Rarely")
     often = await share(db, "2026-08-01", "bbbbbbbbbbb", "bob", title="Often")
     await db.record_play(once["id"], None)
     for _ in range(3):
         play_id = await db.record_play(often["id"], None)
         await db.mark_play_completed(play_id)
-    chart = await db.most_played()
-    # A song played once isn't a chart position — it's just the recently-played
-    # list again, so the chart starts at two.
-    assert [(c["title"], c["plays"], c["finished"]) for c in chart] == [("Often", 3, 3)]
-    totals = await db.play_totals()
-    assert totals == {"plays": 4, "tracks": 2, "finished": 3}
-
-
-async def test_most_played_stays_empty_until_something_repeats(db):
-    track = await share(db, "2026-08-01", "aaaaaaaaaaa", "ana")
-    await db.record_play(track["id"], None)
-    assert await db.most_played() == []
+    assert await db.play_totals() == {"plays": 4, "tracks": 2, "finished": 3}
 
 
 async def test_play_totals_survive_an_empty_history(db):
     assert await db.play_totals() == {"plays": 0, "tracks": 0, "finished": 0}
-    assert await db.recent_plays() == []
 
 
-async def test_stats_page_shows_the_listening_record(db, bus):
+async def test_stats_page_counts_plays_and_links_members(db, bus):
     track = await share(db, "2026-08-01", "aaaaaaaaaaa", "ana", title="Test tone")
-    for _ in range(2):
-        play_id = await db.record_play(track["id"], "speaker")
-        await db.mark_play_completed(play_id)
+    await db.record_play(track["id"], "speaker")
     async with client_for(page_app(db, bus)) as client:
         body = (await client.get("/stats")).text
-    assert "Recently played" in body and "Most played" in body
-    assert "2 plays · 100% finished" in body
-    assert 'href="/member/ana"' in body            # sharers are explorable now
+    assert 'class="stat-l">plays' in body
+    assert 'href="/member/ana"' in body            # sharers are explorable
+    # The per-song listening lists were pulled; the tile is all that remains.
+    assert "Recently played" not in body and "Most played" not in body
 
 
 async def test_member_page_gathers_a_members_record(db, bus):

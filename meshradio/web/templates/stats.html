@@ -11,40 +11,6 @@
   <div class="stat"><span class="stat-n">{{ plays.plays or 0 }}</span><span class="stat-l">plays</span></div>
 </div>
 
-{# Plays, not posts: the only record of what actually came out of the speakers. #}
-{% if recent_plays %}
-<h3>Recently played</h3>
-<ol class="board board-plain">
-  {% for tr in recent_plays %}
-  <li>
-    {% if tr.date %}
-    <a class="board-name" href="/archive/{{ tr.date }}">{{ tr.title or tr.video_id }}{% if tr.artist %} — {{ tr.artist }}{% endif %}</a>
-    {% else %}
-    <span class="board-name">{{ tr.title or tr.video_id }}{% if tr.artist %} — {{ tr.artist }}{% endif %}</span>
-    {% endif %}
-    {% if tr.source == "radio" %}<span class="theme-runs" title="YouTube Mix filler, not a channel post">📻</span>{% endif %}
-    <span class="board-val">
-      {%- if tr.sender and tr.source != "radio" %}{{ tr.sender }} · {% endif -%}
-      {{ tr.when }}</span>
-  </li>
-  {% endfor %}
-</ol>
-{% endif %}
-
-{% if most_played %}
-<h3>Most played</h3>
-<ol class="board">
-  {% for s in most_played %}
-  <li>
-    <a class="board-name" href="https://youtu.be/{{ s.video_id }}" target="_blank" rel="noopener">
-      {{ s.title }}{% if s.artist %} — {{ s.artist }}{% endif %}</a>
-    <span class="board-val">{{ s.plays }} {{ "play" if s.plays == 1 else "plays" }}
-      {%- if s.plays %} · {{ (100 * s.finished / s.plays)|round|int }}% finished{% endif %}</span>
-  </li>
-  {% endfor %}
-</ol>
-{% endif %}
-
 <h3>Top sharers</h3>
 {% if top_sharers %}
 <ol class="board">
