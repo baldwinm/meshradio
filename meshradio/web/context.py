@@ -9,6 +9,7 @@ single player otherwise.
 from __future__ import annotations
 
 from calendar import Calendar, month_name
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -80,6 +81,29 @@ def calendar_month(days: list[dict[str, Any]], key: str) -> dict[str, Any]:
             row.append({"day": dt.day, "iso": iso, "info": by_date.get(iso)})
         weeks.append(row)
     return {"label": month_label(key), "key": key, "weeks": weeks}
+
+
+def theme_key(title: str) -> str:
+    """A theme title as its identity across days: case- and spacing-insensitive,
+    so ``Rain songs`` and ``rain  songs`` are one theme run twice."""
+    return " ".join(title.split()).casefold()
+
+
+def theme_history(themes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Themes grouped into month sections for the Archive's theme list.
+
+    ``themes`` comes from ``Database.all_themes`` (newest first), so the months
+    fall out by walking it in order. Each theme carries ``runs`` — how many days
+    used that title — so a theme the channel has come back to says so wherever
+    it appears."""
+    runs: Counter[str] = Counter(theme_key(t["title"]) for t in themes)
+    months: list[dict[str, Any]] = []
+    for theme in themes:
+        key = theme["date"][:7]
+        if not months or months[-1]["key"] != key:
+            months.append({"key": key, "label": month_label(key), "themes": []})
+        months[-1]["themes"].append({**theme, "runs": runs[theme_key(theme["title"])]})
+    return months
 
 
 @dataclass

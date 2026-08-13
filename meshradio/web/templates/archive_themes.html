@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Themes</h2>
+{% if months %}
+<p class="cal-hint">
+  <!-- Floated first so it rides the top-right of the paragraph, not below it. -->
+  <a class="cal-swap" href="/archive">📅 Calendar</a>
+  {{ theme_count }} {{ "theme" if theme_count == 1 else "themes" }}
+  {%- if title_count != theme_count %}, {{ title_count }} different{% endif %} — tap one
+  for its day. Days nobody named aren't listed.</p>
+{% for month in months %}
+<h3>{{ month.label }}</h3>
+<ol class="board board-plain">
+  {% for theme in month.themes %}
+  <li>
+    <a class="board-name" href="/archive/{{ theme.date }}"
+       title="{{ theme.date }}{% if theme.set_by %} — set by {{ theme.set_by }}{% endif %}">{{ theme.title }}</a>
+    {% if theme.runs > 1 %}<span class="theme-runs" title="run on {{ theme.runs }} days">{{ theme.runs }}×</span>{% endif %}
+    <span class="board-val">{{ theme.date }} ·
+      {{ theme.tracks }} {{ "song" if theme.tracks == 1 else "songs" }}</span>
+  </li>
+  {% endfor %}
+</ol>
+{% endfor %}
+{% else %}
+<p class="empty">No themes yet — they fill in as the channel sets one each day.</p>
+<p class="cal-hint"><a class="cal-swap" href="/archive">📅 Calendar</a></p>
+{% endif %}
+{% endblock %}

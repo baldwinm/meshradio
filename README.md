@@ -136,6 +136,10 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   theme → tracks: **▶ Play this day** replays a whole day in posted order,
   **+ queue** adds a single track. New visitors land with the newest day cued
   up so there's something to press play on.
+- **☰ All themes** — the calendar's companion view: every theme the channel has
+  run, newest first, grouped by month, each linking to its day. A title used on
+  more than one day carries an `N×` badge, so it's easy to see what's been done
+  before picking tomorrow's. Days that never got a theme aren't listed.
 - **🎲 Keep playing** — never run out: when the queue empties, this keeps the
   music going with random songs pulled from the archive. Unlike **Start radio**
   it needs no YouTube access, so it's the "don't stop at the end of the day"

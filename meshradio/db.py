@@ -546,6 +546,21 @@ class Database:
             "GROUP BY t.date ORDER BY t.date DESC"
         )
 
+    async def all_themes(self) -> list[dict[str, Any]]:
+        """Every theme the channel actually used, newest first, with its song
+        count — the Archive's theme list.
+
+        ``Untitled — <date>`` placeholders are left out: nobody chose them, and
+        the day they hold is still on the calendar. Ordering matches the
+        calendar's (newest first), with a day's rare second theme — only
+        possible on days predating locked themes — in creation order."""
+        return await self._fetchall(
+            "SELECT t.id, t.date, t.title, t.set_by, COUNT(tr.id) AS tracks "
+            "FROM themes t LEFT JOIN tracks tr ON tr.theme_id=t.id "
+            "WHERE t.title NOT LIKE 'Untitled — %' "
+            "GROUP BY t.id ORDER BY t.date DESC, t.created_at, t.id"
+        )
+
     async def random_channel_tracks(
         self,
         limit: int = 10,

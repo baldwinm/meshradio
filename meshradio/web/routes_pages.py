@@ -12,6 +12,8 @@ from .context import (
     calendar_month,
     ctx_of,
     month_step,
+    theme_history,
+    theme_key,
     yt_export_url,
 )
 
@@ -46,6 +48,23 @@ async def archive(request: Request, m: str = ""):
             "next_month": month_step(months[i + 1] if 0 <= i < len(months) - 1 else None),
             "day_count": len(days),
             "weekday_headers": WEEKDAY_HEADERS,
+        },
+    )
+
+
+@router.get("/archive/themes", response_class=HTMLResponse)
+async def archive_themes(request: Request):
+    """Every theme the channel has run, newest first. Declared *before*
+    ``/archive/{date}`` so the path isn't taken for a date."""
+    ctx = ctx_of(request)
+    themes = await ctx.db.all_themes()
+    return ctx.templates.TemplateResponse(
+        request,
+        "archive_themes.html",
+        {
+            "months": theme_history(themes),
+            "theme_count": len(themes),
+            "title_count": len({theme_key(t["title"]) for t in themes}),
         },
     )
 

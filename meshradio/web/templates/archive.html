@@ -2,7 +2,10 @@
 {% block content %}
 <h2>Archive</h2>
 {% if month %}
-<p class="cal-hint">{{ day_count }} {{ "day" if day_count == 1 else "days" }} on the
+<p class="cal-hint">
+  <!-- Floated first so it rides the top-right of the paragraph, not below it. -->
+  <a class="cal-swap" href="/archive/themes">☰ All themes</a>
+  {{ day_count }} {{ "day" if day_count == 1 else "days" }} on the
   channel. Tap a lit day to play or browse it.</p>
 <section class="cal-month">
   <div class="cal-nav">
