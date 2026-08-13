@@ -128,9 +128,12 @@ const visPeaks = new Array(VIS_BARS).fill(0);
 let visData = null;
 
 (function drawVis() {
-  requestAnimationFrame(drawVis);
   const c = document.getElementById("vis-canvas");
-  if (!c) return;
+  // Archive, Search, Stats and About have no canvas — and in embed mode no page
+  // does. Poll slowly for one instead of waking 60× a second to do nothing;
+  // htmx can swap the canvas back in at any time, so the loop can't just stop.
+  if (!c) { setTimeout(drawVis, 500); return; }
+  requestAnimationFrame(drawVis);
   const g = c.getContext("2d");
   const W = c.width, H = c.height;
   g.fillStyle = "#000";

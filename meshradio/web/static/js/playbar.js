@@ -28,6 +28,9 @@ function paintBar(scrub, pos, dur) {
 }
 
 setInterval(() => {
+  // Nothing here is state — it only paints the clock — so a hidden tab can
+  // skip it entirely and pick up on the next tick when it comes back.
+  if (document.hidden) return;
   const scrub = document.getElementById("pb-scrub");
   if (!scrub || scrub.dataset.seeking) return;
   let pos = null, dur = null;

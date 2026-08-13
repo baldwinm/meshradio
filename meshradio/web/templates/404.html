@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Not found · MeshRadio{% endblock %}
+{% block content %}
+<h2>Not found</h2>
+<p class="empty">{{ detail or "That page isn't here." }}</p>
+<p class="cal-hint">
+  <a class="cal-swap" href="/archive">📅 Archive</a>
+  Try the <a href="/archive">archive calendar</a>, the
+  <a href="/archive/themes">theme list</a>, or <a href="/search">search</a>.</p>
+{% endblock %}

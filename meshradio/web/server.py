@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Callable
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -58,6 +60,30 @@ def _asset_version() -> int:
     return int(max(f.stat().st_mtime for f in static.rglob("*") if f.is_file()))
 
 
+class VersionedStatic(StaticFiles):
+    """Static files that tell the browser how long to keep them.
+
+    Templates request assets as ``/static/x.js?v=<asset_v>`` (see
+    ``_asset_version``), so a URL carrying ``v`` names one immutable build and
+    can be cached forever — the next deploy changes the query string. Without
+    the versioned URL we can't make that promise (someone linked the bare
+    path), so those get a short window and keep revalidating.
+
+    This is what stops every page navigation from re-checking eleven assets:
+    on the hosted embed that's eleven round trips a visitor doesn't need."""
+
+    IMMUTABLE = "public, max-age=31536000, immutable"
+    SHORT = "public, max-age=300"
+
+    # *args/**kwargs so a future Starlette can add parameters without breaking
+    # the override; the three we name are the long-standing ones.
+    def file_response(self, full_path, stat_result, scope, *args, **kwargs):
+        response = super().file_response(full_path, stat_result, scope, *args, **kwargs)
+        versioned = b"v=" in scope.get("query_string", b"")
+        response.headers["cache-control"] = self.IMMUTABLE if versioned else self.SHORT
+        return response
+
+
 def create_app(
     bus: EventBus,
     db: Database,
@@ -87,6 +113,11 @@ def create_app(
         task.cancel()
 
     app = FastAPI(title="MeshRadio", lifespan=lifespan)
+    # HTML, CSS and JS are mostly repeated markup — the archive pages compress
+    # better than 10:1. Audio is already compressed, and gzipping it would just
+    # burn CPU on the Pi, but it's over the 500-byte floor either way, so the
+    # /audio route sets its own no-op encoding (see routes_ingest).
+    app.add_middleware(GZipMiddleware, minimum_size=500)
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
     templates.env.globals["asset_v"] = _asset_version()
@@ -94,7 +125,7 @@ def create_app(
     # CDN script, so keep it off the offline LAN/appliance skin. player_factory
     # is set exactly when we're in embed mode (see app.py).
     templates.env.globals["embed_mode"] = player_factory is not None
-    app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
+    app.mount("/static", VersionedStatic(directory=_HERE / "static"), name="static")
 
     @app.middleware("http")
     async def skin_from_cookie(request: Request, call_next):
@@ -147,6 +178,21 @@ def create_app(
     app.state.ctx = ctx
     app.state.sessions = sessions
     app.state.speakers = ctx.speakers
+
+    @app.exception_handler(404)
+    async def not_found(request: Request, exc):
+        """A browser gets the site's own 404 page; anything else keeps the JSON.
+
+        The archive's day URLs are the one place a typo (or a crawler) lands on
+        a path built from free text, and the old behaviour was a 200 titled
+        with whatever was typed."""
+        wants_html = "text/html" in request.headers.get("accept", "")
+        detail = getattr(exc, "detail", None)
+        if not wants_html:
+            return JSONResponse({"detail": detail or "Not Found"}, status_code=404)
+        return templates.TemplateResponse(
+            request, "404.html", {"detail": detail}, status_code=404
+        )
 
     app.include_router(routes_pages.router)
     app.include_router(routes_api.router)

@@ -32,7 +32,13 @@ async def audio(request: Request, track_id: int):
     if not path.exists():
         raise HTTPException(404, "cache file missing")
     media_type = _AUDIO_TYPES.get(path.suffix.lower(), "application/octet-stream")
-    return FileResponse(path, media_type=media_type)
+    # Opt out of the app's gzip middleware: opus/m4a are already compressed, so
+    # re-compressing them only burns CPU (it's a Pi), and gzipping a ranged 206
+    # would break seeking. Starlette's GZipMiddleware skips any response that
+    # already declares a content-encoding, and 'identity' means "as-is".
+    return FileResponse(
+        path, media_type=media_type, headers={"content-encoding": "identity"}
+    )
 
 
 @router.post("/api/ingest")
