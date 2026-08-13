@@ -39,7 +39,7 @@
     <li>
       <span class="title">{{ track.title or track.video_id }}</span>
       {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
-      <span class="sender">({{ track.sender or "?" }})</span>
+      <span class="sender">({% if track.sender %}<a href="/member/{{ track.sender|urlencode }}">{{ track.sender }}</a>{% else %}?{% endif %})</span>
       {% if track.cache_status == "ready" %}
         <button hx-post="/api/queue/{{ track.id }}" hx-swap="none">+ queue</button>
       {% elif track.cache_status == "failed" %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · MeshRadio{% endblock %}
+{% block content %}
+<h2>{{ name }}</h2>
+<div class="stat-tiles">
+  <div class="stat"><span class="stat-n">{{ profile.shares or 0 }}</span><span class="stat-l">shares</span></div>
+  <div class="stat"><span class="stat-n">{{ profile.songs or 0 }}</span><span class="stat-l">songs</span></div>
+  <div class="stat"><span class="stat-n">{{ profile.days or 0 }}</span><span class="stat-l">days</span></div>
+  <div class="stat"><span class="stat-n">{{ themes|length }}</span><span class="stat-l">themes set</span></div>
+</div>
+{% if profile.first_day %}
+<p class="cal-hint">
+  {% if yt_export_url %}
+  <a class="cal-swap" href="{{ yt_export_url }}" target="_blank" rel="noopener"
+     title="Open these songs as a YouTube playlist">⤴ Export</a>
+  {% endif %}
+  On the channel from <a href="/archive/{{ profile.first_day }}">{{ profile.first_day }}</a>
+  {%- if profile.last_day != profile.first_day %} to
+  <a href="/archive/{{ profile.last_day }}">{{ profile.last_day }}</a>{% endif %}.</p>
+{% endif %}
+
+{% if artists %}
+<h3>On repeat</h3>
+<ol class="board">
+  {% for a in artists %}
+  <li><span class="board-name">{{ a.artist }}</span>
+    <span class="board-val">{{ a.shares }}×</span></li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+{% if themes %}
+<h3>Themes they set</h3>
+<ol class="board board-plain">
+  {% for t in themes %}
+  <li><a class="board-name" href="/archive/{{ t.date }}">{{ t.title }}</a>
+    <span class="board-val">{{ t.date }} · {{ t.tracks }} {{ "song" if t.tracks == 1 else "songs" }}</span></li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+<h3>Songs shared</h3>
+{% if tracks %}
+<ol class="results">
+  {% for tr in tracks %}
+  <li>
+    <span class="title">{{ tr.title or tr.video_id }}</span>
+    {% if tr.artist %}<span class="artist">— {{ tr.artist }}</span>{% endif %}
+    <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
+    {% if tr.cache_status == "ready" %}
+    <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="empty">Nothing shared yet.</p>
+{% endif %}
+{% endblock %}

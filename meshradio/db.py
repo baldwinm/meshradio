@@ -662,6 +662,103 @@ class Database:
             (limit,),
         )
 
+    async def recent_plays(self, limit: int = 15) -> list[dict[str, Any]]:
+        """What actually came out of the speakers lately, newest first.
+
+        Grouped by video so a song replayed twice in an hour takes one row
+        instead of pushing the rest of the list off the page. SQLite takes the
+        bare columns from the row that produced the ``MAX`` — the query relies
+        on that, so it must stay the only min/max aggregate here.
+
+        This is plays, not shares: radio filler and archive-station songs count,
+        because they played. Rows carry ``source`` so the page can say which."""
+        return await self._fetchall(
+            "SELECT tr.id, tr.video_id, tr.title, tr.artist, tr.sender, tr.source, "
+            " tr.duration, t.date AS date, t.title AS theme_title, "
+            " MAX(p.played_at) AS played_at "
+            "FROM plays p JOIN tracks tr ON tr.id=p.track_id "
+            "LEFT JOIN themes t ON t.id=tr.theme_id "
+            "GROUP BY tr.video_id ORDER BY played_at DESC LIMIT ?",
+            (limit,),
+        )
+
+    async def most_played(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Songs by play count — the listening chart, as opposed to
+        ``top_songs``, which is the posting chart. ``finished`` counts the plays
+        that ran to the end, so a song that's always skipped can't hide."""
+        return await self._fetchall(
+            "SELECT tr.video_id, COALESCE(MAX(tr.title), tr.video_id) AS title, "
+            " MAX(tr.artist) AS artist, COUNT(p.id) AS plays, "
+            " COALESCE(SUM(p.completed), 0) AS finished "
+            "FROM plays p JOIN tracks tr ON tr.id=p.track_id "
+            "GROUP BY tr.video_id HAVING plays > 1 ORDER BY plays DESC, title LIMIT ?",
+            (limit,),
+        )
+
+    async def play_totals(self) -> dict[str, Any]:
+        """Plays, distinct songs played, and how many ran to the end."""
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS plays, COUNT(DISTINCT track_id) AS tracks, "
+            " COALESCE(SUM(completed), 0) AS finished FROM plays"
+        )
+        return row or {}
+
+    # -- members --------------------------------------------------------------
+
+    async def member_name(self, name: str) -> str | None:
+        """The channel's own spelling of a member's name, or ``None`` if nobody
+        by that name ever posted. Names arrive as typed on the mesh, so lookups
+        are case-insensitive and the most-used spelling wins the page title."""
+        row = await self._fetchone(
+            "SELECT sender, COUNT(*) AS n FROM tracks "
+            "WHERE sender = ? COLLATE NOCASE AND sender IS NOT NULL AND sender != '' "
+            "GROUP BY sender ORDER BY n DESC LIMIT 1",
+            (name,),
+        )
+        return row["sender"] if row else None
+
+    async def member_profile(self, name: str) -> dict[str, Any]:
+        """One member's channel record: how much they've shared and over what
+        span. Radio filler is excluded — it was never theirs."""
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS shares, COUNT(DISTINCT tr.video_id) AS songs, "
+            " COUNT(DISTINCT t.date) AS days, MIN(t.date) AS first_day, "
+            " MAX(t.date) AS last_day "
+            "FROM tracks tr JOIN themes t ON t.id=tr.theme_id "
+            "WHERE tr.sender = ? COLLATE NOCASE AND tr.source != 'radio'",
+            (name,),
+        )
+        return row or {}
+
+    async def member_tracks(self, name: str, limit: int = 50) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            "SELECT tr.*, t.date AS date, t.title AS theme_title "
+            "FROM tracks tr JOIN themes t ON t.id=tr.theme_id "
+            "WHERE tr.sender = ? COLLATE NOCASE AND tr.source != 'radio' "
+            "ORDER BY tr.mesh_ts DESC LIMIT ?",
+            (name, limit),
+        )
+
+    async def member_themes(self, name: str, limit: int = 25) -> list[dict[str, Any]]:
+        """Days this member named. Placeholders aren't anyone's doing."""
+        return await self._fetchall(
+            "SELECT t.date, t.title, COUNT(tr.id) AS tracks FROM themes t "
+            "LEFT JOIN tracks tr ON tr.theme_id=t.id "
+            "WHERE t.set_by = ? COLLATE NOCASE AND t.title NOT LIKE 'Untitled — %' "
+            "GROUP BY t.id ORDER BY t.date DESC LIMIT ?",
+            (name, limit),
+        )
+
+    async def member_artists(self, name: str, limit: int = 5) -> list[dict[str, Any]]:
+        """The artists a member keeps coming back to."""
+        return await self._fetchall(
+            "SELECT artist, COUNT(*) AS shares FROM tracks "
+            "WHERE sender = ? COLLATE NOCASE AND source != 'radio' "
+            " AND artist IS NOT NULL AND artist != '' "
+            "GROUP BY artist COLLATE NOCASE ORDER BY shares DESC, artist LIMIT ?",
+            (name, limit),
+        )
+
     async def busiest_themes(self, limit: int = 10) -> list[dict[str, Any]]:
         """Themes that drew the most songs."""
         return await self._fetchall(

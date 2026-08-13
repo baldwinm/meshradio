@@ -11,7 +11,7 @@ from __future__ import annotations
 from calendar import Calendar, month_name
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from time import monotonic
 from typing import Any
 
@@ -82,6 +82,48 @@ def calendar_month(days: list[dict[str, Any]], key: str) -> dict[str, Any]:
             row.append({"day": dt.day, "iso": iso, "info": by_date.get(iso)})
         weeks.append(row)
     return {"label": month_label(key), "key": key, "weeks": weeks}
+
+
+def absolute_url(request: Request, path: str | None = None) -> str:
+    """A full ``https://host/path`` URL for this request (or for ``path`` on the
+    same host) — what link previews, canonical links and the sitemap need.
+
+    Hosted deployments sit behind a TLS-terminating proxy, so the scheme the app
+    sees is plain http; ``x-forwarded-proto`` is the one that matches the URL a
+    visitor would paste. Query strings are dropped: a preview for
+    ``/archive?m=2026-08`` is a preview of the archive."""
+    url = request.url.replace(query="", fragment="") if path is None else (
+        request.base_url.replace(path=path, query="", fragment="")
+    )
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    if forwarded:
+        url = url.replace(scheme=forwarded)
+    return str(url)
+
+
+def local_play_time(played_at: str, tz, today: str) -> str:
+    """A play's timestamp as the channel would say it.
+
+    Plays are stamped UTC (``db.utcnow``) but everything else on the site is
+    channel-local, so a bare ``played_at[:10]`` shows the wrong day for anything
+    after 7pm in Austin. Today's plays read as a clock time, older ones as their
+    local date."""
+    try:
+        stamped = datetime.fromisoformat(played_at.replace("Z", "+00:00"))
+    except ValueError:
+        return played_at[:10]
+    if stamped.tzinfo is None:
+        stamped = stamped.replace(tzinfo=timezone.utc)
+    local = stamped.astimezone(tz)
+    return local.strftime("%H:%M") if local.date().isoformat() == today else (
+        local.date().isoformat()
+    )
+
+
+def yt_thumbnail(video_id: str | None) -> str:
+    """The 480×360 still for a video — the image a shared link previews with.
+    ``hqdefault`` because every video has one; ``maxresdefault`` 404s on plenty."""
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
 
 
 def archive_years(themes: list[dict[str, Any]]) -> list[str]:

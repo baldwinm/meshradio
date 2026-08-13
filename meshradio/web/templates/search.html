@@ -18,7 +18,7 @@
     <li>
       <span class="title">{{ tr.title or tr.video_id }}</span>
       {% if tr.artist %}<span class="artist">— {{ tr.artist }}</span>{% endif %}
-      <span class="sender">({{ tr.sender or "?" }})</span>
+      <span class="sender">({% if tr.sender %}<a href="/member/{{ tr.sender|urlencode }}">{{ tr.sender }}</a>{% else %}?{% endif %})</span>
       <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
       {% if tr.cache_status == "ready" %}
       <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>

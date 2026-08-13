@@ -5,20 +5,23 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 
 from .. import __version__
 from .context import (
     WEEKDAY_HEADERS,
+    absolute_url,
     archive_months,
     archive_years,
     calendar_month,
     ctx_of,
+    local_play_time,
     month_step,
     theme_history,
     theme_key,
     year_step,
     yt_export_url,
+    yt_thumbnail,
 )
 
 router = APIRouter()
@@ -37,8 +40,23 @@ SEARCH_LIMIT = 100
 async def index(request: Request):
     ctx = ctx_of(request)
     p = await ctx.get_player(request)
+    day = await ctx.day_context(p)
+    state = p.state()
+    titles = " · ".join(day["theme_titles"])
     return ctx.templates.TemplateResponse(
-        request, "index.html", {"state": p.state(), **await ctx.day_context(p)}
+        request,
+        "index.html",
+        {
+            "state": state,
+            **day,
+            "meta_description": (
+                f"Today's theme on the Austin mesh #music channel: “{titles}”."
+                if titles else
+                "Songs shared each day on the Austin MeshCore #music channel, "
+                "played against that day's theme."
+            ),
+            "meta_image": yt_thumbnail((state.get("current") or {}).get("video_id")),
+        },
     )
 
 
@@ -109,6 +127,8 @@ async def archive_day(request: Request, date: str):
         theme["tracks"] = await ctx.db.tracks_for_theme(theme["id"])
     all_tracks = [track for theme in themes for track in theme["tracks"]]
     days = sorted(d["date"] for d in await ctx.archive_days())
+    titles = " · ".join(t["title"] for t in themes)
+    n = len(all_tracks)
     return ctx.templates.TemplateResponse(
         request,
         "archive_day.html",
@@ -119,6 +139,14 @@ async def archive_day(request: Request, date: str):
             "prev_day": max((d for d in days if d < date), default=None),
             "next_day": min((d for d in days if d > date), default=None),
             "month": date[:7],
+            # A day is the unit people paste into a chat, so give the unfurl
+            # something to say: the theme, the count, and the day's first song
+            # as the picture.
+            "meta_description": (
+                f"{n} {'song' if n == 1 else 'songs'} shared on {date} for the "
+                f"theme “{titles}” on the Austin mesh #music channel."
+            ),
+            "meta_image": yt_thumbnail(all_tracks[0]["video_id"] if all_tracks else None),
         },
     )
 
@@ -139,15 +167,57 @@ async def search(request: Request, q: str = ""):
 
 @router.get("/stats", response_class=HTMLResponse)
 async def stats(request: Request):
+    """The channel's numbers, plus what has actually been playing — the plays
+    table is the only record of listening, as opposed to posting."""
     ctx = ctx_of(request)
+    today = ctx.today()
+    recent = [
+        {**row, "when": local_play_time(row["played_at"], ctx.player.tz, today)}
+        for row in await ctx.db.recent_plays()
+    ]
     return ctx.templates.TemplateResponse(
         request,
         "stats.html",
         {
             "totals": await ctx.db.overall_stats(),
+            "plays": await ctx.db.play_totals(),
+            "recent_plays": recent,
+            "most_played": await ctx.db.most_played(),
             "top_songs": await ctx.db.top_songs(),
             "top_sharers": await ctx.db.top_sharers(),
             "busiest_themes": await ctx.db.busiest_themes(),
+        },
+    )
+
+
+@router.get("/member/{name}", response_class=HTMLResponse)
+async def member(request: Request, name: str):
+    """One member's record on the channel: what they've shared, the days they
+    named, who they keep coming back to.
+
+    Names are as typed on the mesh, so the lookup is case-insensitive and the
+    page titles itself with the channel's own spelling."""
+    ctx = ctx_of(request)
+    canonical = await ctx.db.member_name(name)
+    if canonical is None:
+        raise HTTPException(404, "nobody by that name has posted")
+    profile = await ctx.db.member_profile(canonical)
+    tracks = await ctx.db.member_tracks(canonical)
+    return ctx.templates.TemplateResponse(
+        request,
+        "member.html",
+        {
+            "name": canonical,
+            "profile": profile,
+            "tracks": tracks,
+            "themes": await ctx.db.member_themes(canonical),
+            "artists": await ctx.db.member_artists(canonical),
+            "yt_export_url": yt_export_url(tracks),
+            "meta_description": (
+                f"{canonical} has shared {profile.get('shares') or 0} songs "
+                f"on {profile.get('days') or 0} days of the Austin mesh "
+                "#music channel."
+            ),
         },
     )
 
@@ -156,6 +226,36 @@ async def stats(request: Request):
 async def about(request: Request):
     return ctx_of(request).templates.TemplateResponse(
         request, "about.html", {"version": __version__, "github_url": GITHUB_URL}
+    )
+
+
+@router.get("/robots.txt", response_class=PlainTextResponse)
+async def robots(request: Request):
+    """Crawlers: pages yes, machinery no. The API, partials and audio are not
+    documents, and /search with a query is an infinite space."""
+    sitemap_url = absolute_url(request, "/sitemap.xml")
+    return PlainTextResponse(
+        "User-agent: *\n"
+        "Disallow: /api/\n"
+        "Disallow: /partials/\n"
+        "Disallow: /audio/\n"
+        "Disallow: /search\n"
+        f"Sitemap: {sitemap_url}\n"
+    )
+
+
+@router.get("/sitemap.xml")
+async def sitemap(request: Request):
+    """Every archived day is a page worth finding — that's the whole archive."""
+    ctx = ctx_of(request)
+    paths = ["/", "/archive", "/archive/themes", "/stats", "/about"]
+    paths += [f"/archive/{d['date']}" for d in await ctx.archive_days()]
+    urls = "".join(f"<url><loc>{absolute_url(request, p)}</loc></url>" for p in paths)
+    return Response(
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"{urls}</urlset>",
+        media_type="application/xml",
     )
 
 
