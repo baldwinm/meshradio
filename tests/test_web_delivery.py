@@ -213,6 +213,16 @@ async def test_forwarded_https_survives_the_proxy(db, bus):
     assert meta_of(body)["og:url"].startswith("https://")
 
 
+async def test_help_documents_the_shortcuts(db, bus):
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/")).text
+    assert "/static/js/keys.js" in body
+    help_text = body[body.index("<dialog id=\"help\""):body.index("</dialog>")]
+    assert "<strong>Keyboard</strong>" in help_text
+    for key in ("Space", "N", "M", "?"):
+        assert f'class="k">{key}<' in help_text
+
+
 async def test_search_says_when_the_list_is_cut_off(db, bus):
     theme = await db.create_theme("2026-08-01", "many songs")
     for i in range(105):

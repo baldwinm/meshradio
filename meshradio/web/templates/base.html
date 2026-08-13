@@ -95,10 +95,14 @@
           the channel has run, so you can see what's been done before.</li>
         <li><strong>Keep playing</strong> — <span class="k">🎲 Keep playing</span> never lets the music
           stop: when the queue empties it keeps going with random songs from the archive.</li>
-        {% if embed_mode %}
-        <li><strong>Playback</strong> — songs stream from YouTube right in your browser, and your
-          queue is your own — playing or skipping never affects anyone else.</li>
-        {% else %}
+        <li><strong>Keyboard</strong> —
+          <span class="k">Space</span> play or pause,
+          <span class="k">N</span> next track,
+          <span class="k">←</span> <span class="k">→</span> jump back or forward 10s,
+          <span class="k">↑</span> <span class="k">↓</span> volume,
+          <span class="k">M</span> mute,
+          <span class="k">?</span> this help.</li>
+        {% if not embed_mode %}
         <li><strong>Radio</strong> — <span class="k">📻 Start radio</span> keeps the music going with
           similar songs when the queue runs dry; press it again to stop.</li>
         <li><strong>Audio</strong> — if you see <span class="k">🔊 Click to enable audio</span>, click it
@@ -133,6 +137,8 @@
   <script src="/static/js/help.js?v={{ asset_v }}"></script>
   <script src="/static/js/skin.js?v={{ asset_v }}"></script>
   <script src="/static/js/nav.js?v={{ asset_v }}"></script>
+  {# after playbar.js: the shortcuts drive its volume/seek helpers. #}
+  <script src="/static/js/keys.js?v={{ asset_v }}"></script>
   <script src="/static/js/queue.js?v={{ asset_v }}"></script>
   <script src="/static/js/fx.js?v={{ asset_v }}"></script>
 </body>

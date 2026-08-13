@@ -143,6 +143,11 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   day. A title used on more than one day carries an `N×` badge, so it's easy to
   see what's been done before picking tomorrow's. Days that never got a theme
   aren't listed.
+- **Keyboard** — <kbd>Space</kbd> play/pause, <kbd>N</kbd> next track,
+  <kbd>←</kbd>/<kbd>→</kbd> jump back or forward 10s, <kbd>↑</kbd>/<kbd>↓</kbd>
+  volume, <kbd>M</kbd> mute, <kbd>?</kbd> help. They drive the on-screen
+  controls, so nothing gets out of step, and they keep out of the way while
+  you're typing in the search box.
 - **Stats** — the channel's numbers: songs, shares, sharers, days, themes and
   plays, plus top sharers, most-shared songs, and the busiest themes.
 - **Member pages** — every sharer's name is a link: what they've shared, the
