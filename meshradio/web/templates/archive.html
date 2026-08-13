@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Archive{% if month %} — {{ month.label }}{% endif %} · MeshRadio{% endblock %}
 {% block content %}
 <h2>Archive</h2>
 {% if month %}

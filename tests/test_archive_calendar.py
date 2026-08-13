@@ -75,6 +75,24 @@ async def test_unknown_month_falls_back_to_the_newest(db, bus):
             assert "<h3>July 2026</h3>" in resp.text
 
 
+async def test_day_page_steps_to_the_days_either_side(db, bus):
+    """The archive should read straight through, not via the calendar each time."""
+    for date in ("2026-07-03", "2026-08-01", "2026-08-09"):
+        await seed_day(db, date, date.replace("-", "")[:11])
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/archive/2026-08-01")).text
+    assert 'href="/archive/2026-07-03"' in body      # previous archived day
+    assert 'href="/archive/2026-08-09"' in body      # next archived day
+    assert 'href="/archive?m=2026-08"' in body       # back to the month
+
+
+async def test_day_page_ends_are_dead_not_missing(db, bus):
+    await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/archive/2026-08-01")).text
+    assert body.count("cal-step-off") == 2           # nowhere to step, both ends
+
+
 async def test_empty_archive_still_renders(db, bus):
     async with client_for(page_app(db, bus)) as client:
         resp = await client.get("/archive")

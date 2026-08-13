@@ -12,6 +12,7 @@ from calendar import Calendar, month_name
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
+from time import monotonic
 from typing import Any
 
 from fastapi import Request
@@ -83,20 +84,38 @@ def calendar_month(days: list[dict[str, Any]], key: str) -> dict[str, Any]:
     return {"label": month_label(key), "key": key, "weeks": weeks}
 
 
+def archive_years(themes: list[dict[str, Any]]) -> list[str]:
+    """The years the channel ran themes in, oldest first — the theme list pages
+    through these the way the calendar pages through months."""
+    return sorted({t["date"][:4] for t in themes})
+
+
+def year_step(key: str | None) -> dict[str, str] | None:
+    """A prev/next target for the theme list's year nav, or ``None`` at the ends
+    of history (where the arrow is drawn dead)."""
+    return {"key": key, "label": key} if key else None
+
+
 def theme_key(title: str) -> str:
     """A theme title as its identity across days: case- and spacing-insensitive,
     so ``Rain songs`` and ``rain  songs`` are one theme run twice."""
     return " ".join(title.split()).casefold()
 
 
-def theme_history(themes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def theme_history(
+    themes: list[dict[str, Any]], all_themes: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
     """Themes grouped into month sections for the Archive's theme list.
 
     ``themes`` comes from ``Database.all_themes`` (newest first), so the months
     fall out by walking it in order. Each theme carries ``runs`` — how many days
     used that title — so a theme the channel has come back to says so wherever
-    it appears."""
-    runs: Counter[str] = Counter(theme_key(t["title"]) for t in themes)
+    it appears. ``all_themes`` is the whole history when ``themes`` is only the
+    year on screen: the count has to span history, or a repeat looks like a
+    first outing whenever the pair straddles a year boundary."""
+    runs: Counter[str] = Counter(
+        theme_key(t["title"]) for t in (all_themes if all_themes is not None else themes)
+    )
     months: list[dict[str, Any]] = []
     for theme in themes:
         key = theme["date"][:7]
@@ -118,6 +137,24 @@ class WebContext:
     templates: Jinja2Templates
     speakers: SpeakerRegistry      # communal speaker election
     health: dict
+    _days: tuple[float, list[dict[str, Any]]] | None = None
+
+    # Every player-state push makes each open page re-fetch the now-playing and
+    # day-nav partials, and both rebuild day_context — so archive_days(), which
+    # aggregates the whole themes×tracks join, ran twice per event per tab. It
+    # only changes when a song lands, so a few seconds of staleness costs
+    # nothing (at worst the day arrows lag one event) and takes the query off
+    # the hot path entirely.
+    DAYS_TTL_S = 5.0
+
+    async def archive_days(self) -> list[dict[str, Any]]:
+        """``Database.archive_days`` behind a short TTL (see DAYS_TTL_S)."""
+        now = monotonic()
+        if self._days is not None and now - self._days[0] < self.DAYS_TTL_S:
+            return self._days[1]
+        days = await self.db.archive_days()
+        self._days = (now, days)
+        return days
 
     async def get_player(self, request: Request) -> PlayerService:
         if self.sessions is None:
@@ -134,7 +171,7 @@ class WebContext:
         today = self.today()
         day = p.day or today
         themes = await self.db.themes_for_day(day)
-        days = sorted(d["date"] for d in await self.db.archive_days() if d["tracks"])
+        days = sorted(d["date"] for d in await self.archive_days() if d["tracks"])
         return {
             "day": day,
             "today": today,

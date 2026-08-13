@@ -1,6 +1,25 @@
 {% extends "base.html" %}
+{% block title %}{{ date }}{% if themes %} — {{ themes[0].title }}{% endif %} · MeshRadio{% endblock %}
 {% block content %}
 <h2>{{ date }}</h2>
+{# Steps to the days either side, so the archive reads straight through instead
+   of via the calendar every time. Links, not the play buttons on Now Playing —
+   this is browsing, and it shouldn't hijack what's currently playing. #}
+<nav class="day-steps" aria-label="Archive days">
+  {% if prev_day %}
+  <a class="cal-step" href="/archive/{{ prev_day }}" rel="prev"
+     title="The day before ({{ prev_day }})">← {{ prev_day }}</a>
+  {% else %}
+  <span class="cal-step cal-step-off" aria-hidden="true">←</span>
+  {% endif %}
+  <a class="day-month" href="/archive?m={{ month }}" title="Back to the month">📅 Calendar</a>
+  {% if next_day %}
+  <a class="cal-step" href="/archive/{{ next_day }}" rel="next"
+     title="The day after ({{ next_day }})">{{ next_day }} →</a>
+  {% else %}
+  <span class="cal-step cal-step-off" aria-hidden="true">→</span>
+  {% endif %}
+</nav>
 <div class="day-actions">
   <form method="post" action="/api/play-day/{{ date }}">
     <button type="submit">▶ Play this day</button>

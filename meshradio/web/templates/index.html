@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}{{ theme_titles|join(" · ") or day }} · MeshRadio{% endblock %}
 {% block content %}
 <div id="now-playing"
      hx-get="/partials/now-playing"

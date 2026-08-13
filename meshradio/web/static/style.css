@@ -221,6 +221,12 @@ nav a {
   text-decoration: none;
 }
 nav a:hover { color: var(--amber); }
+/* Current section: pressed-in button, the way a 90s player marks the open tab. */
+nav a[aria-current="page"] {
+  color: var(--green);
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+  background: linear-gradient(#2a2a36, #464658);
+}
 
 /* section headers double as window title bars */
 h2, h3, .eq-window summary {
@@ -604,11 +610,36 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
   background: color-mix(in srgb, var(--amber) 12%, transparent);
 }
 
+/* Day page: previous/next day either side of the way back to the month. */
+.day-steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.75rem;
+}
+.day-steps .cal-step { font-size: 0.75rem; font-family: "Lucida Console", monospace; }
+.day-month {
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  padding: 0 0.35rem;
+}
+.day-month:hover { color: var(--amber); border-color: var(--amber); }
+
 /* -- archive theme list ----------------------------------------------------- */
 /* Same LCD board as the stats leaderboards, but these rows are history, not a
    ranking — so no position counter. */
 .board-plain li::before { content: none; }
 .board-plain { margin-bottom: 1rem; }
+.theme-month {
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.18em;
+  margin: 0.9rem 0 0.3rem;
+  text-transform: uppercase;
+}
 .theme-runs {
   color: var(--green-dim);
   font-size: 0.7rem;
@@ -619,6 +650,11 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 
 section.theme { margin-top: 0; }
 section.theme ol button { margin-left: auto; flex: none; }
+
+/* Prose links (the 404 page's ways out, hint lines): the skin's colours rather
+   than the browser's default blue, which belongs to no skin. */
+main p a:not([class]) { color: var(--accent); text-decoration-color: var(--accent); }
+main p a:not([class]):hover { color: var(--amber); text-decoration-color: var(--amber); }
 
 .empty, .sender { color: var(--muted); }
 p.empty {

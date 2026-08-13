@@ -3,20 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MeshRadio</title>
+  {# Per-page titles: tabs, history and bookmarks are otherwise all "MeshRadio".
+     htmx picks this up on boosted navigation too. #}
+  <title>{% block title %}MeshRadio{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
-  <script src="/static/htmx.min.js"></script>
+  {# defer: htmx only needs the DOM at DOMContentLoaded, and nothing calls its
+     API at parse time, so there's no reason to block first paint on 48KB. #}
+  <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
   <header>
     <h1><a href="/">📻 MeshRadio</a></h1>
-    <nav>
-      <a href="/">Now Playing</a>
-      <a href="/archive">Archive</a>
-      <a href="/search">Search</a>
-      <a href="/stats">Stats</a>
-      <a href="/about">About</a>
+    {# hx-boost swaps <main> instead of reloading the document, so the audio
+       element, WebSocket and speaker role survive a click — moving between
+       Now Playing and the Archive no longer interrupts the song. hx-select
+       keeps the swap to <main> so the scripts below (and the help dialog and
+       embed iframe) are never torn out and re-run. #}
+    <nav hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
+      {% set path = request.url.path %}
+      {% for href, label in [("/", "Now Playing"), ("/archive", "Archive"),
+                             ("/search", "Search"), ("/stats", "Stats"),
+                             ("/about", "About")] %}
+      <a href="{{ href }}"
+         {% if path == href or (href != "/" and path.startswith(href)) %}aria-current="page"{% endif %}
+         >{{ label }}</a>
+      {% endfor %}
     </nav>
     <select id="skin-select" class="skin-select" aria-label="Skin" title="Change skin">
       <option value="winamp" {{ 'selected' if request.state.skin == 'winamp' else '' }}>Winamp</option>
@@ -92,6 +104,7 @@
   <script src="/static/js/playbar.js?v={{ asset_v }}"></script>
   <script src="/static/js/help.js?v={{ asset_v }}"></script>
   <script src="/static/js/skin.js?v={{ asset_v }}"></script>
+  <script src="/static/js/nav.js?v={{ asset_v }}"></script>
   <script src="/static/js/queue.js?v={{ asset_v }}"></script>
   <script src="/static/js/fx.js?v={{ asset_v }}"></script>
 </body>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}{% if q %}“{{ q }}” — {% endif %}Search · MeshRadio{% endblock %}
 {% block content %}
 <h2>Search</h2>
 <form class="search-form" method="get" action="/search" role="search">
@@ -8,7 +9,10 @@
 </form>
 {% if q %}
   {% if results %}
-  <p class="search-count">{{ results|length }} {{ "match" if results|length == 1 else "matches" }} for “{{ q }}”</p>
+  <p class="search-count">
+    {%- if more %}first {{ results|length }} matches for “{{ q }}” — narrow it down for the rest
+    {%- else %}{{ results|length }} {{ "match" if results|length == 1 else "matches" }} for “{{ q }}”
+    {%- endif %}</p>
   <ol class="results">
     {% for tr in results %}
     <li>

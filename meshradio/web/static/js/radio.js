@@ -50,6 +50,17 @@ function applyState(s) {
     if (currentTrackId !== s.current.id) {
       currentTrackId = s.current.id;
       audio.src = "/audio/" + s.current.id;
+      // Join the song where the server already is, not at 0. This tab may be
+      // adopting a track that's been playing for two minutes — a page load, a
+      // navigation, or claiming the speaker role from another tab. currentTime
+      // can only be set once the browser knows the duration, and the drift
+      // branch below can't cover it: it only runs once the id already matched,
+      // and state pushes are event-driven, so nothing would correct it until
+      // someone pressed a button. (embed.js has always done this via 'start'.)
+      const joinAt = s.position || 0;
+      audio.onloadedmetadata = () => {
+        if (joinAt > 1) { try { audio.currentTime = joinAt; } catch (e) {} }
+      };
       audio.onended = () => fetch("/api/ended/" + currentTrackId, { method: "POST" });
     } else if (audio.readyState > 0 && Math.abs(audio.currentTime - s.position) > 3) {
       audio.currentTime = s.position;  // a remote tab scrubbed; follow it
