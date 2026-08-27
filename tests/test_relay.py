@@ -1,12 +1,13 @@
 """Relay: the Pi pushes channel history to a hosted instance that Cloudflare
 won't let poll CoreScope itself."""
 
+import asyncio
 import json
 
 import httpx
 
 from meshradio.audio.routing import make_router
-from meshradio.bus import EventBus
+from meshradio.bus import INGEST_STATUS, EventBus
 from meshradio.config import PlayerConfig, RelayConfig
 from meshradio.db import Database
 from meshradio.ingest.relay import CURSOR_KEY, RelayPusher
@@ -245,6 +246,52 @@ async def test_healthz_shape(db, bus):
         body = (await client.get("/healthz")).json()
         assert body["tracks"] == 1
         assert body["ingest_age_s"] is not None and body["ingest_age_s"] < 5
+
+
+async def _settle(predicate, tries: int = 50):
+    """Let the lifespan watcher task subscribe/drain between event-loop turns."""
+    for _ in range(tries):
+        await asyncio.sleep(0)
+        if predicate():
+            return True
+    return False
+
+
+async def test_healthz_fresh_from_backup_feed_alone(db, bus):
+    """A poll from any analyzer feed marks ingest fresh. With only the primary
+    counted, a CoreScope outage the backup feed was covering still read as
+    "every ingest source stopped" and failed the host's health check."""
+    app = make_app(db, bus, token="s3cret")
+    async with app.router.lifespan_context(app):
+        async with api_client(app) as client:
+            assert (await client.get("/healthz")).json()["ingest_age_s"] is None
+            await _settle(lambda: bool(bus._subs))
+            bus.publish(INGEST_STATUS, {"corescope": "error", "comchan": "ok"})
+            body = {}
+
+            async def fresh():
+                nonlocal body
+                body = (await client.get("/healthz")).json()
+                return body["ingest_age_s"] is not None
+
+            for _ in range(50):
+                await asyncio.sleep(0)
+                if await fresh():
+                    break
+            assert body["ingest_age_s"] is not None and body["ingest_age_s"] < 5
+
+
+async def test_healthz_ignores_mesh_link_state(db, bus):
+    """Mesh reports link state, not a completed ingest — a connected radio
+    that has heard nothing must not pass for fresh ingestion."""
+    app = make_app(db, bus, token="s3cret")
+    async with app.router.lifespan_context(app):
+        async with api_client(app) as client:
+            await _settle(lambda: bool(bus._subs))
+            bus.publish(INGEST_STATUS, {"mesh": "connected"})
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert (await client.get("/healthz")).json()["ingest_age_s"] is None
 
 
 async def test_ingest_endpoint_inserts_and_dedupes(db, bus):

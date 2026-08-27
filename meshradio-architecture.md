@@ -139,7 +139,7 @@ meshradio/
 │   ├── parse.py        # link extraction, theme detection  ← pure functions, unit-tested
 │   ├── service.py      # message → theme/track rows, dedupe (the ingest core)
 │   ├── mesh.py         # meshcore serial client, #music subscription
-│   ├── corescope.py    # CoreScope poller (fallback + backfill)
+│   ├── corescope.py    # CoreScope poller (fallback + backfill; also the backup feed)
 │   └── relay.py        # push local channel history to a hosted instance (§14)
 ├── media/
 │   ├── cacher.py       # yt-dlp download-to-cache worker (self-healing retries)
@@ -193,7 +193,8 @@ themes(  id, date, title, set_by, raw_message, created_at, locked,
          updated_at )                        -- set when a placeholder is adopted
 tracks(  id, video_id, url, title, artist, duration,
          theme_id → themes, sender, mesh_ts, ingested_at,
-         source TEXT CHECK(source IN ('mesh','corescope','radio','letsmesh')),
+         source TEXT CHECK(source IN ('mesh','corescope','radio',
+                                      'letsmesh','comchan')),
          cache_path, cache_status,          -- pending|ready|failed
          dedupe_hash UNIQUE )
 plays(   id, track_id → tracks, played_at, output, completed )
@@ -205,7 +206,7 @@ Two dedupe rules apply. `dedupe_hash = sha256("channel|sender|video_id|mesh_ts_b
 
 Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Migrations that landed after the initial design:
 
-- **`radio` / `letsmesh` track sources** — Mix continuations (§7) and a since-retired backup analyzer feed (§6). SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table; `'letsmesh'` stays in the constraint because existing rows may carry it, even though nothing writes it now.
+- **`radio` / `letsmesh` / `comchan` track sources** — Mix continuations (§7), a since-retired backup analyzer feed, and the backup feed that replaced it (both §6). SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table; `'letsmesh'` stays in the constraint because existing rows may carry it, even though nothing writes it now. A rebuild drops the table's indexes with it, so by the `comchan` migration all five `idx_tracks_*` indexes have to be recreated, not just the two the original schema had.
 - **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives a redeploy (which restarts the process). Keyed by the session cookie.
 - **Lockable themes** — a `locked` flag plus a backfill that merges same-day rival themes into one playlist, so a stray second "Theme:" post can't split a day.
 - **One-song-per-playlist** — collapses any duplicate `(theme_id, video_id)` rows that predate the rule (keeping the earliest, repointing plays) and adds the partial unique index above.
@@ -225,6 +226,8 @@ Rotating snapshots of the whole DB (`backup.py`, §14) provide a rollback point 
 Poll the AUS CoreScope instance every 2–5 min for `#music` channel packets; same parser, same dedupe. Serves two jobs: catching messages the local node missed (RF is RF), and **backfilling history on first boot** so a freshly built kit radio arrives with the channel's archive already populated. *(Exact endpoint/auth to be confirmed against the AUS instance's API — isolate in `corescope.py` so it's a one-file adaptation if the API shifts.)*
 
 **Retired backup feed (LetsMesh analyzer).** A second poll instance once ran against the LetsMesh MeshCore analyzer (`analyzer.letsmesh.net`) — a CoreScope-family API — as a fallback for an AUS CoreScope outage. That host retired the endpoint and moved its API behind a Cloudflare challenge a headless poller can't clear, so the feed was dropped rather than repointed. `CoreScopePoller` keeps its generic `name`/`source` parameters, so adding another CoreScope-compatible feed later is still a one-liner in `app.py`; dedupe on channel+sender+video+minute (not source) makes any two overlapping feeds no-op each other.
+
+**Current backup feed (`analyzer.comchan.net`).** A Digitaino CoreScope outage took ingestion down with it, so that generic mechanism is now in use: the `[comchan]` block wires a second `CoreScopePoller` under `name`/`source` `comchan`. It is **not** a failover — both feeds poll continuously and dedupe swallows the overlap, which is why neither needs health tracking to decide who is in charge, and why an outage on either side costs only the other's poll interval. Two details differ from the primary: `base_url` carries a real default in `ComchanConfig` (an appliance config written by `system/provision.py` has no `[comchan]` section, and a backup nobody configured is no backup), and its tracks carry their own `source`, so it stays queryable which analyzer covered a day — and a repeat of the LetsMesh retirement is one query to find. `/healthz` counts a successful poll from *any* feed as ingest freshness; scoping it to the primary would have reported "every ingest source stopped" during exactly the outage the backup exists for.
 
 ### Theme detection
 

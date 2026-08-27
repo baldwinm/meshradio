@@ -13,6 +13,14 @@ base_url = "https://scope.digitaino.com"
 channel = "#music"
 poll_interval_s = 180
 
+# Backup analyzer feed, polled alongside the primary (dedupe no-ops the
+# overlap) so a CoreScope outage doesn't stop ingestion here.
+[comchan]
+enabled = true
+base_url = "https://analyzer.comchan.net"
+channel = "#music"
+poll_interval_s = 180
+
 [player]
 backend = "embed"
 

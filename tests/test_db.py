@@ -86,6 +86,17 @@ async def test_letsmesh_source_accepted(db: Database):
     assert track["source"] == "letsmesh"
 
 
+async def test_comchan_source_accepted(db: Database):
+    """The v10 schema allows the analyzer.comchan.net backup feed's source."""
+    theme = await db.create_theme("2026-08-27", "backup feed day")
+    track = await db.add_track(**_track_args(theme_id=theme["id"], source="comchan"))
+    assert track is not None
+    assert track["source"] == "comchan"
+    # Backup-feed tracks are channel posts, so they must reach the archive
+    # like any other non-radio row.
+    assert [t["id"] for t in await db.tracks_for_theme(theme["id"])] == [track["id"]]
+
+
 async def test_theme_unique_per_day(db: Database):
     theme_a = await db.create_theme("2026-07-06", "rain songs", set_by="alice")
     theme_b = await db.create_theme("2026-07-06", "rain songs", set_by="bob")
@@ -318,3 +329,47 @@ async def test_search_escapes_like_wildcards(db: Database):
     assert [t["id"] for t in await db.search_tracks("%")] == [pct["id"]]
     assert await db.search_tracks("____") == []
     assert len(await db.search_tracks("Song")) == 1   # normal search still works
+
+
+async def _build_v9_db(path):
+    """A database migrated only through v9 (before the backup-feed source
+    migration, which is the third full rebuild of the tracks table)."""
+    conn = await aiosqlite.connect(path)
+    conn.row_factory = aiosqlite.Row
+    for i, script in enumerate(MIGRATIONS[:9], start=1):
+        await conn.executescript(script)
+        await conn.execute(f"PRAGMA user_version={i}")
+    await conn.commit()
+    return conn
+
+
+async def test_v10_rebuild_keeps_rows_and_indexes(tmp_path):
+    """Rebuilding tracks to widen the source CHECK must carry every row over
+    and put back all five indexes v2-v8 accumulated — DROP TABLE takes the
+    indexes with it, so a rebuild that only recreates v2's pair silently
+    un-optimizes the cacher, the relay pusher, and the playlist backstop."""
+    path = tmp_path / "legacy.db"
+    conn = await _build_v9_db(path)
+    theme = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
+    await _add_track_v5(conn, theme, "aaaaaaaaaaa", 1_783_357_200)
+    await conn.close()
+
+    db = Database(path)
+    await db.connect()
+    try:
+        assert len(await db.tracks_for_theme(theme)) == 1
+        cur = await db.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tracks' "
+            "AND name NOT LIKE 'sqlite_%'"
+        )
+        assert {r["name"] for r in await cur.fetchall()} == {
+            "idx_tracks_theme",
+            "idx_tracks_status",
+            "idx_tracks_video",
+            "idx_tracks_ingested",
+            "idx_tracks_theme_video",
+        }
+        # The widened CHECK is what the migration is for.
+        assert await db.add_track(**_track_args(theme_id=theme, source="comchan"))
+    finally:
+        await db.close()

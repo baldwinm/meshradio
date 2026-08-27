@@ -94,7 +94,9 @@ def create_app(
     player_factory: Callable[[EventBus], PlayerService] | None = None,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
-    # via the lifespan watcher below, by any successful CoreScope poll.
+    # via the lifespan watcher below, by any successful analyzer poll —
+    # primary or backup feed, so a primary outage the backup covers doesn't
+    # read as "every ingest source stopped".
     health: dict = {"last_ingest": None}
 
     @asynccontextmanager
@@ -103,7 +105,9 @@ def create_app(
             sub = bus.subscribe(INGEST_STATUS)
             try:
                 async for _topic, payload in sub:
-                    if payload.get("corescope") == "ok":
+                    # "ok" is the pollers' success marker; mesh reports link
+                    # state ("connected"/"disconnected"), which isn't ingest.
+                    if "ok" in payload.values():
                         health["last_ingest"] = time.time()
             finally:
                 sub.close()

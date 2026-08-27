@@ -34,6 +34,20 @@ class CoreScopeConfig:
 
 
 @dataclass
+class ComchanConfig(CoreScopeConfig):
+    """Backup analyzer feed — a second CoreScope-compatible instance polled
+    alongside the primary, so an outage there doesn't stop ingestion.
+
+    Unlike the primary, ``base_url`` carries a default: a backup nobody
+    remembered to configure is no backup, and appliance configs written at
+    provisioning (system/provision.py) have no section for it. Both feeds
+    run continuously — dedupe keys on channel+sender+video+minute, not
+    source, so their overlap no-ops rather than needing failover logic.
+    """
+    base_url: str = "https://analyzer.comchan.net"
+
+
+@dataclass
 class PlayerConfig:
     backend: str = "auto"          # auto | mpv | web | embed | null; auto = mpv on pi4/lite,
                                    # web on dev. embed = YouTube IFrame in the browser, no
@@ -92,6 +106,7 @@ class Config:
     data_dir: Path = field(default_factory=lambda: Path("./data"))
     mesh: MeshConfig = field(default_factory=MeshConfig)
     corescope: CoreScopeConfig = field(default_factory=CoreScopeConfig)
+    comchan: ComchanConfig = field(default_factory=ComchanConfig)
     player: PlayerConfig = field(default_factory=PlayerConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     web: WebConfig = field(default_factory=WebConfig)
@@ -132,7 +147,9 @@ def load_config(path: str | Path | None = None) -> Config:
         if candidate and Path(candidate).is_file():
             with open(candidate, "rb") as f:
                 raw = tomllib.load(f)
-            for section in ("mesh", "corescope", "player", "cache", "web", "relay", "backup"):
+            sections = ("mesh", "corescope", "comchan", "player", "cache",
+                        "web", "relay", "backup")
+            for section in sections:
                 if section in raw:
                     _apply(getattr(cfg, section), raw[section])
             _apply(cfg, {k: v for k, v in raw.items() if not isinstance(v, dict)})

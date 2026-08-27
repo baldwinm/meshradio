@@ -1,7 +1,7 @@
 """MeshRadio entrypoint — one asyncio process, modules wired over the bus.
 
-Startup order: DB → bus → ingest (mesh + CoreScope) → cacher → player →
-routing → panel → power → web. Everything is a task in one loop; systemd
+Startup order: DB → bus → ingest (mesh + CoreScope + backup feed) → cacher →
+player → routing → panel → power → web. Everything is a task in one loop; systemd
 manages the process (architecture §4).
 """
 
@@ -131,6 +131,15 @@ async def run(config, demo: bool = False) -> None:
         services.append(MeshIngest(config.mesh, ingest, bus))
     if config.corescope.enabled:
         services.append(CoreScopePoller(config.corescope, ingest, db, bus))
+    # Backup analyzer feed, polled alongside the primary rather than failed
+    # over to: dedupe no-ops the overlap while both are up, so an outage on
+    # either one costs nothing but the other's poll interval.
+    if config.comchan.enabled and config.comchan.base_url:
+        services.append(
+            CoreScopePoller(
+                config.comchan, ingest, db, bus, name="comchan", source="comchan"
+            )
+        )
     if config.relay.push_url and config.relay.token:
         services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
     if config.backup.enabled:

@@ -91,6 +91,9 @@ data_dir = "./data"                # the archive + audio cache live here
 base_url = "https://scope.digitaino.com"   # Austin CoreScope instance
 channel = "#music"
 
+[comchan]
+enabled = true                     # backup analyzer feed; base_url already defaults
+
 [cache]
 ffmpeg_location = ""               # set to ffmpeg's folder if it's not on PATH
 ```
@@ -100,8 +103,21 @@ CoreScope — themes, songs, senders — then polls every 3 minutes for new
 posts. Audio downloads into `data/cache/` in the background (a fresh backfill
 takes a few minutes). Run `pytest` if you want to check the install.
 
-Verify it's working: the log shows `CoreScope poll: N new tracks`, and the
+Verify it's working: the log shows `corescope poll: N new tracks`, and the
 Archive page fills with real days and themes.
+
+**The backup feed.** A single analyzer instance is a single point of failure
+for ingestion, so a second CoreScope-compatible one
+([analyzer.comchan.net](https://analyzer.comchan.net/#/channels)) is polled
+alongside the primary under the `[comchan]` block. Both run continuously
+rather than one failing over to the other: dedupe keys on
+channel+sender+video+minute, not on which feed delivered the message, so the
+overlap no-ops and an outage on either side costs nothing but the other's
+poll interval. Its tracks are stamped `source = 'comchan'`, so it stays
+visible which analyzer covered a given day. `base_url` defaults to a real
+instance (unlike `[corescope]`, whose URL is set at provisioning) so existing
+appliance configs get the backup without being edited; turn it off with
+`enabled = false`.
 
 Config precedence: `--config` flag → `$MESHRADIO_CONFIG` → `./meshradio.toml`
 → `/etc/meshradio/config.toml` → built-in defaults. Every key is optional;
@@ -305,6 +321,7 @@ integration pending.**
 | Link/theme parsing (matches real channel usage) | ✅ working, tested |
 | Ingest pipeline + mesh/CoreScope dedupe | ✅ working, tested |
 | CoreScope poller (Austin instance) | ✅ working, verified against live channel |
+| Backup analyzer feed (analyzer.comchan.net) | 🟡 wired + tested, needs a live poll to confirm the API shape |
 | Cache-first downloader (yt-dlp) + self-healing retries | ✅ working, tested |
 | Player: live policy, queue, archive replay, quiet hours | ✅ working, tested |
 | Web player (browser audio, radio-station mode, EQ/analyzer) | ✅ working, tested |

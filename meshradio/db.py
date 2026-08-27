@@ -245,6 +245,44 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE themes ADD COLUMN updated_at TEXT;
     """,
+    # v10 — 'comchan' track source: the backup analyzer feed
+    # (analyzer.comchan.net), standing in while the primary CoreScope
+    # instance is unreachable. It is its own source rather than more
+    # 'corescope' rows so provenance stays readable when the two feeds
+    # disagree — and so a repeat of the letsmesh retirement (v5) is one
+    # query to find. SQLite can't alter a CHECK, so rebuild the table
+    # (as v2 and v5 did).
+    """
+    PRAGMA foreign_keys=OFF;
+    CREATE TABLE tracks_v10(
+        id           INTEGER PRIMARY KEY,
+        video_id     TEXT NOT NULL,
+        url          TEXT NOT NULL,
+        title        TEXT,
+        artist       TEXT,
+        duration     REAL,
+        theme_id     INTEGER REFERENCES themes(id),
+        sender       TEXT,
+        mesh_ts      REAL,
+        ingested_at  TEXT NOT NULL,
+        source       TEXT NOT NULL
+                     CHECK(source IN ('mesh','corescope','radio','letsmesh','comchan')),
+        cache_path   TEXT,
+        cache_status TEXT NOT NULL DEFAULT 'pending'
+                     CHECK(cache_status IN ('pending','ready','failed')),
+        dedupe_hash  TEXT NOT NULL UNIQUE
+    );
+    INSERT INTO tracks_v10 SELECT * FROM tracks;
+    DROP TABLE tracks;
+    ALTER TABLE tracks_v10 RENAME TO tracks;
+    CREATE INDEX idx_tracks_theme ON tracks(theme_id);
+    CREATE INDEX idx_tracks_status ON tracks(cache_status);
+    CREATE INDEX idx_tracks_video ON tracks(video_id);
+    CREATE INDEX idx_tracks_ingested ON tracks(ingested_at);
+    CREATE UNIQUE INDEX idx_tracks_theme_video
+        ON tracks(theme_id, video_id) WHERE theme_id IS NOT NULL;
+    PRAGMA foreign_keys=ON;
+    """,
 ]
 
 

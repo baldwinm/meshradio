@@ -21,7 +21,10 @@ dedupe hash, which makes reprocessing a no-op.
 The ``name``/``source`` params keep the poller reusable for any additional
 CoreScope-compatible feed (its own cursor key, status field, and track
 provenance); because dedupe keys on channel+sender+video+minute rather than
-source, two such feeds no-op each other's overlap.
+source, two such feeds no-op each other's overlap. app.py uses that to run
+the ``comchan`` backup feed (analyzer.comchan.net) alongside the primary —
+concurrently, not failed over to, so neither instance's outage stalls
+ingestion and neither needs health tracking to decide who is in charge.
 """
 
 from __future__ import annotations

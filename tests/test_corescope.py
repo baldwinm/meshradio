@@ -5,7 +5,7 @@ CoreScope instance, 2026-07): GET /api/channels/{hash}/messages ->
 import httpx
 import pytest
 
-from meshradio.config import CoreScopeConfig
+from meshradio.config import ComchanConfig, CoreScopeConfig
 from meshradio.db import Database
 from meshradio.ingest.corescope import CURSOR_KEY, CoreScopePoller
 from meshradio.ingest.service import IngestService
@@ -159,3 +159,56 @@ async def test_secondary_feed_dedupes_against_primary(db, bus, poller_factory):
     backup, bclient = _secondary_poller(db, bus, [msg])
     assert await backup.poll_once(bclient) == 0
     assert len(await db.tracks_for_day("2026-07-06")) == 1
+
+
+def _comchan_poller(db, bus, messages):
+    """The backup feed exactly as app.py wires it: analyzer.comchan.net under
+    the 'comchan' name and source."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"messages": messages, "total": len(messages)})
+
+    config = ComchanConfig(channel="#music")
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=config.base_url
+    )
+    service = IngestService(db, bus, channel="#music")
+    poller = CoreScopePoller(config, service, db, bus, name="comchan", source="comchan")
+    return poller, client
+
+
+async def test_comchan_feed_stamps_its_own_provenance(db, bus):
+    """Backup-feed tracks are stamped 'comchan', not 'corescope', so it stays
+    visible which analyzer supplied a day the primary was down for."""
+    msg = corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")
+    poller, client = _comchan_poller(db, bus, [msg])
+    assert await poller.poll_once(client) == 1
+    tracks = await db.tracks_for_day("2026-07-06")
+    assert [t["source"] for t in tracks] == ["comchan"]
+    assert await db.get_setting("comchan.cursor") == "2026-07-06T17:00:05Z"
+    assert await db.get_setting(CURSOR_KEY) is None   # primary cursor untouched
+
+
+async def test_comchan_feed_carries_a_day_the_primary_missed(db, bus, poller_factory):
+    """The outage case this feed exists for: the primary returns nothing for a
+    day, the backup has it, and the archive is whole either way."""
+    theme = corescope_msg("alice", "Theme: songs about rain", NOON, "2026-07-06T17:00:05Z")
+    song = corescope_msg("bob", f"https://youtu.be/{VID}", NOON + 300, "2026-07-06T17:05:10Z")
+    primary, pclient = poller_factory([])
+    assert await primary.poll_once(pclient) == 0
+    backup, bclient = _comchan_poller(db, bus, [song, theme])
+    assert await backup.poll_once(bclient) == 1
+    themes = await db.themes_for_day("2026-07-06")
+    assert themes[0]["title"] == "songs about rain"
+
+    # When the primary comes back with the same history, it inserts nothing
+    # new — the two feeds no-op each other rather than doubling the day.
+    recovered, rclient = poller_factory([song, theme])
+    assert await recovered.poll_once(rclient) == 0
+    assert len(await db.tracks_for_day("2026-07-06")) == 1
+
+
+async def test_comchan_defaults_to_a_configured_instance():
+    """A backup nobody configured is no backup: the section may be absent from
+    an appliance config written before it existed and must still poll."""
+    assert ComchanConfig().enabled is True
+    assert ComchanConfig().base_url == "https://analyzer.comchan.net"
