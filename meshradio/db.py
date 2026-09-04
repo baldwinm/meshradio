@@ -28,7 +28,9 @@ log = logging.getLogger(__name__)
 # cache filename and a yt-dlp CLI argument, so enforcing the shape here — at the
 # one place tracks are inserted — keeps anything path-traversal- or
 # argument-injection-shaped out of those sinks regardless of the ingest source.
-_VIDEO_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{11}\Z")
+# The delete CLI checks its argument against the same rule, so an id that could
+# never have been stored is rejected before it goes looking for one.
+VIDEO_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{11}\Z")
 
 MIGRATIONS: list[str] = [
     # v1 — initial schema
@@ -283,6 +285,23 @@ MIGRATIONS: list[str] = [
         ON tracks(theme_id, video_id) WHERE theme_id IS NOT NULL;
     PRAGMA foreign_keys=ON;
     """,
+    # v11 — tombstones for songs the operator removed by hand
+    # (``meshradio --delete-track``). Deleting the row alone isn't enough: the
+    # message is still on the channel, so any re-backfill (the relay's
+    # self-healing one, a restore, a cursor reset) would insert it right back.
+    # A tombstone is the same idea as a locked theme — the archive remembers
+    # the out-of-band decision and ignores the replayed message.
+    """
+    CREATE TABLE deleted_tracks(
+        id         INTEGER PRIMARY KEY,
+        date       TEXT NOT NULL,          -- channel-local day it was removed from
+        video_id   TEXT NOT NULL,
+        title      TEXT,
+        sender     TEXT,
+        deleted_at TEXT NOT NULL,
+        UNIQUE(date, video_id)
+    );
+    """,
 ]
 
 
@@ -487,7 +506,7 @@ class Database:
         can't show up twice in the day's list — no matter who reposts it or how
         much later. Radio filler (``theme_id`` NULL) is exempt; a mix can echo
         the same video across days."""
-        if not _VIDEO_ID_RE.match(video_id):
+        if not VIDEO_ID_RE.match(video_id):
             log.warning("rejecting track with malformed video_id %r", video_id)
             return None
         if theme_id is not None:
@@ -496,6 +515,12 @@ class Database:
                 (theme_id, video_id),
             )
             if already is not None:
+                return None
+            if await self.is_deleted(theme_id, video_id):
+                # The operator removed this song from the day by hand. The
+                # message is still on the channel, so ingest keeps offering it
+                # back; the tombstone is what makes the removal stick.
+                log.info("skipping %s on theme %s: deleted by the operator", video_id, theme_id)
                 return None
         dh = dedupe_hash(channel, sender, video_id, mesh_ts)
         try:
@@ -519,6 +544,72 @@ class Database:
 
     async def track_by_id(self, track_id: int) -> dict[str, Any] | None:
         return await self._fetchone("SELECT * FROM tracks WHERE id=?", (track_id,))
+
+    async def is_deleted(self, theme_id: int, video_id: str) -> bool:
+        """Was this video removed by hand from the day ``theme_id`` belongs to?
+
+        Keyed on the *day* rather than the theme row, so the tombstone still
+        applies if the day's playlist is a different row than it was — a
+        placeholder that got cleaned up, a receiver that rebuilt its own."""
+        row = await self._fetchone(
+            "SELECT 1 FROM deleted_tracks d JOIN themes t ON t.date=d.date "
+            "WHERE t.id=? AND d.video_id=? LIMIT 1",
+            (theme_id, video_id),
+        )
+        return row is not None
+
+    async def delete_track(self, track_id: int) -> dict[str, Any] | None:
+        """Remove one song from the archive for good. Returns the deleted row.
+
+        The out-of-band fix for a song that shouldn't be in the day's playlist
+        — posted before the theme was set, or posted to the wrong day. Ingest
+        can't undo it: the link is still on the channel and a repost is a
+        dedupe no-op, so the only way out is here.
+
+        Three things happen together, and all three are needed for the removal
+        to hold: the track row goes, its play history goes with it (``plays``
+        references it), and a ``deleted_tracks`` tombstone records the day and
+        video so a re-backfill can't quietly put it back. Radio filler (no
+        theme) leaves no tombstone — it isn't on the channel to come back.
+
+        The cached audio file isn't touched here; the caller owns the disk."""
+        track = await self.track_by_id(track_id)
+        if track is None:
+            return None
+        date = None
+        if track["theme_id"] is not None:
+            theme = await self.theme_by_id(track["theme_id"])
+            date = theme["date"] if theme else None
+        await self.db.execute("DELETE FROM plays WHERE track_id=?", (track_id,))
+        await self.db.execute("DELETE FROM tracks WHERE id=?", (track_id,))
+        if date is not None:
+            await self.db.execute(
+                "INSERT INTO deleted_tracks(date,video_id,title,sender,deleted_at) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(date,video_id) DO NOTHING",
+                (date, track["video_id"], track["title"], track["sender"], utcnow()),
+            )
+        await self.db.commit()
+        return track
+
+    async def delete_empty_placeholder(self, theme_id: int) -> bool:
+        """Drop a day's ``Untitled — `` placeholder once it holds no songs.
+
+        Only ever an auto-created, unlocked placeholder with an empty playlist:
+        nobody named it and nothing is filed under it, so leaving it behind
+        would light up a calendar tile for a day that has nothing to play. A
+        real (locked, titled) theme stays even when emptied — somebody chose
+        that title, and the day is still a day the channel named."""
+        theme = await self.theme_by_id(theme_id)
+        if theme is None or theme["locked"] or not theme["title"].startswith("Untitled — "):
+            return False
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM tracks WHERE theme_id=?", (theme_id,)
+        )
+        if row and row["n"]:
+            return False
+        await self.db.execute("DELETE FROM themes WHERE id=?", (theme_id,))
+        await self.db.commit()
+        return True
 
     async def update_track_metadata(
         self,
@@ -804,10 +895,25 @@ class Database:
         )
 
     async def channel_track_count(self) -> int:
-        """How many channel (non-radio) tracks this node knows. The relay
-        compares counts to detect a wiped receiver and re-backfill."""
+        """How many channel (non-radio) tracks this node holds right now."""
         row = await self._fetchone(
             "SELECT COUNT(*) AS n FROM tracks WHERE source != 'radio'"
+        )
+        return int(row["n"]) if row else 0
+
+    async def relay_track_total(self) -> int:
+        """How many channel songs this node has *accounted for* — the ones it
+        holds plus the ones an operator deleted.
+
+        This, not ``channel_track_count``, is what the relay compares: a
+        receiver behind on history is a wipe to re-backfill, but a receiver
+        that is one song lighter because someone ran ``--delete-track`` on it
+        is exactly right, and counting the tombstone keeps the pusher from
+        re-pushing the whole channel every interval trying to restore a song
+        the tombstone will reject anyway."""
+        row = await self._fetchone(
+            "SELECT (SELECT COUNT(*) FROM tracks WHERE source != 'radio') "
+            "+ (SELECT COUNT(*) FROM deleted_tracks) AS n"
         )
         return int(row["n"]) if row else 0
 

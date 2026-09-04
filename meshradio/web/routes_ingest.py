@@ -81,7 +81,7 @@ async def api_ingest(request: Request):
     return JSONResponse({
         "ok": True,
         "inserted": inserted,
-        "tracks": await ctx.db.channel_track_count(),
+        "tracks": await ctx.db.relay_track_total(),
     })
 
 

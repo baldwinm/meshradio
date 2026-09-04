@@ -76,7 +76,7 @@ class RelayPusher(Service):
                 len(messages), data.get("inserted", "?"),
             )
         remote_total = data.get("tracks")
-        local_total = await self.db.channel_track_count()
+        local_total = await self.db.relay_track_total()
         if remote_total is not None and remote_total < local_total:
             log.warning(
                 "relay: receiver has %d tracks vs %d local — wiped? re-backfilling",
