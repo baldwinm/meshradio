@@ -13,6 +13,7 @@ import logging
 import sqlite3
 import sys
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import uvicorn
@@ -23,7 +24,8 @@ from . import backup as backup_mod
 from .backup import BackupService
 from .bus import EventBus
 from .config import load_config
-from .db import Database
+from .db import Database, VIDEO_ID_RE
+from .ingest import parse
 from .ingest.corescope import CoreScopePoller
 from .ingest.mesh import MeshIngest
 from .ingest.relay import RelayPusher
@@ -213,6 +215,17 @@ def main() -> None:
     parser.add_argument("--theme-date", metavar="YYYY-MM-DD",
                         help="which day --set-theme applies to (default: today, in the "
                              "configured player timezone)")
+    parser.add_argument("--delete-track", metavar="VIDEO",
+                        help="remove one song from a day's playlist and exit — a YouTube "
+                             "URL or a bare video id. For a song that shouldn't be in the "
+                             "archive at all (posted before the theme was set, posted to "
+                             "the wrong day); a repost can't undo it and neither can the "
+                             "queue's Remove button. The removal is remembered, so a "
+                             "re-backfill can't put it back. Defaults to today; see "
+                             "--track-date.")
+    parser.add_argument("--track-date", metavar="YYYY-MM-DD",
+                        help="which day --delete-track applies to (default: today, in the "
+                             "configured player timezone)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -240,6 +253,10 @@ def main() -> None:
         raise SystemExit(asyncio.run(_run_set_theme(config, args)))
     if args.theme_date is not None:
         parser.error("--theme-date only applies with --set-theme")
+    if args.delete_track is not None:
+        raise SystemExit(asyncio.run(_run_delete_track(config, args)))
+    if args.track_date is not None:
+        parser.error("--track-date only applies with --delete-track")
 
     try:
         asyncio.run(run(config, demo=args.demo))
@@ -288,14 +305,9 @@ async def _run_set_theme(config, args) -> int:
         print("--set-theme needs a non-empty title", file=sys.stderr)
         return 1
 
-    if args.theme_date:
-        try:
-            date = datetime.strptime(args.theme_date, "%Y-%m-%d").strftime("%Y-%m-%d")
-        except ValueError:
-            print(f"--theme-date must be YYYY-MM-DD, got {args.theme_date!r}", file=sys.stderr)
-            return 1
-    else:
-        date = datetime.now(ZoneInfo(config.player.timezone)).strftime("%Y-%m-%d")
+    date = _resolve_day(args.theme_date, config, "--theme-date")
+    if date is None:
+        return 1
 
     db = Database(config.db_path)
     await db.connect()
@@ -326,6 +338,89 @@ async def _run_set_theme(config, args) -> int:
         return 0
     finally:
         await db.close()
+
+
+def _resolve_day(value: str | None, config, flag: str) -> str | None:
+    """A YYYY-MM-DD flag value, or today in the configured timezone. None on a
+    malformed date (the caller reports and exits)."""
+    if not value:
+        return datetime.now(ZoneInfo(config.player.timezone)).strftime("%Y-%m-%d")
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        print(f"{flag} must be YYYY-MM-DD, got {value!r}", file=sys.stderr)
+        return None
+
+
+async def _run_delete_track(config, args) -> int:
+    """Handle --delete-track: drop one song from a day's playlist, then exit.
+
+    The song stays gone: a tombstone tells ingest to ignore the link if the
+    channel replays it (a relay re-backfill, a restore, a repost). Like
+    --set-theme this edits one archive, so run it on each instance you want
+    fixed — the hosted receiver and the Pi keep their own."""
+    raw = args.delete_track.strip()
+    links = parse.extract_links(raw)
+    video_id = links[0].video_id if links else raw
+    if not VIDEO_ID_RE.match(video_id):   # the same id the archive would store
+        print(f"--delete-track needs a YouTube link or an 11-character video id, "
+              f"got {raw!r}", file=sys.stderr)
+        return 1
+
+    date = _resolve_day(args.track_date, config, "--track-date")
+    if date is None:
+        return 1
+
+    db = Database(config.db_path)
+    await db.connect()
+    try:
+        tracks = await db.tracks_for_day(date)
+        matches = [t for t in tracks if t["video_id"] == video_id]
+        if not matches:
+            print(f"{date}: no song with video id {video_id} in the archive", file=sys.stderr)
+            if tracks:
+                print("that day's songs:", file=sys.stderr)
+                for t in tracks:
+                    label = t["title"] or t["url"]
+                    print(f"  {t['video_id']}  {label} (shared by {t['sender']})",
+                          file=sys.stderr)
+            return 1
+
+        for track in matches:
+            theme_id = track["theme_id"]
+            deleted = await db.delete_track(track["id"])
+            assert deleted is not None
+            label = deleted["title"] or deleted["url"]
+            print(f"{date}: removed {label} ({deleted['video_id']}, "
+                  f"shared by {deleted['sender']})")
+            _drop_cache_file(config, deleted)
+            if theme_id is not None and await db.delete_empty_placeholder(theme_id):
+                print(f"{date}: the day's empty 'Untitled —' placeholder went with it")
+        print("It won't come back: a replayed channel message for it is now ignored, "
+              "the way a corrected repost is.")
+        print("Run this on each instance you want fixed (relay hosts keep their own "
+              "archive). Restart the service if it's already sitting in a live queue.")
+        return 0
+    finally:
+        await db.close()
+
+
+def _drop_cache_file(config, track: dict) -> None:
+    """Delete the removed song's cached audio, if this node downloaded one.
+
+    Best-effort and confined to the cache directory: a stale or hand-edited
+    cache_path must not turn a track deletion into an arbitrary unlink."""
+    path = track.get("cache_path")
+    if not path:
+        return
+    cache_dir = Path(config.cache_dir).resolve()
+    try:
+        target = Path(path).resolve()
+        target.relative_to(cache_dir)
+        target.unlink()
+    except (OSError, ValueError):
+        return
+    print(f"  cached audio removed ({target.name})")
 
 
 if __name__ == "__main__":

@@ -276,6 +276,37 @@ travel over the relay — the hosted receiver has its own locked theme for that
 day and ignores the replayed message, exactly like a corrected repost on the
 channel. Run it once per instance you want fixed (the Pi and the host).
 
+### Removing a song
+
+The queue's **✕ Remove** takes a song out of what's playing; it stays in the
+day's playlist and comes back next time the day is played. To drop it from the
+archive itself — a song posted before anyone set the theme, or posted to the
+wrong day — remove it by video id or link:
+
+```
+meshradio --delete-track "https://youtu.be/VIDEOID"           # today
+meshradio --delete-track VIDEOID --track-date 2026-07-06      # any day
+```
+
+Get the id wrong and it prints that day's songs so you can pick one. The song
+and its play history go, and so does its cached audio file if this node
+downloaded one.
+
+The removal sticks. The link is still on the channel, so ingest would keep
+offering it back (a repost is a dedupe no-op, and the relay re-backfills a
+receiver it thinks was wiped) — the archive records the day and video it
+dropped and ignores the message from then on, the same way a locked theme
+ignores a corrected repost. The tombstone is scoped to that day only: if
+someone shares the song again next week it files normally.
+
+If the song was the only thing on an `Untitled — <date>` placeholder, the
+empty placeholder goes too, so the day doesn't sit lit but silent on the
+calendar. A theme somebody actually named stays, empty or not.
+
+Like `--set-theme`, this edits one archive — run it on each instance you want
+fixed (the Pi and the host). A song already sitting in a running player's queue
+plays out until the service restarts.
+
 ---
 
 ## FAQ
