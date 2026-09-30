@@ -210,7 +210,7 @@ class SessionManager:
             and self._newest_day == datetime.now(self._tz).date().isoformat()
         ):
             return self._newest_day
-        newest = next((d["date"] for d in await self._db.archive_days() if d["tracks"]), None)
+        newest = await self._db.newest_day_with_tracks()
         if newest is not None:
             self._newest_day = newest
         return newest

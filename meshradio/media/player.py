@@ -635,17 +635,17 @@ class PlayerService(Service):
         # per-entry filler flags don't (only track ids are stored), which at
         # worst costs a restored session one mis-ordered live post.
         self.station = snap.get("station") if snap.get("station") in ("radio", "archive") else None
-        queue: list[dict[str, Any]] = []
-        for track_id in snap.get("queue_track_ids", []):
-            track = await self.db.track_by_id(track_id)
-            if track and self._is_playable(track):
-                queue.append(track)
-        self.queue = queue
-        current = None
-        if snap.get("current_track_id") is not None:
-            current = await self.db.track_by_id(snap["current_track_id"])
-            if current and not self._is_playable(current):
-                current = None
+        queue_ids = list(snap.get("queue_track_ids", []))
+        current_id = snap.get("current_track_id")
+        # One query for the lot: a restore is a returning visitor's first
+        # request, and a long day is a couple of hundred ids.
+        rows = await self.db.tracks_by_ids(queue_ids + ([current_id] if current_id is not None else []))
+        self.queue = [
+            dict(rows[i]) for i in queue_ids if i in rows and self._is_playable(rows[i])
+        ]
+        current = rows.get(current_id) if current_id is not None else None
+        if current and not self._is_playable(current):
+            current = None
         status = snap.get("status")
         if current and status in ("playing", "paused"):
             self.current = current

@@ -601,6 +601,23 @@ class Database:
     async def track_by_id(self, track_id: int) -> dict[str, Any] | None:
         return await self._fetchone("SELECT * FROM tracks WHERE id=?", (track_id,))
 
+    async def tracks_by_ids(
+        self, ids: list[int] | tuple[int, ...], chunk: int = 500
+    ) -> dict[int, dict[str, Any]]:
+        """Rows for many track ids, keyed by id, in one round trip per
+        ``chunk`` (SQLite caps bound parameters). Ids that no longer exist
+        are simply absent. A session restore used to do one query per queued
+        track — 200 round trips through the driver thread for a long day."""
+        found: dict[int, dict[str, Any]] = {}
+        wanted = list(dict.fromkeys(ids))
+        for start in range(0, len(wanted), chunk):
+            part = wanted[start:start + chunk]
+            rows = await self._fetchall(
+                f"SELECT * FROM tracks WHERE id IN ({','.join('?' * len(part))})", tuple(part)
+            )
+            found.update((row["id"], row) for row in rows)
+        return found
+
     async def is_deleted(self, theme_id: int, video_id: str) -> bool:
         """Was this video removed by hand from the day ``theme_id`` belongs to?
 
@@ -744,6 +761,17 @@ class Database:
             "FROM themes t LEFT JOIN tracks tr ON tr.theme_id=t.id "
             "GROUP BY t.date ORDER BY t.date DESC"
         )
+
+    async def newest_day_with_tracks(self) -> str | None:
+        """The most recent archive day holding at least one song — where a
+        new visitor lands. ``archive_days`` answers the same question by
+        aggregating the whole history; this is one lookup, and it runs on
+        every request from an idle session until today's first song lands."""
+        row = await self._fetchone(
+            "SELECT MAX(t.date) AS date FROM themes t "
+            "WHERE EXISTS (SELECT 1 FROM tracks tr WHERE tr.theme_id=t.id)"
+        )
+        return row["date"] if row and row["date"] else None
 
     async def all_themes(self) -> list[dict[str, Any]]:
         """Every theme the channel actually used, newest first, with its song
