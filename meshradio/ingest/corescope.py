@@ -47,6 +47,11 @@ log = logging.getLogger(__name__)
 
 CURSOR_KEY = "corescope.cursor"
 
+# Messages committed per transaction during a poll. Big enough that a backfill
+# is a handful of commits; small enough that other writers (a play starting,
+# a session flush) wait milliseconds, not the whole history.
+INGEST_BATCH = 500
+
 
 class CoreScopePoller(Service):
     def __init__(
@@ -105,10 +110,14 @@ class CoreScopePoller(Service):
         # Themes must land before the links posted after them.
         fresh.sort(key=lambda m: m["ts"])
         inserted = 0
-        for msg in fresh:
-            inserted += await self.service.handle_message(
-                sender=msg["sender"], text=msg["text"], ts=msg["ts"], source=self.source
-            )
+        # One commit per batch rather than per row: a first-boot backfill is
+        # thousands of messages, each otherwise its own write transaction.
+        for start in range(0, len(fresh), INGEST_BATCH):
+            async with self.db.transaction():
+                for msg in fresh[start:start + INGEST_BATCH]:
+                    inserted += await self.service.handle_message(
+                        sender=msg["sender"], text=msg["text"], ts=msg["ts"], source=self.source
+                    )
         newest = max((m["first_seen"] for m in fresh), default="")
         if newest and newest != cursor:
             await self.db.set_setting(self.cursor_key, newest)

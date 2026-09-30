@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import secrets
 import time
 from pathlib import Path
@@ -9,9 +11,15 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from ..ingest.corescope import INGEST_BATCH
 from .context import ctx_of
 
 router = APIRouter()
+
+# A full backfill batch (5000 short messages + metadata) is well under a
+# megabyte; anything huge is a mistake or abuse — refuse before parsing.
+MAX_INGEST_BYTES = 16 * 1024 * 1024
+MAX_INGEST_MESSAGES = 5000
 
 _AUDIO_TYPES = {
     ".opus": "audio/ogg",
@@ -50,31 +58,36 @@ async def api_ingest(request: Request):
     ctx = ctx_of(request)
     if not ctx.ingest_token or ctx.ingest is None:
         raise HTTPException(404)
-    supplied = request.headers.get("authorization", "")
-    if not secrets.compare_digest(supplied, f"Bearer {ctx.ingest_token}"):
+    # Bytes, not str: compare_digest raises on non-ASCII text, and a 500 is
+    # a stranger answer to a garbage header than a 401.
+    supplied = request.headers.get("authorization", "").encode("utf-8", "replace")
+    if not secrets.compare_digest(supplied, f"Bearer {ctx.ingest_token}".encode()):
         raise HTTPException(401, "bad token")
-    # A full backfill batch (5000 short messages + metadata) is well under a
-    # megabyte; anything huge is a mistake or abuse — refuse before parsing.
-    length = request.headers.get("content-length", "")
-    if length.isdigit() and int(length) > 16 * 1024 * 1024:
-        raise HTTPException(413, "batch too large")
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(400, "invalid JSON")
+    payload = json_body(await read_capped(request, MAX_INGEST_BYTES))
+    if not isinstance(payload, dict) or not isinstance(payload.get("messages", []), list):
+        raise HTTPException(400, 'expected {"messages": [...]}')
+    messages = (payload.get("messages") or [])[:MAX_INGEST_MESSAGES]
     inserted = 0
-    for msg in (payload.get("messages") or [])[:5000]:
-        try:
-            meta = msg.get("meta")
-            inserted += await ctx.ingest.handle_message(
-                sender=str(msg["sender"]),
-                text=str(msg["text"]),
-                ts=float(msg["ts"]),
-                source="corescope",  # relayed community-channel history
-                meta=meta if isinstance(meta, dict) else None,
-            )
-        except (KeyError, TypeError, ValueError):
-            continue  # skip malformed entries, keep the batch going
+    # One commit per batch rather than per row (see corescope.INGEST_BATCH).
+    for start in range(0, len(messages), INGEST_BATCH):
+        async with ctx.db.transaction():
+            for msg in messages[start:start + INGEST_BATCH]:
+                if not isinstance(msg, dict):
+                    continue
+                try:
+                    ts = float(msg["ts"])
+                    if not math.isfinite(ts):
+                        continue
+                    meta = msg.get("meta")
+                    inserted += await ctx.ingest.handle_message(
+                        sender=str(msg["sender"]),
+                        text=str(msg["text"]),
+                        ts=ts,
+                        source="corescope",  # relayed community-channel history
+                        meta=meta if isinstance(meta, dict) else None,
+                    )
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    continue  # skip malformed entries, keep the batch going
     ctx.health["last_ingest"] = time.time()
     # Total lets the pusher detect a wiped DB (ephemeral hosting) and reset
     # its cursor for a full re-backfill.
@@ -83,6 +96,30 @@ async def api_ingest(request: Request):
         "inserted": inserted,
         "tracks": await ctx.db.relay_track_total(),
     })
+
+
+async def read_capped(request: Request, limit: int) -> bytes:
+    """The request body, or 413 once it grows past ``limit``. Counts what
+    actually arrives rather than trusting Content-Length, which a chunked
+    request simply doesn't send."""
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > limit:
+        raise HTTPException(413, "batch too large")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(413, "batch too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def json_body(raw: bytes):
+    try:
+        return json.loads(raw)
+    except ValueError:
+        raise HTTPException(400, "invalid JSON")
 
 
 @router.get("/healthz")
