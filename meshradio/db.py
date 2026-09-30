@@ -782,6 +782,28 @@ class Database:
         )
         return row["date"] if row and row["date"] else None
 
+    async def recent_days_tracks(self, days: int = 30) -> list[dict[str, Any]]:
+        """Every channel song on the newest ``days`` days that have any — the
+        feed's source. Newest day first, and within a day in posted order.
+
+        The days are picked from ``themes`` with a per-theme EXISTS (the shape
+        ``newest_day_with_tracks`` uses) rather than by DISTINCT over a
+        themes×tracks join: this walks one row per day down the date index and
+        stops at the limit, where the join read every track to find the dates.
+        A day with a theme but no songs isn't an entry worth a subscriber's
+        attention, so it's left out."""
+        return await self._fetchall(
+            "SELECT t.date AS date, t.title AS theme_title, tr.video_id, tr.title, "
+            " tr.artist, tr.sender, tr.mesh_ts "
+            "FROM tracks tr JOIN themes t ON t.id=tr.theme_id "
+            "WHERE tr.source != 'radio' AND t.date IN ("
+            " SELECT t2.date FROM themes t2 WHERE EXISTS ("
+            "  SELECT 1 FROM tracks tr2 WHERE tr2.theme_id=t2.id AND tr2.source != 'radio') "
+            " GROUP BY t2.date ORDER BY t2.date DESC LIMIT ?) "
+            "ORDER BY t.date DESC, tr.mesh_ts, tr.id",
+            (days,),
+        )
+
     async def all_themes(self) -> list[dict[str, Any]]:
         """Every theme the channel actually used, newest first, with its song
         count — the Archive's theme list.

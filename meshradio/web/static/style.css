@@ -158,6 +158,22 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .results .day-link:hover { color: var(--amber); }
 .results button { flex: none; }
 
+/* Cover-art stamp beside a song in the archive's lists (partials/thumb.html).
+   Sized here and on the <img> so lazy-loaded rows don't shift the list as the
+   stills arrive; the face colour holds the place until they do. The bevel is
+   .art's, so the stamp reads as part of the same chrome. */
+.thumb {
+  flex: none;
+  width: 56px; height: 32px;
+  object-fit: cover;
+  background: var(--face-lo);
+  border: 1px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+}
+/* .results rows align on the text baseline, which would sit the image's bottom
+   edge on it; centre the stamp on the row instead. */
+.results .thumb { align-self: center; }
+
 /* -- stats ---------------------------------------------------------------- */
 .stat-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.2rem; }
 .stat {
@@ -769,6 +785,7 @@ select option { background: #26262f; color: #d8dce6; }
   body { padding: 0 0.5rem 3rem; font-size: 12px; }
   header { flex-wrap: wrap; gap: 0.5rem; }
   .art { width: 112px; }
+  .thumb { width: 44px; height: 25px; }
   .meta .title { font-size: 0.85rem; }
   .controls { flex-wrap: wrap; }
   .controls input[type="range"][title="Volume"] { flex: 1; min-width: 80px; }

@@ -80,7 +80,13 @@ function scrubPreview(el) {                            // dragging: preview only
 
 function scrubCommit(el) {                             // released: actually seek
   delete el.dataset.seeking;
-  const pos = +el.value;
+  seekTo(+el.value);
+}
+
+// Move this tab's player to ``pos`` seconds and tell the server, so its clock
+// and every other tab follow. The scrub bar and the OS media controls
+// (mediasession.js) both land here.
+function seekTo(pos) {
   if (currentTrackId !== null && audio.src) audio.currentTime = pos;
   if (ytPlayer && embedTrackId !== null) { try { ytPlayer.seekTo(pos, true); } catch (e) {} }
   fetch("/api/seek/" + pos, { method: "POST" });       // keep server clock + remotes in sync
