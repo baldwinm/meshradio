@@ -44,6 +44,7 @@ ytdlp_bin = "yt-dlp"
 audio_format = "opus"
 max_retries = 3
 retry_backoff_s = 30
+concurrency = 2                 # downloads in flight at once (a Pi copes with 2; 1 = strictly one by one)
 ffmpeg_location = ""            # set if ffmpeg isn't on PATH (passed to yt-dlp)
 ytdlp_extra_args = []           # e.g. ["--js-runtimes", "deno:/path/to/deno"] if deno isn't on PATH
 

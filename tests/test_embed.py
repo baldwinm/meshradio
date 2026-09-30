@@ -35,7 +35,7 @@ async def test_embed_plays_without_cache_path(db, bus):
 
 
 async def test_embed_cacher_skips_download(db, bus, monkeypatch, tmp_path):
-    async def fake_oembed(video_id):
+    async def fake_oembed(video_id, client=None):
         return {"title": "Song A", "artist": "Artist A", "thumbnail": ""}
 
     monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", fake_oembed)
@@ -54,7 +54,7 @@ async def test_embed_cacher_skips_download(db, bus, monkeypatch, tmp_path):
 
 
 async def test_embed_cacher_fails_unresolvable(db, bus, monkeypatch, tmp_path):
-    async def fake_oembed(video_id):
+    async def fake_oembed(video_id, client=None):
         return None  # deleted/private video
 
     monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", fake_oembed)
@@ -71,7 +71,7 @@ async def test_embed_oembed_retries_transient_failures(db, bus, monkeypatch, tmp
     retries and it goes ready once YouTube answers again."""
     calls = {"n": 0}
 
-    async def flaky_oembed(video_id):
+    async def flaky_oembed(video_id, client=None):
         calls["n"] += 1
         if calls["n"] == 1:
             return None
@@ -91,7 +91,7 @@ async def test_embed_ready_without_oembed_when_meta_relayed(db, bus, monkeypatch
     go straight to ready without asking YouTube anything."""
     from meshradio.ingest.service import IngestService
 
-    async def must_not_run(video_id):
+    async def must_not_run(video_id, client=None):
         raise AssertionError("oEmbed called despite relayed metadata")
 
     monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", must_not_run)
@@ -134,7 +134,7 @@ async def test_meta_backfills_deduped_track(db, bus):
 async def test_process_track_skips_already_ready(db, bus, monkeypatch, tmp_path):
     """Sweep + event stream can deliver the same track twice; the second
     delivery must not refetch or re-announce it."""
-    async def must_not_run(video_id):
+    async def must_not_run(video_id, client=None):
         raise AssertionError("oEmbed called for an already-ready track")
 
     monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", must_not_run)

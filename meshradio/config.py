@@ -70,6 +70,8 @@ class CacheConfig:
     max_retries: int = 3
     retry_backoff_s: int = 30
     ffmpeg_location: str = ""      # dir/exe passed to yt-dlp when ffmpeg isn't on PATH
+    concurrency: int = 2           # downloads (yt-dlp processes) or oEmbed lookups in flight
+                                   # at once; one stuck fetch no longer stalls the backlog
     ytdlp_extra_args: list = field(default_factory=list)  # e.g. ["--js-runtimes", "deno:C:/path/deno.exe"]
 
 
