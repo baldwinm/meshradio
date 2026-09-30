@@ -257,6 +257,17 @@ class WebContext:
             {"state": p.state(), **await self.day_context(p)},
         )
 
+    async def render_live(self, request: Request):
+        """Everything on Now Playing that a state push changes — the bar, the
+        queue, the day nav — in one response, as out-of-band swaps into the
+        page's three containers. One request per event instead of three, and
+        the day context (two queries) built once instead of twice."""
+        p = await self.get_player(request)
+        return self.templates.TemplateResponse(
+            request, "partials/live.html",
+            {"state": p.state(), **await self.day_context(p)},
+        )
+
     async def render_queue(self, request: Request):
         return self.templates.TemplateResponse(
             request, "partials/queue.html",

@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ theme_titles|join(" · ") or day }} · MeshRadio{% endblock %}
 {% block content %}
-<div id="now-playing"
-     hx-get="/partials/now-playing"
-     hx-trigger="meshradio:state from:body"
-     hx-swap="innerHTML">
+{# One request per state push, not three: radio.js fires meshradio:state on
+   every WebSocket message, this element fetches /partials/live, and the
+   response swaps the three containers below out-of-band (partials/live.html).
+   The containers themselves fetch nothing. #}
+<div id="live-sync" hx-get="/partials/live" hx-trigger="meshradio:state from:body"
+     hx-swap="none"></div>
+<div id="now-playing">
   {% include "partials/now_playing.html" %}
 </div>
 
@@ -43,17 +46,11 @@
 </details>
 
 <h2>Queue</h2>
-<div id="queue"
-     hx-get="/partials/queue"
-     hx-trigger="meshradio:state from:body"
-     hx-swap="innerHTML">
+<div id="queue">
   {% include "partials/queue.html" %}
 </div>
 
-<div id="day-nav"
-     hx-get="/partials/day-nav"
-     hx-trigger="meshradio:state from:body"
-     hx-swap="innerHTML">
+<div id="day-nav">
   {% include "partials/day_nav.html" %}
 </div>
 {% endblock %}

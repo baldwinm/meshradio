@@ -239,6 +239,12 @@ async def sitemap(request: Request):
     )
 
 
+@router.get("/partials/live", response_class=HTMLResponse)
+async def partial_live(request: Request):
+    """What the index page fetches on every state push (see index.html)."""
+    return await ctx_of(request).render_live(request)
+
+
 @router.get("/partials/now-playing", response_class=HTMLResponse)
 async def partial_now_playing(request: Request):
     return await ctx_of(request).render_now_playing(request)

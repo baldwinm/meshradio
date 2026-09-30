@@ -55,8 +55,11 @@
     if (li) { e.preventDefault(); select(li); }
   });
 
-  // Re-apply the highlight after htmx swaps the queue (state pushes, clear).
-  document.body.addEventListener("htmx:afterSwap", function (e) {
+  // Re-apply the highlight after htmx swaps the queue: out-of-band from the
+  // live partial on a state push, or directly (Clear queue's own response).
+  function onSwap(e) {
     if (e.target && e.target.id === "queue") apply();
-  });
+  }
+  document.body.addEventListener("htmx:afterSwap", onSwap);
+  document.body.addEventListener("htmx:oobAfterSwap", onSwap);
 })();
