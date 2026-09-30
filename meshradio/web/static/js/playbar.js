@@ -53,6 +53,26 @@ setInterval(() => {
   paintBar(scrub, pos, dur);
 }, 500);
 
+// The bar's controls are re-rendered by htmx on every state push and the
+// Content-Security-Policy allows no inline handlers, so listen once at the
+// document and match by id — bindings survive every swap that way.
+document.addEventListener("input", (e) => {
+  if (e.target.id === "pb-scrub") scrubPreview(e.target);
+});
+document.addEventListener("change", (e) => {
+  if (e.target.id === "pb-scrub") scrubCommit(e.target);
+  else if (e.target.id === "vol-range") setVolume(e.target.value);
+});
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#vol-icon")) toggleMute();
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.id === "vol-icon") {
+    e.preventDefault();
+    toggleMute();
+  }
+});
+
 function scrubPreview(el) {                            // dragging: preview only
   el.dataset.seeking = "1";
   paintBar(el, +el.value, +el.max);

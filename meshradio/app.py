@@ -143,7 +143,12 @@ async def run(config, demo: bool = False) -> None:
             )
         )
     if config.relay.push_url and config.relay.token:
-        services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
+        try:
+            services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
+        except ValueError as exc:
+            # A misconfigured relay must not take the radio down with it (or
+            # loop the systemd unit); it just doesn't push until fixed.
+            log.error("relay disabled: %s", exc)
     if config.backup.enabled:
         services.append(BackupService(config.backup, config.db_path, config.backup_dir))
 
@@ -158,7 +163,10 @@ async def run(config, demo: bool = False) -> None:
     player_factory = None
     if isinstance(player.backend, EmbedBackend):
         def player_factory(out_bus: EventBus) -> PlayerService:
-            p = PlayerService(
+            # Not started here: the SessionManager starts the players it
+            # keeps and never starts the throwaway one a session-less page
+            # view renders from.
+            return PlayerService(
                 config.player,
                 db,
                 bus,                       # hears shared TRACK_READY events
@@ -166,8 +174,6 @@ async def run(config, demo: bool = False) -> None:
                 output_getter=lambda: "embed",
                 events_out=out_bus,        # announces state only to its session
             )
-            p.start()
-            return p
 
     web_app = create_app(
         bus,
@@ -177,6 +183,10 @@ async def run(config, demo: bool = False) -> None:
         ingest=ingest,
         ingest_token=config.web.ingest_token,
         player_factory=player_factory,
+        allowed_hosts=config.web.allowed_hosts,
+        public_url=config.web.public_url,
+        security_headers=config.web.security_headers,
+        csp_report_only=config.web.csp_report_only,
     )
     server = uvicorn.Server(
         uvicorn.Config(

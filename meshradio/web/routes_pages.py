@@ -91,7 +91,7 @@ async def archive_themes(request: Request, y: str = ""):
     The repeat counts come from the whole history, not the year on screen: "run
     3×" has to mean 3 times ever."""
     ctx = ctx_of(request)
-    themes = await ctx.db.all_themes()
+    themes = await ctx.all_themes()
     years = archive_years(themes)
     i = years.index(y) if y in years else len(years) - 1
     year = years[i] if years else None
@@ -167,17 +167,7 @@ async def search(request: Request, q: str = ""):
 @router.get("/stats", response_class=HTMLResponse)
 async def stats(request: Request):
     ctx = ctx_of(request)
-    return ctx.templates.TemplateResponse(
-        request,
-        "stats.html",
-        {
-            "totals": await ctx.db.overall_stats(),
-            "plays": await ctx.db.play_totals(),
-            "top_songs": await ctx.db.top_songs(),
-            "top_sharers": await ctx.db.top_sharers(),
-            "busiest_themes": await ctx.db.busiest_themes(),
-        },
-    )
+    return ctx.templates.TemplateResponse(request, "stats.html", await ctx.stats())
 
 
 @router.get("/member/{name}", response_class=HTMLResponse)
@@ -247,6 +237,12 @@ async def sitemap(request: Request):
         f"{urls}</urlset>",
         media_type="application/xml",
     )
+
+
+@router.get("/partials/live", response_class=HTMLResponse)
+async def partial_live(request: Request):
+    """What the index page fetches on every state push (see index.html)."""
+    return await ctx_of(request).render_live(request)
 
 
 @router.get("/partials/now-playing", response_class=HTMLResponse)

@@ -44,6 +44,7 @@ ytdlp_bin = "yt-dlp"
 audio_format = "opus"
 max_retries = 3
 retry_backoff_s = 30
+concurrency = 2                 # downloads in flight at once (a Pi copes with 2; 1 = strictly one by one)
 ffmpeg_location = ""            # set if ffmpeg isn't on PATH (passed to yt-dlp)
 ytdlp_extra_args = []           # e.g. ["--js-runtimes", "deno:/path/to/deno"] if deno isn't on PATH
 
@@ -52,12 +53,22 @@ host = "0.0.0.0"
 port = 8080
 ingest_token = ""               # non-empty enables POST /api/ingest (relay receiver);
                                 # on hosts prefer the MESHRADIO_INGEST_TOKEN env var
+allowed_hosts = []              # host names this instance answers to, e.g.
+                                # ["meshradio.local", "192.168.1.20"]; empty = any.
+                                # Pinning it stops DNS-rebinding pages reaching the radio.
+public_url = ""                 # how visitors reach it, e.g. "https://meshradio.example.org";
+                                # canonical links, previews and the sitemap use this
+                                # rather than the request's Host header
+security_headers = true         # Content-Security-Policy, nosniff, referrer and framing
+                                # headers on every response; false if a proxy sets them
+csp_report_only = false         # true = the policy only reports (browser console), never blocks
 
 [relay]
 # Mirror this node's channel history to a hosted instance that can't poll
 # CoreScope itself (Cloudflare challenges datacenter IPs). Runs only when
 # both keys are set.
-push_url = ""                   # e.g. "https://meshradio.example.org"
+push_url = ""                   # e.g. "https://meshradio.example.org" — https only (the
+                                # token rides on every push); plain http just for localhost
 token = ""                      # must match the receiver's ingest token
 interval_s = 120
 

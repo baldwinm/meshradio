@@ -101,9 +101,28 @@ function syncEqSliders() {
   applyEq();
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+// The EQ panel's controls carry no inline handlers (the Content-Security-
+// Policy forbids them); listen at the document and match by id/class. That
+// also keeps them working after hx-boost swaps <main> on navigation.
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#eq-on")) eqToggle();
+  else if (e.target.closest("#eq-reset")) eqReset();
+});
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.id === "eq-preamp") eqPreamp(el.value);
+  else if (el.classList && el.classList.contains("band-input")) eqBand(+el.dataset.band, el.value);
+});
+document.addEventListener("change", (e) => {
+  if (e.target.id === "eq-preset") eqPreset(e.target.value);
+});
+
+// Fill the preset list and sync the sliders whenever the panel is (re)drawn:
+// first paint, and again after a boosted navigation brings Now Playing back
+// (DOMContentLoaded doesn't fire for an htmx swap).
+function initEq() {
   const sel = document.getElementById("eq-preset");
-  if (sel) {
+  if (sel && sel.options.length <= 1) {
     for (const name of Object.keys(EQ_PRESETS)) {
       const opt = document.createElement("option");
       opt.value = opt.textContent = name;
@@ -112,11 +131,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   syncEqSliders();
   const win = document.getElementById("eq-window");
-  if (win) {
+  if (win && !win.dataset.eqBound) {
+    win.dataset.eqBound = "1";
     win.open = localStorage.getItem("meshradio-eq-open") === "1";
     win.addEventListener("toggle", () =>
       localStorage.setItem("meshradio-eq-open", win.open ? "1" : "0"));
   }
+}
+document.addEventListener("DOMContentLoaded", initEq);
+document.body.addEventListener("htmx:afterSettle", (e) => {
+  if (e.target && e.target.tagName === "MAIN") initEq();
 });
 
 // Spectrum analyzer: 19 log-spaced bars with slowly falling peak caps,

@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from .context import ctx_of
 
 router = APIRouter()
+
+# A position or a length in seconds. Anything past a day is a mistake, and
+# ``inf``/``nan`` parse as floats too: a seek to infinity leaves the player's
+# clock unserialisable (every state read 500s), and a reported duration lands
+# in the shared tracks table, where it breaks every session that queues the
+# song. Reject at the edge so nothing downstream has to think about it.
+_SECONDS = dict(allow_inf_nan=False, le=24 * 3600)
 
 
 @router.get("/api/state")
@@ -40,7 +47,7 @@ async def api_volume(request: Request, level: int):
 
 
 @router.post("/api/seek/{seconds}")
-async def api_seek(request: Request, seconds: float):
+async def api_seek(request: Request, seconds: float = Path(ge=0, **_SECONDS)):
     p = await ctx_of(request).get_player(request)
     await p.seek(seconds)
     return JSONResponse({"ok": True, "position": p.position()})
@@ -115,9 +122,12 @@ async def api_ended(request: Request, track_id: int):
 
 
 @router.post("/api/duration/{track_id}/{seconds}")
-async def api_duration(request: Request, track_id: int, seconds: float):
+async def api_duration(
+    request: Request, track_id: int, seconds: float = Path(gt=0, **_SECONDS)
+):
     """The embed speaker tab reports a track's real duration (embed tracks
-    start without one — oEmbed metadata has no length)."""
+    start without one — oEmbed metadata has no length). Only a missing
+    duration is ever filled (see ``PlayerService.report_duration``)."""
     ctx = ctx_of(request)
     await (await ctx.get_player(request)).report_duration(track_id, seconds)
     return JSONResponse({"ok": True})

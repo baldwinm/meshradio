@@ -34,6 +34,9 @@
   {% endif %}
   <meta name="twitter:title" content="{{ og_title }}">
   <meta name="twitter:description" content="{{ og_desc }}">
+  {# htmx would otherwise inject a <style> for its request indicator, which the
+     Content-Security-Policy (no inline styles) would refuse; nothing uses it. #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {# defer: htmx only needs the DOM at DOMContentLoaded, and nothing calls its

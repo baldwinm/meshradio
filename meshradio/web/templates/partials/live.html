@@ -1,0 +1,12 @@
+{# The index page's live regions, as out-of-band swaps: htmx puts each into
+   the container with the same id (index.html) and swaps nothing else. One
+   response per state event carries all three. #}
+<div id="now-playing" hx-swap-oob="innerHTML">
+  {% include "partials/now_playing.html" %}
+</div>
+<div id="queue" hx-swap-oob="innerHTML">
+  {% include "partials/queue.html" %}
+</div>
+<div id="day-nav" hx-swap-oob="innerHTML">
+  {% include "partials/day_nav.html" %}
+</div>

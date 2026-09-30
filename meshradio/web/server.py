@@ -16,13 +16,17 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import Headers
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import PlainTextResponse
 
 from ..bus import EventBus, INGEST_STATUS
 from ..db import Database
@@ -60,6 +64,143 @@ def _asset_version() -> int:
     return int(max(f.stat().st_mtime for f in static.rglob("*") if f.is_file()))
 
 
+def _authority(netloc: str) -> str:
+    """``host[:port]`` normalised for comparison: lower-cased, default ports
+    dropped (a browser's Origin omits ``:443``; a Host header may carry it)."""
+    netloc = netloc.strip().lower()
+    for default in (":80", ":443"):
+        if netloc.endswith(default):
+            return netloc[: -len(default)]
+    return netloc
+
+
+def same_site(origin: str | None, host: str, fetch_site: str | None = None) -> bool:
+    """Did this request come from a page we served?
+
+    Browsers attach ``Origin`` to every POST and WebSocket handshake, so a
+    mismatch with ``Host`` is another site driving the radio. No ``Origin`` at
+    all means no browser was involved (curl, the relay pusher, tests) and is
+    allowed. ``Sec-Fetch-Site`` is the belt to that brace where present."""
+    if fetch_site is not None and fetch_site.strip().lower() == "cross-site":
+        return False
+    if origin is None:
+        return True
+    if origin.strip().lower() == "null":   # sandboxed frame, file://, redirects
+        return False
+    return _authority(urlsplit(origin).netloc) == _authority(host)
+
+
+class OriginGuard:
+    """Refuse cross-site state changes and WebSocket hijacks.
+
+    The appliance is a communal player with no login: any page a LAN user has
+    open could otherwise POST ``/api/skip`` or ``/api/output/bluetooth`` at
+    it, or open ``/ws`` to read state and claim the speaker role (browsers
+    don't enforce same-origin on WebSockets). Reads stay open — a cross-site
+    page can't see their bodies without CORS headers, and a link into the
+    archive from a chat is a cross-site GET that must keep working."""
+
+    SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        kind = scope["type"]
+        if kind == "websocket" or (kind == "http" and scope["method"] not in self.SAFE_METHODS):
+            headers = Headers(scope=scope)
+            if not same_site(headers.get("origin"), headers.get("host", ""),
+                             headers.get("sec-fetch-site")):
+                if kind == "websocket":
+                    await self._deny_websocket(scope, send)
+                else:
+                    response = PlainTextResponse("cross-site request refused", status_code=403)
+                    await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _deny_websocket(scope, send) -> None:
+        """Close before accepting: uvicorn answers that handshake with a
+        plain 403. (Its ASGI denial-response extension would let us write
+        the 403 ourselves, but the websockets implementation it ships then
+        logs "returned without completing handshake" and tries a 500 on top;
+        the close is the path it handles cleanly.)"""
+        await send({"type": "websocket.close", "code": 1008})
+
+
+def content_security_policy(embed_mode: bool) -> str:
+    """The sources our pages actually use, and nothing else.
+
+    Scripts and styles are our own files (the templates carry no inline
+    handlers — see eq.js/playbar.js for the delegated listeners that replaced
+    them); images are ours plus YouTube stills; audio streams from ``/audio``;
+    fetch and the WebSocket stay on this origin; the one frame is YouTube's
+    player. Embed hosting adds the YouTube IFrame API and the coffee button,
+    which styles itself inline and pulls its own font."""
+    script = ["'self'"]
+    style = ["'self'"]
+    img = ["'self'", "https://i.ytimg.com"]
+    font = ["'self'"]
+    if embed_mode:
+        script += ["https://www.youtube.com", "https://cdnjs.buymeacoffee.com"]
+        style += ["'unsafe-inline'", "https://cdnjs.buymeacoffee.com", "https://fonts.googleapis.com"]
+        img += ["https://cdn.buymeacoffee.com", "https://cdnjs.buymeacoffee.com",
+                "https://www.buymeacoffee.com"]
+        font += ["https://fonts.gstatic.com"]
+    return "; ".join([
+        "default-src 'self'",
+        f"script-src {' '.join(script)}",
+        f"style-src {' '.join(style)}",
+        f"img-src {' '.join(img)}",
+        "media-src 'self'",
+        # ws:/wss: spelled out: older browsers don't count a same-origin
+        # WebSocket as 'self'.
+        "connect-src 'self' ws: wss:",
+        "frame-src https://www.youtube.com",
+        f"font-src {' '.join(font)}",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+    ])
+
+
+class SecurityHeaders:
+    """Browser hardening headers on every HTTP response.
+
+    The policy is the one thing here with teeth: with no inline script
+    allowed, markup that reaches a page through a mesh name or a title can't
+    run anything even if escaping ever slipped. The rest closes the usual
+    small doors — content sniffing, referrer leakage, framing by another
+    site. A handler that already set one of these keeps its own value."""
+
+    def __init__(self, app, csp: str, report_only: bool = False) -> None:
+        self.app = app
+        csp_header = "content-security-policy-report-only" if report_only else "content-security-policy"
+        self.headers = [
+            (csp_header.encode(), csp.encode()),
+            (b"x-content-type-options", b"nosniff"),
+            (b"referrer-policy", b"strict-origin-when-cross-origin"),
+            (b"x-frame-options", b"SAMEORIGIN"),
+        ]
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message) -> None:
+            if message["type"] == "http.response.start":
+                raw = list(message.get("headers", []))
+                present = {name.lower() for name, _ in raw}
+                raw += [(name, value) for name, value in self.headers if name not in present]
+                message["headers"] = raw
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 class VersionedStatic(StaticFiles):
     """Static files that tell the browser how long to keep them.
 
@@ -92,6 +233,10 @@ def create_app(
     ingest=None,
     ingest_token: str = "",
     player_factory: Callable[[EventBus], PlayerService] | None = None,
+    allowed_hosts: Sequence[str] = (),
+    public_url: str = "",
+    security_headers: bool = True,
+    csp_report_only: bool = False,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
@@ -184,6 +329,8 @@ def create_app(
     app.state.ctx = ctx
     app.state.sessions = sessions
     app.state.speakers = ctx.speakers
+    # See context.absolute_url: the one place the site names itself.
+    app.state.public_url = public_url.rstrip("/")
 
     @app.exception_handler(404)
     async def not_found(request: Request, exc):
@@ -209,4 +356,19 @@ def create_app(
     app.include_router(routes_api.router)
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
+
+    # Outermost, so a refused request never reaches the session or skin
+    # middleware either (each add_middleware wraps everything before it).
+    app.add_middleware(OriginGuard)
+    if allowed_hosts:
+        app.add_middleware(
+            TrustedHostMiddleware, allowed_hosts=list(allowed_hosts), www_redirect=False
+        )
+    if security_headers:
+        # Outermost of all: the guards' own 403/400 answers get them too.
+        app.add_middleware(
+            SecurityHeaders,
+            csp=content_security_policy(embed_mode=player_factory is not None),
+            report_only=csp_report_only,
+        )
     return app

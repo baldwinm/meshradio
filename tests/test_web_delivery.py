@@ -145,7 +145,8 @@ async def test_archive_days_are_cached_between_calls(db, bus):
         first = await ctx.archive_days()
         again = await ctx.archive_days()
         assert calls == 1 and first == again
-        ctx._days = (ctx._days[0] - ctx.DAYS_TTL_S - 1, ctx._days[1])  # age it out
+        at, value = ctx._cache["days"]
+        ctx._cache["days"] = (at - ctx.CACHE_TTL_S - 1, value)   # age it out
         await ctx.archive_days()
         assert calls == 2
     finally:

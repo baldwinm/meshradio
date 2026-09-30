@@ -144,7 +144,7 @@ async def test_adopted_theme_reaches_receiver(db, bus, tmp_path):
     receiver_db = Database(tmp_path / "receiver.db")
     await receiver_db.connect()
     receiver_bus = EventBus()
-    pusher = RelayPusher(RelayConfig(push_url="http://receiver", token="s3cret"), db)
+    pusher = RelayPusher(RelayConfig(push_url="https://receiver", token="s3cret"), db)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=make_app(receiver_db, receiver_bus, "s3cret")),
@@ -310,3 +310,87 @@ async def test_ingest_endpoint_inserts_and_dedupes(db, bus):
         assert resp.json()["inserted"] == 0
         days = await db.archive_days()
         assert len(days) == 1 and days[0]["tracks"] == 1
+
+
+
+async def test_ingest_endpoint_rejects_the_wrong_shape_cleanly(db, bus):
+    """Bad input is a 400 or a skipped row, never a 500 mid-batch."""
+    async with api_client(make_app(db, bus, token="s3cret")) as client:
+        headers = {"Authorization": "Bearer s3cret", "content-type": "application/json"}
+        assert (await client.post("/api/ingest", headers=headers, content=b"[1, 2]")).status_code == 400
+        assert (await client.post("/api/ingest", headers=headers, content=b"{{")).status_code == 400
+        resp = await client.post(
+            "/api/ingest", headers=headers,
+            json={"messages": [1, None, {"sender": "a", "text": "t", "ts": "inf"},
+                               {"sender": "a", "text": "t", "ts": "nan"}, MSG]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["inserted"] == 1
+        # A non-ASCII bearer value is just a wrong token (compare_digest
+        # raises on non-ASCII str, which used to surface as a 500).
+        resp = await client.post("/api/ingest", json={"messages": []},
+                                 headers={b"authorization": "Bearer tok\xe9n".encode("latin-1")})
+        assert resp.status_code == 401
+
+
+async def test_ingest_endpoint_caps_a_chunked_body(db, bus):
+    """No Content-Length (chunked transfer) must not bypass the size cap."""
+    from meshradio.web import routes_ingest
+
+    async def body():
+        yield b'{"messages": ['
+        for _ in range(4):
+            yield b'"' + b"x" * 1024 + b'",'
+        yield b'{}]}'
+
+    app = make_app(db, bus, token="s3cret")
+    async with api_client(app) as client:
+        headers = {"Authorization": "Bearer s3cret", "content-type": "application/json"}
+        saved, routes_ingest.MAX_INGEST_BYTES = routes_ingest.MAX_INGEST_BYTES, 2048
+        try:
+            resp = await client.post("/api/ingest", headers=headers, content=body())
+        finally:
+            routes_ingest.MAX_INGEST_BYTES = saved
+        assert resp.status_code == 413
+
+
+async def test_ingest_batch_is_one_transaction_per_chunk(db, bus):
+    """A relay push of many messages lands in one commit per chunk, and a
+    dedupe in the middle doesn't take the rest of the chunk with it."""
+    commits = 0
+    execute = db.db.execute
+
+    async def counting(sql, *args, **kwargs):
+        nonlocal commits
+        if sql == "COMMIT":
+            commits += 1
+        return await execute(sql, *args, **kwargs)
+
+    db.db.execute = counting
+    msgs = [dict(MSG, text=f"https://youtu.be/{i:011d}", ts=MSG["ts"] + i) for i in range(30)]
+    msgs.insert(15, dict(MSG, text="https://youtu.be/00000000003", ts=MSG["ts"] + 3))  # repost
+    async with api_client(make_app(db, bus, token="s3cret")) as client:
+        resp = await client.post("/api/ingest", json={"messages": msgs},
+                                 headers={"Authorization": "Bearer s3cret"})
+    assert resp.status_code == 200
+    assert resp.json()["inserted"] == 30
+    assert commits == 1               # the theme and every track rode one transaction
+    assert len(await db.tracks_for_day("2026-07-06")) == 30
+
+
+def test_push_url_must_be_https_off_the_box(db):
+    """The token rides on every push; plain http may only stay on localhost."""
+    import pytest
+    from meshradio.ingest.relay import validate_push_url
+
+    for ok in ("https://meshradio.example.org", "https://r.example.org:8443/base",
+               "http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"):
+        assert validate_push_url(ok) == ok
+        RelayPusher(RelayConfig(push_url=ok, token="t"), db)
+    for bad in ("http://meshradio.example.org", "http://192.168.1.20:8080",
+                "ftp://x.example", "meshradio.example.org", "https://"):
+        with pytest.raises(ValueError, match="https"):
+            validate_push_url(bad)
+        with pytest.raises(ValueError):
+            RelayPusher(RelayConfig(push_url=bad, token="t"), db)
+    RelayPusher(RelayConfig(), db)                    # unset: the pusher never runs

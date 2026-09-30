@@ -13,16 +13,24 @@ already under a theme is dropped so it can't list twice (enforced in
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 import aiosqlite
 
 log = logging.getLogger(__name__)
+
+# The task that currently holds ``Database.transaction()``. A write method
+# called from inside that task joins the open transaction instead of trying to
+# take the lock again (which would deadlock); any other task waits its turn.
+_TXN_OWNER: ContextVar[asyncio.Task | None] = ContextVar("meshradio_txn_owner", default=None)
 
 # A YouTube video id is exactly 11 chars of this set. A video id becomes both a
 # cache filename and a yt-dlp CLI argument, so enforcing the shape here — at the
@@ -302,6 +310,15 @@ MIGRATIONS: list[str] = [
         UNIQUE(date, video_id)
     );
     """,
+    # v12 — index tracks.sender, case-insensitively. The member pages look a
+    # name up with ``sender = ? COLLATE NOCASE`` four times per visit
+    # (member_name, member_profile, member_tracks, member_artists), and every
+    # one was a full scan of tracks; an index declared with the same
+    # collation serves them. Any future rebuild of tracks (v2/v5/v10 style)
+    # must recreate this one along with the five before it.
+    """
+    CREATE INDEX idx_tracks_sender ON tracks(sender COLLATE NOCASE);
+    """,
 ]
 
 
@@ -326,13 +343,28 @@ def dedupe_hash(channel: str, sender: str, video_id: str, mesh_ts: float) -> str
 
 
 class Database:
+    """One connection, many coroutines.
+
+    Every coroutine in the process shares this aiosqlite connection, and each
+    ``await`` inside a write is a point where another coroutine's statements
+    run on it. With the driver's implicit transactions that meant one task's
+    rollback could discard another task's uncommitted UPDATE (it did: an
+    ``add_track`` dedupe rollback once un-readied a track the cacher had just
+    finished). So the connection runs in autocommit mode and every write goes
+    through ``transaction()``, which serialises writers behind a lock and
+    makes BEGIN/COMMIT explicit. Reads never wait.
+    """
+
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self._db: aiosqlite.Connection | None = None
+        self._write_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = await aiosqlite.connect(self.path)
+        # isolation_level=None: no implicit BEGIN before DML. A statement
+        # outside transaction() is atomic on its own; a group is explicit.
+        self._db = await aiosqlite.connect(self.path, isolation_level=None)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
@@ -353,13 +385,45 @@ class Database:
         assert self._db is not None, "Database.connect() not called"
         return self._db
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        """Run a group of writes as one transaction, alone among writers.
+
+        ``BEGIN IMMEDIATE`` on entry, ``COMMIT`` on a clean exit, ``ROLLBACK``
+        on an exception (which is re-raised). Nested use from the same task
+        joins the open transaction, so a batch can wrap the ordinary write
+        methods: ``async with db.transaction(): await handle_message(...)``
+        commits a whole relay push once instead of once per row. A failed
+        statement inside the group undoes only itself (SQLite's default
+        ABORT), so a caller that catches its error can carry on.
+
+        Only the task that entered is "inside": a task spawned from within
+        waits for the lock like any other, rather than writing into a
+        transaction it doesn't own."""
+        if _TXN_OWNER.get() is asyncio.current_task():
+            yield                      # nested: the outer block commits
+            return
+        async with self._write_lock:
+            token = _TXN_OWNER.set(asyncio.current_task())
+            try:
+                await self.db.execute("BEGIN IMMEDIATE")
+                try:
+                    yield
+                except BaseException:
+                    await self.db.execute("ROLLBACK")
+                    raise
+                await self.db.execute("COMMIT")
+            finally:
+                _TXN_OWNER.reset(token)
+
     async def _migrate(self) -> None:
         cur = await self.db.execute("PRAGMA user_version")
         (version,) = await cur.fetchone()
         for i, script in enumerate(MIGRATIONS[version:], start=version + 1):
+            # executescript runs each migration as its own statement group;
+            # the version bump follows only once the script has finished.
             await self.db.executescript(script)
             await self.db.execute(f"PRAGMA user_version={i}")
-            await self.db.commit()
 
     # -- settings ----------------------------------------------------------
 
@@ -369,12 +433,12 @@ class Database:
         return row["value"] if row else default
 
     async def set_setting(self, key: str, value: str) -> None:
-        await self.db.execute(
-            "INSERT INTO settings(key,value) VALUES(?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, value),
-        )
-        await self.db.commit()
+        async with self.transaction():
+            await self.db.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
 
     # -- themes ------------------------------------------------------------
 
@@ -394,20 +458,20 @@ class Database:
         the real theme can still adopt them (see ``adopt_theme``)."""
         # RETURNING (not lastrowid, which is unreliable after DO NOTHING)
         # distinguishes a fresh insert from a conflict no-op.
-        cur = await self.db.execute(
-            "INSERT INTO themes(date,title,set_by,raw_message,created_at,locked) "
-            "VALUES(?,?,?,?,?,?) "
-            "ON CONFLICT(date,title) DO NOTHING RETURNING id",
-            (date, title, set_by, raw_message, utcnow(), int(locked)),
-        )
-        inserted = await cur.fetchone()
-        await self.db.commit()
-        if inserted:
-            row = await self._fetchone("SELECT * FROM themes WHERE id=?", (inserted["id"],))
-        else:
-            row = await self._fetchone(
-                "SELECT * FROM themes WHERE date=? AND title=?", (date, title)
+        async with self.transaction():
+            cur = await self.db.execute(
+                "INSERT INTO themes(date,title,set_by,raw_message,created_at,locked) "
+                "VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(date,title) DO NOTHING RETURNING id",
+                (date, title, set_by, raw_message, utcnow(), int(locked)),
             )
+            inserted = await cur.fetchone()
+            if inserted:
+                row = await self._fetchone("SELECT * FROM themes WHERE id=?", (inserted["id"],))
+            else:
+                row = await self._fetchone(
+                    "SELECT * FROM themes WHERE date=? AND title=?", (date, title)
+                )
         assert row is not None
         return row
 
@@ -426,16 +490,16 @@ class Database:
         created_at because the relay's cursor is usually sitting on exactly
         this row — the push that skipped the placeholder — and an equal
         second would leave the adoption invisible to it."""
-        row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
-        assert row is not None
-        updated_at = max(utcnow(), _next_second(row["created_at"]))
-        await self.db.execute(
-            "UPDATE themes SET title=?, set_by=?, raw_message=?, locked=1, updated_at=? "
-            "WHERE id=?",
-            (title, set_by, raw_message, updated_at, theme_id),
-        )
-        await self.db.commit()
-        row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
+        async with self.transaction():
+            row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
+            assert row is not None
+            updated_at = max(utcnow(), _next_second(row["created_at"]))
+            await self.db.execute(
+                "UPDATE themes SET title=?, set_by=?, raw_message=?, locked=1, updated_at=? "
+                "WHERE id=?",
+                (title, set_by, raw_message, updated_at, theme_id),
+            )
+            row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
         assert row is not None
         return row
 
@@ -457,17 +521,17 @@ class Database:
 
         Raises ``sqlite3.IntegrityError`` if the date already has a theme with
         this title (UNIQUE(date, title)); callers report that as a no-op."""
-        row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
-        assert row is not None
-        # Same nudge as adopt_theme: strictly past created_at, so a relay
-        # cursor parked on this row still sees the change.
-        updated_at = max(utcnow(), _next_second(row["created_at"]))
-        await self.db.execute(
-            "UPDATE themes SET title=?, raw_message=?, locked=1, updated_at=? WHERE id=?",
-            (title, f"Theme: {title}", updated_at, theme_id),
-        )
-        await self.db.commit()
-        row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
+        async with self.transaction():
+            row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
+            assert row is not None
+            # Same nudge as adopt_theme: strictly past created_at, so a relay
+            # cursor parked on this row still sees the change.
+            updated_at = max(utcnow(), _next_second(row["created_at"]))
+            await self.db.execute(
+                "UPDATE themes SET title=?, raw_message=?, locked=1, updated_at=? WHERE id=?",
+                (title, f"Theme: {title}", updated_at, theme_id),
+            )
+            row = await self._fetchone("SELECT * FROM themes WHERE id=?", (theme_id,))
         assert row is not None
         return row
 
@@ -509,41 +573,59 @@ class Database:
         if not VIDEO_ID_RE.match(video_id):
             log.warning("rejecting track with malformed video_id %r", video_id)
             return None
-        if theme_id is not None:
-            already = await self._fetchone(
-                "SELECT 1 FROM tracks WHERE theme_id=? AND video_id=? LIMIT 1",
-                (theme_id, video_id),
-            )
-            if already is not None:
+        # Check and insert under one transaction: the write lock means no other
+        # ingest path can slip a repost in between them.
+        async with self.transaction():
+            if theme_id is not None:
+                already = await self._fetchone(
+                    "SELECT 1 FROM tracks WHERE theme_id=? AND video_id=? LIMIT 1",
+                    (theme_id, video_id),
+                )
+                if already is not None:
+                    return None
+                if await self.is_deleted(theme_id, video_id):
+                    # The operator removed this song from the day by hand. The
+                    # message is still on the channel, so ingest keeps offering
+                    # it back; the tombstone is what makes the removal stick.
+                    log.info("skipping %s on theme %s: deleted by the operator", video_id, theme_id)
+                    return None
+            dh = dedupe_hash(channel, sender, video_id, mesh_ts)
+            try:
+                cur = await self.db.execute(
+                    "INSERT INTO tracks(video_id,url,title,artist,theme_id,sender,mesh_ts,"
+                    "ingested_at,source,dedupe_hash) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(dedupe_hash) DO NOTHING RETURNING id",
+                    (video_id, url, title, artist, theme_id, sender, mesh_ts, utcnow(), source, dh),
+                )
+                inserted = await cur.fetchone()
+            except aiosqlite.IntegrityError:
+                # The one-song-per-playlist index is the backstop for the check
+                # above. A failed INSERT undoes only itself, so a batch this is
+                # part of carries on; the playlist already has the song.
                 return None
-            if await self.is_deleted(theme_id, video_id):
-                # The operator removed this song from the day by hand. The
-                # message is still on the channel, so ingest keeps offering it
-                # back; the tombstone is what makes the removal stick.
-                log.info("skipping %s on theme %s: deleted by the operator", video_id, theme_id)
+            if inserted is None:
                 return None
-        dh = dedupe_hash(channel, sender, video_id, mesh_ts)
-        try:
-            cur = await self.db.execute(
-                "INSERT INTO tracks(video_id,url,title,artist,theme_id,sender,mesh_ts,"
-                "ingested_at,source,dedupe_hash) VALUES(?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(dedupe_hash) DO NOTHING RETURNING id",
-                (video_id, url, title, artist, theme_id, sender, mesh_ts, utcnow(), source, dh),
-            )
-            inserted = await cur.fetchone()
-            await self.db.commit()
-        except aiosqlite.IntegrityError:
-            # The one-song-per-playlist index caught a repost that slipped past
-            # the check above (two ingest paths racing between our SELECT and
-            # INSERT). The playlist already has it; treat as a dedupe no-op.
-            await self.db.rollback()
-            return None
-        if inserted is None:
-            return None
-        return await self.track_by_id(inserted["id"])
+            return await self.track_by_id(inserted["id"])
 
     async def track_by_id(self, track_id: int) -> dict[str, Any] | None:
         return await self._fetchone("SELECT * FROM tracks WHERE id=?", (track_id,))
+
+    async def tracks_by_ids(
+        self, ids: list[int] | tuple[int, ...], chunk: int = 500
+    ) -> dict[int, dict[str, Any]]:
+        """Rows for many track ids, keyed by id, in one round trip per
+        ``chunk`` (SQLite caps bound parameters). Ids that no longer exist
+        are simply absent. A session restore used to do one query per queued
+        track — 200 round trips through the driver thread for a long day."""
+        found: dict[int, dict[str, Any]] = {}
+        wanted = list(dict.fromkeys(ids))
+        for start in range(0, len(wanted), chunk):
+            part = wanted[start:start + chunk]
+            rows = await self._fetchall(
+                f"SELECT * FROM tracks WHERE id IN ({','.join('?' * len(part))})", tuple(part)
+            )
+            found.update((row["id"], row) for row in rows)
+        return found
 
     async def is_deleted(self, theme_id: int, video_id: str) -> bool:
         """Was this video removed by hand from the day ``theme_id`` belongs to?
@@ -573,22 +655,22 @@ class Database:
         theme) leaves no tombstone — it isn't on the channel to come back.
 
         The cached audio file isn't touched here; the caller owns the disk."""
-        track = await self.track_by_id(track_id)
-        if track is None:
-            return None
-        date = None
-        if track["theme_id"] is not None:
-            theme = await self.theme_by_id(track["theme_id"])
-            date = theme["date"] if theme else None
-        await self.db.execute("DELETE FROM plays WHERE track_id=?", (track_id,))
-        await self.db.execute("DELETE FROM tracks WHERE id=?", (track_id,))
-        if date is not None:
-            await self.db.execute(
-                "INSERT INTO deleted_tracks(date,video_id,title,sender,deleted_at) "
-                "VALUES(?,?,?,?,?) ON CONFLICT(date,video_id) DO NOTHING",
-                (date, track["video_id"], track["title"], track["sender"], utcnow()),
-            )
-        await self.db.commit()
+        async with self.transaction():
+            track = await self.track_by_id(track_id)
+            if track is None:
+                return None
+            date = None
+            if track["theme_id"] is not None:
+                theme = await self.theme_by_id(track["theme_id"])
+                date = theme["date"] if theme else None
+            await self.db.execute("DELETE FROM plays WHERE track_id=?", (track_id,))
+            await self.db.execute("DELETE FROM tracks WHERE id=?", (track_id,))
+            if date is not None:
+                await self.db.execute(
+                    "INSERT INTO deleted_tracks(date,video_id,title,sender,deleted_at) "
+                    "VALUES(?,?,?,?,?) ON CONFLICT(date,video_id) DO NOTHING",
+                    (date, track["video_id"], track["title"], track["sender"], utcnow()),
+                )
         return track
 
     async def delete_empty_placeholder(self, theme_id: int) -> bool:
@@ -599,16 +681,16 @@ class Database:
         would light up a calendar tile for a day that has nothing to play. A
         real (locked, titled) theme stays even when emptied — somebody chose
         that title, and the day is still a day the channel named."""
-        theme = await self.theme_by_id(theme_id)
-        if theme is None or theme["locked"] or not theme["title"].startswith("Untitled — "):
-            return False
-        row = await self._fetchone(
-            "SELECT COUNT(*) AS n FROM tracks WHERE theme_id=?", (theme_id,)
-        )
-        if row and row["n"]:
-            return False
-        await self.db.execute("DELETE FROM themes WHERE id=?", (theme_id,))
-        await self.db.commit()
+        async with self.transaction():
+            theme = await self.theme_by_id(theme_id)
+            if theme is None or theme["locked"] or not theme["title"].startswith("Untitled — "):
+                return False
+            row = await self._fetchone(
+                "SELECT COUNT(*) AS n FROM tracks WHERE theme_id=?", (theme_id,)
+            )
+            if row and row["n"]:
+                return False
+            await self.db.execute("DELETE FROM themes WHERE id=?", (theme_id,))
         return True
 
     async def update_track_metadata(
@@ -619,21 +701,35 @@ class Database:
         artist: str | None = None,
         duration: float | None = None,
     ) -> None:
-        await self.db.execute(
-            "UPDATE tracks SET title=COALESCE(?,title), artist=COALESCE(?,artist), "
-            "duration=COALESCE(?,duration) WHERE id=?",
-            (title, artist, duration, track_id),
-        )
-        await self.db.commit()
+        async with self.transaction():
+            await self.db.execute(
+                "UPDATE tracks SET title=COALESCE(?,title), artist=COALESCE(?,artist), "
+                "duration=COALESCE(?,duration) WHERE id=?",
+                (title, artist, duration, track_id),
+            )
+
+    async def fill_track_duration(self, track_id: int, seconds: float) -> bool:
+        """Set a track's duration only if it has none. Returns whether it did.
+
+        The browser-reported length (``/api/duration``) goes through here
+        rather than ``update_track_metadata``: that report is unauthenticated
+        and the row is shared, so it may complete a blank but never replace a
+        value the archive already holds."""
+        async with self.transaction():
+            cur = await self.db.execute(
+                "UPDATE tracks SET duration=? WHERE id=? AND duration IS NULL",
+                (seconds, track_id),
+            )
+        return cur.rowcount > 0
 
     async def set_cache_status(
         self, track_id: int, status: str, cache_path: str | None = None
     ) -> None:
-        await self.db.execute(
-            "UPDATE tracks SET cache_status=?, cache_path=? WHERE id=?",
-            (status, cache_path, track_id),
-        )
-        await self.db.commit()
+        async with self.transaction():
+            await self.db.execute(
+                "UPDATE tracks SET cache_status=?, cache_path=? WHERE id=?",
+                (status, cache_path, track_id),
+            )
 
     async def pending_tracks(self) -> list[dict[str, Any]]:
         return await self._fetchall(
@@ -674,6 +770,17 @@ class Database:
             "FROM themes t LEFT JOIN tracks tr ON tr.theme_id=t.id "
             "GROUP BY t.date ORDER BY t.date DESC"
         )
+
+    async def newest_day_with_tracks(self) -> str | None:
+        """The most recent archive day holding at least one song — where a
+        new visitor lands. ``archive_days`` answers the same question by
+        aggregating the whole history; this is one lookup, and it runs on
+        every request from an idle session until today's first song lands."""
+        row = await self._fetchone(
+            "SELECT MAX(t.date) AS date FROM themes t "
+            "WHERE EXISTS (SELECT 1 FROM tracks tr WHERE tr.theme_id=t.id)"
+        )
+        return row["date"] if row and row["date"] else None
 
     async def all_themes(self) -> list[dict[str, Any]]:
         """Every theme the channel actually used, newest first, with its song
@@ -927,13 +1034,13 @@ class Database:
         if not items:
             return
         now = utcnow()
-        await self.db.executemany(
-            "INSERT INTO web_sessions(sid, updated_at, state) VALUES(?,?,?) "
-            "ON CONFLICT(sid) DO UPDATE SET updated_at=excluded.updated_at, "
-            "state=excluded.state",
-            [(sid, now, state) for sid, state in items],
-        )
-        await self.db.commit()
+        async with self.transaction():
+            await self.db.executemany(
+                "INSERT INTO web_sessions(sid, updated_at, state) VALUES(?,?,?) "
+                "ON CONFLICT(sid) DO UPDATE SET updated_at=excluded.updated_at, "
+                "state=excluded.state",
+                [(sid, now, state) for sid, state in items],
+            )
 
     async def load_web_session(self, sid: str) -> str | None:
         row = await self._fetchone(
@@ -942,30 +1049,30 @@ class Database:
         return row["state"] if row else None
 
     async def delete_web_sessions(self, sids: list[str] | None = None, older_than: str | None = None) -> None:
-        if sids:
-            await self.db.executemany(
-                "DELETE FROM web_sessions WHERE sid=?", [(s,) for s in sids]
-            )
-        if older_than:
-            await self.db.execute(
-                "DELETE FROM web_sessions WHERE updated_at < ?", (older_than,)
-            )
-        await self.db.commit()
+        async with self.transaction():
+            if sids:
+                await self.db.executemany(
+                    "DELETE FROM web_sessions WHERE sid=?", [(s,) for s in sids]
+                )
+            if older_than:
+                await self.db.execute(
+                    "DELETE FROM web_sessions WHERE updated_at < ?", (older_than,)
+                )
 
     # -- plays / LRU ---------------------------------------------------------
 
     async def record_play(self, track_id: int, output: str | None) -> int:
-        cur = await self.db.execute(
-            "INSERT INTO plays(track_id,played_at,output) VALUES(?,?,?)",
-            (track_id, utcnow(), output),
-        )
-        await self.db.commit()
+        async with self.transaction():
+            cur = await self.db.execute(
+                "INSERT INTO plays(track_id,played_at,output) VALUES(?,?,?)",
+                (track_id, utcnow(), output),
+            )
         assert cur.lastrowid is not None
         return cur.lastrowid
 
     async def mark_play_completed(self, play_id: int) -> None:
-        await self.db.execute("UPDATE plays SET completed=1 WHERE id=?", (play_id,))
-        await self.db.commit()
+        async with self.transaction():
+            await self.db.execute("UPDATE plays SET completed=1 WHERE id=?", (play_id,))
 
     async def cached_tracks_lru(self) -> list[dict[str, Any]]:
         """Cached tracks, least-recently-played (then oldest-ingested) first."""

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 from datetime import datetime
@@ -344,7 +345,7 @@ class PlayerService(Service):
     async def seek(self, seconds: float) -> None:
         """Jump within the current track. The backend follows; for WebBackend
         the speaker tab either initiated this or follows via the state push."""
-        if self.current is None:
+        if self.current is None or not math.isfinite(seconds):
             return
         duration = self.current.get("duration")
         seconds = max(0.0, min(seconds, float(duration)) if duration else seconds)
@@ -522,10 +523,15 @@ class PlayerService(Service):
 
     async def report_duration(self, track_id: int, seconds: float) -> None:
         """The embed speaker tab learned the real duration from its player
-        (oEmbed metadata has no duration, so embed tracks start without one)."""
-        if seconds <= 0:
+        (oEmbed metadata has no duration, so embed tracks start without one).
+
+        Fills a blank only. The report comes from whichever browser is
+        playing, and the row is shared by every session, so a value that is
+        already known is never overwritten — the client sends one exactly
+        when the track has none, and the server holds it to the same rule."""
+        if not (seconds > 0 and math.isfinite(seconds)):
             return
-        await self.db.update_track_metadata(track_id, duration=seconds)
+        await self.db.fill_track_duration(track_id, seconds)
         changed = False
         for t in [self.current, *self.queue]:
             if t and t["id"] == track_id and not t.get("duration"):
@@ -629,17 +635,17 @@ class PlayerService(Service):
         # per-entry filler flags don't (only track ids are stored), which at
         # worst costs a restored session one mis-ordered live post.
         self.station = snap.get("station") if snap.get("station") in ("radio", "archive") else None
-        queue: list[dict[str, Any]] = []
-        for track_id in snap.get("queue_track_ids", []):
-            track = await self.db.track_by_id(track_id)
-            if track and self._is_playable(track):
-                queue.append(track)
-        self.queue = queue
-        current = None
-        if snap.get("current_track_id") is not None:
-            current = await self.db.track_by_id(snap["current_track_id"])
-            if current and not self._is_playable(current):
-                current = None
+        queue_ids = list(snap.get("queue_track_ids", []))
+        current_id = snap.get("current_track_id")
+        # One query for the lot: a restore is a returning visitor's first
+        # request, and a long day is a couple of hundred ids.
+        rows = await self.db.tracks_by_ids(queue_ids + ([current_id] if current_id is not None else []))
+        self.queue = [
+            dict(rows[i]) for i in queue_ids if i in rows and self._is_playable(rows[i])
+        ]
+        current = rows.get(current_id) if current_id is not None else None
+        if current and not self._is_playable(current):
+            current = None
         status = snap.get("status")
         if current and status in ("playing", "paused"):
             self.current = current

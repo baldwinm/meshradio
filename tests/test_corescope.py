@@ -212,3 +212,67 @@ async def test_comchan_defaults_to_a_configured_instance():
     an appliance config written before it existed and must still poll."""
     assert ComchanConfig().enabled is True
     assert ComchanConfig().base_url == "https://analyzer.comchan.net"
+
+
+def _client(handler, base="https://scope.example"):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url=base)
+
+
+def _poller(db, bus):
+    config = CoreScopeConfig(base_url="https://scope.example", channel="#music")
+    return CoreScopePoller(config, IngestService(db, bus, channel="#music"), db, bus)
+
+
+async def test_poll_refuses_an_oversized_history(db, bus, monkeypatch):
+    """The analyzer returns the whole channel every poll; a response past the
+    cap is refused while streaming rather than read into memory first."""
+    from meshradio.ingest import corescope
+
+    monkeypatch.setattr(corescope, "MAX_POLL_BYTES", 4096)
+    huge = {"messages": [corescope_msg("a", "x" * 100, NOON, "2026-07-06T17:00:00Z")] * 100}
+    served = {"bytes": 0}
+
+    def handler(request):
+        body = httpx.Response(200, json=huge).content
+        served["bytes"] = len(body)
+
+        async def chunked():
+            yield body[:2048]
+            yield body[2048:]
+
+        # No Content-Length: chunked, so only counting what arrives can catch it.
+        return httpx.Response(200, content=chunked(),
+                              headers={"content-type": "application/json"})
+
+    async with _client(handler) as client:
+        with pytest.raises(corescope.PollTooLarge):
+            await _poller(db, bus).poll_once(client)
+    assert served["bytes"] > 4096
+    assert await db.archive_days() == []                          # nothing ingested
+
+    def declared(request):
+        return httpx.Response(200, content=b"{}", headers={"content-length": "999999"})
+
+    async with _client(declared) as client:
+        with pytest.raises(corescope.PollTooLarge):
+            await _poller(db, bus).poll_once(client)
+
+
+async def test_poll_error_keeps_the_body_snippet(db, bus):
+    """A Cloudflare challenge page and an origin error look the same by
+    status; the first bytes of the body are what tell them apart."""
+    def handler(request):
+        return httpx.Response(403, text="<html>Just a moment... cf-challenge " + "x" * 500)
+
+    async with _client(handler) as client:
+        with pytest.raises(httpx.HTTPStatusError) as blocked:
+            await _poller(db, bus).poll_once(client)
+    message = str(blocked.value)
+    assert "HTTP 403" in message and "cf-challenge" in message
+    assert len(message) < 400                                      # a snippet, not the page
+
+
+async def test_poll_tolerates_a_malformed_history(db, bus):
+    for body in (b"[]", b'{"messages": [1, null, {"text": "hi"}]}', b'{"messages": null}'):
+        async with _client(lambda request, body=body: httpx.Response(200, content=body)) as client:
+            assert await _poller(db, bus).poll_once(client) == 0

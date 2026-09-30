@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -17,34 +16,55 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# A page that has stopped reading (a laptop lid closing mid-send) must not
+# hold the others' state update; past this the send is abandoned and the
+# socket's own loops will notice the dead connection.
+SEND_TIMEOUT_S = 5.0
+
 
 async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
-    """Push fresh state to a session's pages (speaker role may have moved)."""
+    """Push fresh state to a session's pages (speaker role may have moved).
+    All at once: one slow socket used to delay everyone after it in line."""
     state = p.state()  # snapshot once; only the speaker flag is per-connection
-    for conn in reg.clients():
+
+    async def push(conn) -> None:
         try:
-            await conn.send_json({
-                "topic": PLAYER_STATE,
-                "data": {**state, "speaker": reg.is_speaker(conn)},
-            })
+            await asyncio.wait_for(
+                conn.send_json({
+                    "topic": PLAYER_STATE,
+                    "data": {**state, "speaker": reg.is_speaker(conn)},
+                }),
+                timeout=SEND_TIMEOUT_S,
+            )
         except Exception:
             pass
+
+    clients = reg.clients()
+    if clients:
+        await asyncio.gather(*(push(conn) for conn in clients))
 
 
 @router.websocket("/ws")
 async def ws(websocket: WebSocket):
     ctx = ctx_of(websocket)
-    await websocket.accept()
     if ctx.sessions is not None:
-        # Per-visitor session: this browser's own player/bus/speakers.
-        # A forged cookie sid is ignored, same as the HTTP middleware.
+        # Per-visitor session: this browser's own player/bus/speakers. The
+        # page that opens this socket always carries the cookie (the HTTP
+        # middleware issued it with the page), so a handshake without a
+        # valid one is not our page. Minting a sid here would open a session
+        # nothing could ever present again — one per bot connection.
         sid = websocket.cookies.get(SESSION_COOKIE)
         if not valid_sid(sid):
-            sid = secrets.token_hex(16)
+            # Close before accept: uvicorn turns that into a 403 (see
+            # server.OriginGuard._deny_websocket for why not a denial body).
+            await websocket.close(code=1008)
+            return
+        await websocket.accept()
         session = await ctx.sessions.get(sid)
         reg, p = session.speakers, session.player
         sub = session.bus.subscribe(PLAYER_STATE)
     else:
+        await websocket.accept()
         reg, p = ctx.speakers, ctx.player
         sub = ctx.bus.subscribe(PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
     reg.join(websocket)

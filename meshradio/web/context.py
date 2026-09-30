@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from calendar import Calendar, month_name
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from time import monotonic
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import URL
 
 # Sunday-first weeks (US convention; the channel is Austin-local).
 WEEKDAY_HEADERS = ["S", "M", "T", "W", "T", "F", "S"]
@@ -88,15 +89,23 @@ def absolute_url(request: Request, path: str | None = None) -> str:
     """A full ``https://host/path`` URL for this request (or for ``path`` on the
     same host) — what link previews, canonical links and the sitemap need.
 
-    Hosted deployments sit behind a TLS-terminating proxy, so the scheme the app
-    sees is plain http; ``x-forwarded-proto`` is the one that matches the URL a
-    visitor would paste. Query strings are dropped: a preview for
-    ``/archive?m=2026-08`` is a preview of the archive."""
+    With ``[web] public_url`` configured that is the authority, whatever Host
+    header the request carried: a canonical link is a statement about where the
+    page lives, and a spoofed Host must not be able to make one. Without it,
+    the request's own host is used. Hosted deployments sit behind a
+    TLS-terminating proxy, so the scheme the app sees is plain http;
+    ``x-forwarded-proto`` is the one that matches the URL a visitor would
+    paste, and only ``http``/``https`` are believed. Query strings are dropped:
+    a preview for ``/archive?m=2026-08`` is a preview of the archive."""
     url = request.url.replace(query="", fragment="") if path is None else (
         request.base_url.replace(path=path, query="", fragment="")
     )
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    if forwarded:
+    public = getattr(request.app.state, "public_url", "")
+    if public:
+        base = URL(public)
+        return str(url.replace(scheme=base.scheme, netloc=base.netloc))
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if forwarded in ("http", "https"):
         url = url.replace(scheme=forwarded)
     return str(url)
 
@@ -160,29 +169,62 @@ class WebContext:
     templates: Jinja2Templates
     speakers: SpeakerRegistry      # communal speaker election
     health: dict
-    _days: tuple[float, list[dict[str, Any]]] | None = None
+    _cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
 
-    # Every player-state push makes each open page re-fetch the now-playing and
-    # day-nav partials, and both rebuild day_context — so archive_days(), which
-    # aggregates the whole themes×tracks join, ran twice per event per tab. It
-    # only changes when a song lands, so a few seconds of staleness costs
-    # nothing (at worst the day arrows lag one event) and takes the query off
-    # the hot path entirely.
-    DAYS_TTL_S = 5.0
+    # Whole-archive aggregates behind a short TTL. Every player-state push
+    # makes each open page re-fetch the now-playing and day-nav partials, and
+    # both rebuild day_context — so archive_days(), which aggregates the whole
+    # themes×tracks join, ran twice per event per tab; the stats and theme
+    # pages (both in the sitemap) recomputed five and one full scans per hit.
+    # None of it changes until a song lands, so a few seconds of staleness
+    # costs nothing (at worst the day arrows lag one event) and takes the
+    # queries off the hot path entirely.
+    CACHE_TTL_S = 5.0
+
+    async def _cached(self, key: str, load: Callable[[], Awaitable[Any]]) -> Any:
+        now = monotonic()
+        hit = self._cache.get(key)
+        if hit is not None and now - hit[0] < self.CACHE_TTL_S:
+            return hit[1]
+        value = await load()
+        self._cache[key] = (now, value)
+        return value
 
     async def archive_days(self) -> list[dict[str, Any]]:
-        """``Database.archive_days`` behind a short TTL (see DAYS_TTL_S)."""
-        now = monotonic()
-        if self._days is not None and now - self._days[0] < self.DAYS_TTL_S:
-            return self._days[1]
-        days = await self.db.archive_days()
-        self._days = (now, days)
-        return days
+        """``Database.archive_days`` behind the TTL."""
+        return await self._cached("days", self.db.archive_days)
+
+    async def all_themes(self) -> list[dict[str, Any]]:
+        """``Database.all_themes`` behind the TTL."""
+        return await self._cached("themes", self.db.all_themes)
+
+    async def stats(self) -> dict[str, Any]:
+        """Everything the Stats page shows, behind the TTL."""
+        async def load() -> dict[str, Any]:
+            return {
+                "totals": await self.db.overall_stats(),
+                "plays": await self.db.play_totals(),
+                "top_songs": await self.db.top_songs(),
+                "top_sharers": await self.db.top_sharers(),
+                "busiest_themes": await self.db.busiest_themes(),
+            }
+        return await self._cached("stats", load)
 
     async def get_player(self, request: Request) -> PlayerService:
+        """The player this request acts on.
+
+        Appliance: the one communal player. Embed hosting: the visitor's own
+        session player — opened by a POST (they pressed something) or found
+        by a GET (their page's WebSocket, or a returning cookie's snapshot,
+        opened it). A GET from a visitor with no session gets a throwaway
+        preview instead: the page still renders cued, but a crawler or a
+        cookie-spraying bot leaves no session behind."""
         if self.sessions is None:
             return self.player
-        sid = getattr(request.state, "sid", None) or request.cookies.get(SESSION_COOKIE)
+        sid = getattr(request.state, "sid", None) or request.cookies.get(SESSION_COOKIE) or ""
+        if request.method in ("GET", "HEAD"):
+            session = await self.sessions.lookup(sid) if sid else None
+            return session.player if session else await self.sessions.preview()
         return (await self.sessions.get(sid or "anonymous")).player
 
     def today(self) -> str:
@@ -212,6 +254,17 @@ class WebContext:
         p = await self.get_player(request)
         return self.templates.TemplateResponse(
             request, "partials/now_playing.html",
+            {"state": p.state(), **await self.day_context(p)},
+        )
+
+    async def render_live(self, request: Request):
+        """Everything on Now Playing that a state push changes — the bar, the
+        queue, the day nav — in one response, as out-of-band swaps into the
+        page's three containers. One request per event instead of three, and
+        the day context (two queries) built once instead of twice."""
+        p = await self.get_player(request)
+        return self.templates.TemplateResponse(
+            request, "partials/live.html",
             {"state": p.state(), **await self.day_context(p)},
         )
 
