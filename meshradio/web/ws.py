@@ -17,18 +17,32 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# A page that has stopped reading (a laptop lid closing mid-send) must not
+# hold the others' state update; past this the send is abandoned and the
+# socket's own loops will notice the dead connection.
+SEND_TIMEOUT_S = 5.0
+
 
 async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
-    """Push fresh state to a session's pages (speaker role may have moved)."""
+    """Push fresh state to a session's pages (speaker role may have moved).
+    All at once: one slow socket used to delay everyone after it in line."""
     state = p.state()  # snapshot once; only the speaker flag is per-connection
-    for conn in reg.clients():
+
+    async def push(conn) -> None:
         try:
-            await conn.send_json({
-                "topic": PLAYER_STATE,
-                "data": {**state, "speaker": reg.is_speaker(conn)},
-            })
+            await asyncio.wait_for(
+                conn.send_json({
+                    "topic": PLAYER_STATE,
+                    "data": {**state, "speaker": reg.is_speaker(conn)},
+                }),
+                timeout=SEND_TIMEOUT_S,
+            )
         except Exception:
             pass
+
+    clients = reg.clients()
+    if clients:
+        await asyncio.gather(*(push(conn) for conn in clients))
 
 
 @router.websocket("/ws")
