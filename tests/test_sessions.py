@@ -425,6 +425,6 @@ async def test_websocket_without_a_cookie_is_refused(db, bus):
     app = embed_app(db, bus)
     for cookie in (None, "forged", "x" * 32):
         sent = await _websocket(app, cookie=cookie)
-        assert sent[0]["type"] == "websocket.http.response.start"
-        assert sent[0]["status"] == 403
+        # Closed before accept, which the server reports as a 403 handshake.
+        assert sent == [{"type": "websocket.close", "code": 1008, "reason": ""}]
     assert app.state.sessions.count() == 0

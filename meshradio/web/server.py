@@ -121,20 +121,12 @@ class OriginGuard:
 
     @staticmethod
     async def _deny_websocket(scope, send) -> None:
-        """Answer the handshake with a 403 where the server lets us (uvicorn
-        and Starlette's test client both do); otherwise close before accept,
-        which the server reports the same way."""
-        if "websocket.http.response" in scope.get("extensions", {}):
-            body = b"cross-site websocket refused"
-            await send({
-                "type": "websocket.http.response.start",
-                "status": 403,
-                "headers": [(b"content-type", b"text/plain; charset=utf-8"),
-                            (b"content-length", str(len(body)).encode())],
-            })
-            await send({"type": "websocket.http.response.body", "body": body})
-        else:
-            await send({"type": "websocket.close", "code": 1008})
+        """Close before accepting: uvicorn answers that handshake with a
+        plain 403. (Its ASGI denial-response extension would let us write
+        the 403 ourselves, but the websockets implementation it ships then
+        logs "returned without completing handshake" and tries a 500 on top;
+        the close is the path it handles cleanly.)"""
+        await send({"type": "websocket.close", "code": 1008})
 
 
 def content_security_policy(embed_mode: bool) -> str:

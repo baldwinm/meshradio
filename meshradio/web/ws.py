@@ -6,7 +6,6 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
 
 from ..bus import OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
 from ..media.player import PlayerService
@@ -56,9 +55,9 @@ async def ws(websocket: WebSocket):
         # nothing could ever present again — one per bot connection.
         sid = websocket.cookies.get(SESSION_COOKIE)
         if not valid_sid(sid):
-            await websocket.send_denial_response(
-                PlainTextResponse("session cookie required", status_code=403)
-            )
+            # Close before accept: uvicorn turns that into a 403 (see
+            # server.OriginGuard._deny_websocket for why not a denial body).
+            await websocket.close(code=1008)
             return
         await websocket.accept()
         session = await ctx.sessions.get(sid)

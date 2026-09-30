@@ -14,7 +14,8 @@ with warnings.catch_warnings():
     # Starlette would rather we used httpx2; the WebSocket handshake tests
     # below only need the client, and httpx is what the project pins.
     warnings.simplefilter("ignore")
-    from starlette.testclient import TestClient, WebSocketDenialResponse
+    from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from meshradio.audio.routing import make_router
 from meshradio.bus import EventBus
@@ -79,11 +80,13 @@ def _communal_app(tmp_path):
 
 
 def test_cross_site_websocket_is_refused(tmp_path):
+    """Closed before it is accepted — which uvicorn reports to the browser
+    as a 403 on the handshake."""
     client = TestClient(_communal_app(tmp_path))
-    with pytest.raises(WebSocketDenialResponse) as denied:
+    with pytest.raises(WebSocketDisconnect) as refused:
         with client.websocket_connect("/ws", headers=EVIL):
             pass
-    assert denied.value.status_code == 403
+    assert refused.value.code == 1008                          # policy violation
 
 
 def test_same_site_websocket_still_connects(tmp_path):
