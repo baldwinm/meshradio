@@ -180,6 +180,8 @@ async def run(config, demo: bool = False) -> None:
         player_factory=player_factory,
         allowed_hosts=config.web.allowed_hosts,
         public_url=config.web.public_url,
+        security_headers=config.web.security_headers,
+        csp_report_only=config.web.csp_report_only,
     )
     server = uvicorn.Server(
         uvicorn.Config(

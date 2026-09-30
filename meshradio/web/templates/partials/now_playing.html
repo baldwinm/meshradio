@@ -28,13 +28,15 @@
       <div class="sender">mode: {{ state.mode }} · waiting for the mesh…</div>
     </div>
   {% endif %}
+  {# No inline handlers (the Content-Security-Policy forbids them): playbar.js
+     listens for the scrub bar, the volume slider and the mute icon at the
+     document level, which also survives every htmx swap of this partial. #}
   {% if current %}
   <div class="playbar">
     <span class="time" id="pb-elapsed">{{ state.position|mmss }}</span>
     <input type="range" id="pb-scrub" min="0" step="1"
            max="{{ (current.duration or 0)|int }}" value="{{ state.position|int }}"
-           title="Seek" {% if not current.duration %}disabled{% endif %}
-           oninput="scrubPreview(this)" onchange="scrubCommit(this)">
+           title="Seek" {% if not current.duration %}disabled{% endif %}>
     <span class="time" id="pb-remaining">{% if current.duration %}-{{ (current.duration - state.position)|mmss }}{% endif %}</span>
   </div>
   {% endif %}
@@ -70,9 +72,8 @@
       <button class="radio-btn" hx-post="/api/station/archive" hx-target="#now-playing"
               title="Never run out: when the queue empties, keep going with random songs from the archive">🎲 Keep playing</button>
     {% endif %}
-    <span class="vol-icon" id="vol-icon" title="Mute / unmute" onclick="toggleMute()"
+    <span class="vol-icon" id="vol-icon" title="Mute / unmute" tabindex="0"
           role="button">{% if state.volume == 0 %}🔇{% else %}🔊{% endif %}</span>
-    <input type="range" id="vol-range" min="0" max="100" value="{{ state.volume }}" title="Volume"
-           onchange="setVolume(this.value)">
+    <input type="range" id="vol-range" min="0" max="100" value="{{ state.volume }}" title="Volume">
   </div>
 </div>

@@ -58,6 +58,9 @@ allowed_hosts = []              # host names this instance answers to, e.g.
 public_url = ""                 # how visitors reach it, e.g. "https://meshradio.example.org";
                                 # canonical links, previews and the sitemap use this
                                 # rather than the request's Host header
+security_headers = true         # Content-Security-Policy, nosniff, referrer and framing
+                                # headers on every response; false if a proxy sets them
+csp_report_only = false         # true = the policy only reports (browser console), never blocks
 
 [relay]
 # Mirror this node's channel history to a hosted instance that can't poll

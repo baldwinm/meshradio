@@ -11,10 +11,12 @@
 <details id="eq-window" class="eq-window">
   <summary>Equalizer</summary>
   <div class="eq-body">
+    {# No inline handlers (the Content-Security-Policy forbids them): eq.js
+       listens for these controls at the document level. #}
     <div class="eq-actions">
-      <button id="eq-on" class="subtle" onclick="eqToggle()" title="Toggle the equalizer">ON</button>
-      <button class="subtle" onclick="eqReset()" title="Flatten all bands">Reset</button>
-      <select id="eq-preset" onchange="eqPreset(this.value)" title="Equalizer presets">
+      <button id="eq-on" class="subtle" type="button" title="Toggle the equalizer">ON</button>
+      <button id="eq-reset" class="subtle" type="button" title="Flatten all bands">Reset</button>
+      <select id="eq-preset" title="Equalizer presets">
         <option value="">Presets…</option>
       </select>
     </div>
@@ -22,7 +24,7 @@
       <div class="eq-band">
         <div class="eq-slider-wrap">
           <input id="eq-preamp" type="range" min="-12" max="12" step="0.1" value="0"
-                 title="Preamp" oninput="eqPreamp(this.value)">
+                 title="Preamp">
         </div>
         <label>PRE</label>
       </div>
@@ -30,8 +32,8 @@
       {% for label in ["60", "170", "310", "600", "1K", "3K", "6K", "12K", "14K", "16K"] %}
       <div class="eq-band">
         <div class="eq-slider-wrap">
-          <input class="band-input" type="range" min="-12" max="12" step="0.1" value="0"
-                 title="{{ label }}Hz" oninput="eqBand({{ loop.index0 }}, this.value)">
+          <input class="band-input" data-band="{{ loop.index0 }}" type="range"
+                 min="-12" max="12" step="0.1" value="0" title="{{ label }}Hz">
         </div>
         <label>{{ label }}</label>
       </div>

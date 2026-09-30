@@ -88,6 +88,12 @@ class WebConfig:
     # links, link previews and the sitemap are built from it instead of from
     # whatever Host header a request carried. Empty = derive from the request.
     public_url: str = ""
+    # Content-Security-Policy and friends on every response (see
+    # web/server.py: SecurityHeaders). Off only if a proxy in front already
+    # sets them. csp_report_only keeps the policy advisory — the browser
+    # console reports what it would have blocked — for trying a change out.
+    security_headers: bool = True
+    csp_report_only: bool = False
 
 
 @dataclass

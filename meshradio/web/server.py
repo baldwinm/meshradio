@@ -137,6 +137,78 @@ class OriginGuard:
             await send({"type": "websocket.close", "code": 1008})
 
 
+def content_security_policy(embed_mode: bool) -> str:
+    """The sources our pages actually use, and nothing else.
+
+    Scripts and styles are our own files (the templates carry no inline
+    handlers — see eq.js/playbar.js for the delegated listeners that replaced
+    them); images are ours plus YouTube stills; audio streams from ``/audio``;
+    fetch and the WebSocket stay on this origin; the one frame is YouTube's
+    player. Embed hosting adds the YouTube IFrame API and the coffee button,
+    which styles itself inline and pulls its own font."""
+    script = ["'self'"]
+    style = ["'self'"]
+    img = ["'self'", "https://i.ytimg.com"]
+    font = ["'self'"]
+    if embed_mode:
+        script += ["https://www.youtube.com", "https://cdnjs.buymeacoffee.com"]
+        style += ["'unsafe-inline'", "https://cdnjs.buymeacoffee.com", "https://fonts.googleapis.com"]
+        img += ["https://cdn.buymeacoffee.com", "https://cdnjs.buymeacoffee.com",
+                "https://www.buymeacoffee.com"]
+        font += ["https://fonts.gstatic.com"]
+    return "; ".join([
+        "default-src 'self'",
+        f"script-src {' '.join(script)}",
+        f"style-src {' '.join(style)}",
+        f"img-src {' '.join(img)}",
+        "media-src 'self'",
+        # ws:/wss: spelled out: older browsers don't count a same-origin
+        # WebSocket as 'self'.
+        "connect-src 'self' ws: wss:",
+        "frame-src https://www.youtube.com",
+        f"font-src {' '.join(font)}",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+    ])
+
+
+class SecurityHeaders:
+    """Browser hardening headers on every HTTP response.
+
+    The policy is the one thing here with teeth: with no inline script
+    allowed, markup that reaches a page through a mesh name or a title can't
+    run anything even if escaping ever slipped. The rest closes the usual
+    small doors — content sniffing, referrer leakage, framing by another
+    site. A handler that already set one of these keeps its own value."""
+
+    def __init__(self, app, csp: str, report_only: bool = False) -> None:
+        self.app = app
+        csp_header = "content-security-policy-report-only" if report_only else "content-security-policy"
+        self.headers = [
+            (csp_header.encode(), csp.encode()),
+            (b"x-content-type-options", b"nosniff"),
+            (b"referrer-policy", b"strict-origin-when-cross-origin"),
+            (b"x-frame-options", b"SAMEORIGIN"),
+        ]
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message) -> None:
+            if message["type"] == "http.response.start":
+                raw = list(message.get("headers", []))
+                present = {name.lower() for name, _ in raw}
+                raw += [(name, value) for name, value in self.headers if name not in present]
+                message["headers"] = raw
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 class VersionedStatic(StaticFiles):
     """Static files that tell the browser how long to keep them.
 
@@ -171,6 +243,8 @@ def create_app(
     player_factory: Callable[[EventBus], PlayerService] | None = None,
     allowed_hosts: Sequence[str] = (),
     public_url: str = "",
+    security_headers: bool = True,
+    csp_report_only: bool = False,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
@@ -297,5 +371,12 @@ def create_app(
     if allowed_hosts:
         app.add_middleware(
             TrustedHostMiddleware, allowed_hosts=list(allowed_hosts), www_redirect=False
+        )
+    if security_headers:
+        # Outermost of all: the guards' own 403/400 answers get them too.
+        app.add_middleware(
+            SecurityHeaders,
+            csp=content_security_policy(embed_mode=player_factory is not None),
+            report_only=csp_report_only,
         )
     return app
