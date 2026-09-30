@@ -41,6 +41,14 @@
      Content-Security-Policy (no inline styles) would refuse; nothing uses it. #}
   <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg?v={{ asset_v }}">
+  {# "Add to Home Screen" names the app after this page's <title> — on Now
+     Playing that is the day's theme — and with no touch icon draws a letter
+     tile from it ("S" for "States & cities"). iOS ignores SVG icons, so the
+     logo is a real 180×180 PNG (opaque: iOS fills transparency black), and the
+     name is pinned so it doesn't change with the day. #}
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v={{ asset_v }}">
+  <meta name="apple-mobile-web-app-title" content="MeshRadio">
+  <meta name="application-name" content="MeshRadio">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {# defer: htmx only needs the DOM at DOMContentLoaded, and nothing calls its
      API at parse time, so there's no reason to block first paint on 48KB. #}
