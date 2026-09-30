@@ -66,7 +66,8 @@ csp_report_only = false         # true = the policy only reports (browser consol
 # Mirror this node's channel history to a hosted instance that can't poll
 # CoreScope itself (Cloudflare challenges datacenter IPs). Runs only when
 # both keys are set.
-push_url = ""                   # e.g. "https://meshradio.example.org"
+push_url = ""                   # e.g. "https://meshradio.example.org" — https only (the
+                                # token rides on every push); plain http just for localhost
 token = ""                      # must match the receiver's ingest token
 interval_s = 120
 

@@ -30,6 +30,7 @@ ingestion and neither needs health tracking to decide who is in charge.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 from urllib.parse import quote
@@ -51,6 +52,16 @@ CURSOR_KEY = "corescope.cursor"
 # is a handful of commits; small enough that other writers (a play starting,
 # a session flush) wait milliseconds, not the whole history.
 INGEST_BATCH = 500
+
+# The API returns the channel's whole history every poll (no ``since``). A
+# year of a busy channel is a few megabytes; this is the point past which
+# the response is not a channel any more, and reading on would only be
+# growing our memory at the analyzer's say-so.
+MAX_POLL_BYTES = 64 * 1024 * 1024
+
+
+class PollTooLarge(Exception):
+    """The analyzer's response outgrew MAX_POLL_BYTES; nothing was ingested."""
 
 
 class CoreScopePoller(Service):
@@ -86,15 +97,10 @@ class CoreScopePoller(Service):
                     await self.poll_once(client)
                     self.bus.publish(INGEST_STATUS, {self.name: "ok"})
                 except httpx.HTTPStatusError as exc:
-                    # Body snippet tells a Cloudflare block apart from an
-                    # origin error without dumping a whole challenge page.
-                    log.error(
-                        "%s poll: HTTP %d from %s; server said: %.200s",
-                        self.name,
-                        exc.response.status_code,
-                        exc.request.url,
-                        exc.response.text,
-                    )
+                    # The message carries a body snippet (see _fetch_messages):
+                    # it tells a Cloudflare block apart from an origin error
+                    # without dumping a whole challenge page.
+                    log.error("%s poll: %s", self.name, exc)
                     self.bus.publish(INGEST_STATUS, {self.name: "error"})
                 except Exception:
                     log.exception("%s poll failed", self.name)
@@ -128,15 +134,26 @@ class CoreScopePoller(Service):
     # -- API adapter -----------------------------------------------------------
 
     async def _fetch_messages(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
-        """Fetch the channel's full message history."""
-        resp = await client.get(f"/api/channels/{quote(self.config.channel, safe='')}/messages")
-        resp.raise_for_status()
-        raw = resp.json()
-        return [m for m in map(self._normalize, raw.get("messages", [])) if m]
+        """Fetch the channel's full message history, streamed under a size cap."""
+        path = f"/api/channels/{quote(self.config.channel, safe='')}/messages"
+        async with client.stream("GET", path) as resp:
+            body = await _read_capped(resp, MAX_POLL_BYTES)
+            if resp.is_error:
+                snippet = body[:200].decode(errors="replace")
+                raise httpx.HTTPStatusError(
+                    f"HTTP {resp.status_code} from {resp.url}; server said: {snippet}",
+                    request=resp.request, response=resp,
+                )
+        raw = json.loads(body)
+        if not isinstance(raw, dict):
+            return []
+        return [m for m in map(self._normalize, raw.get("messages") or []) if m]
 
     @staticmethod
     def _normalize(raw: dict[str, Any]) -> dict[str, Any] | None:
         """Map one CoreScope message to {sender, text, ts, first_seen}."""
+        if not isinstance(raw, dict):
+            return None
         text = raw.get("text")
         sender = raw.get("sender") or "unknown"
         ts = raw.get("sender_timestamp")
@@ -148,3 +165,20 @@ class CoreScopePoller(Service):
             "ts": float(ts),
             "first_seen": str(raw.get("first_seen") or ""),
         }
+
+
+async def _read_capped(resp: httpx.Response, limit: int) -> bytes:
+    """The response body, or PollTooLarge once it passes ``limit``. Counts what
+    arrives rather than trusting Content-Length, which a chunked response
+    doesn't carry."""
+    length = resp.headers.get("content-length", "")
+    if length.isdigit() and int(length) > limit:
+        raise PollTooLarge(f"{resp.url}: Content-Length {length} > {limit}")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in resp.aiter_bytes():
+        size += len(chunk)
+        if size > limit:
+            raise PollTooLarge(f"{resp.url}: body passed {limit} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)

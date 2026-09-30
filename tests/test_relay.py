@@ -144,7 +144,7 @@ async def test_adopted_theme_reaches_receiver(db, bus, tmp_path):
     receiver_db = Database(tmp_path / "receiver.db")
     await receiver_db.connect()
     receiver_bus = EventBus()
-    pusher = RelayPusher(RelayConfig(push_url="http://receiver", token="s3cret"), db)
+    pusher = RelayPusher(RelayConfig(push_url="https://receiver", token="s3cret"), db)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=make_app(receiver_db, receiver_bus, "s3cret")),
@@ -376,3 +376,21 @@ async def test_ingest_batch_is_one_transaction_per_chunk(db, bus):
     assert resp.json()["inserted"] == 30
     assert commits == 1               # the theme and every track rode one transaction
     assert len(await db.tracks_for_day("2026-07-06")) == 30
+
+
+def test_push_url_must_be_https_off_the_box(db):
+    """The token rides on every push; plain http may only stay on localhost."""
+    import pytest
+    from meshradio.ingest.relay import validate_push_url
+
+    for ok in ("https://meshradio.example.org", "https://r.example.org:8443/base",
+               "http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"):
+        assert validate_push_url(ok) == ok
+        RelayPusher(RelayConfig(push_url=ok, token="t"), db)
+    for bad in ("http://meshradio.example.org", "http://192.168.1.20:8080",
+                "ftp://x.example", "meshradio.example.org", "https://"):
+        with pytest.raises(ValueError, match="https"):
+            validate_push_url(bad)
+        with pytest.raises(ValueError):
+            RelayPusher(RelayConfig(push_url=bad, token="t"), db)
+    RelayPusher(RelayConfig(), db)                    # unset: the pusher never runs

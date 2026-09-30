@@ -16,6 +16,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -29,9 +30,33 @@ log = logging.getLogger(__name__)
 
 CURSOR_KEY = "relay.cursor"
 
+# Plain http is allowed only to the machine itself (a dev receiver on the
+# same box); anywhere else the token would cross the network in the clear.
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def validate_push_url(url: str) -> str:
+    """``url`` if it is safe to send the bearer token to, else ValueError.
+
+    Every push carries the shared token in a header; over ``http://`` any
+    hop on the way could read it and then feed the receiver whatever it
+    liked. Refusing at startup beats leaking it every two minutes."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme == "https" and host:
+        return url
+    if parts.scheme == "http" and host in _LOCAL_HOSTS:
+        return url
+    raise ValueError(
+        f"[relay] push_url must be https:// (got {url!r}); the ingest token rides on "
+        "every push, so plain http is only allowed to localhost"
+    )
+
 
 class RelayPusher(Service):
     def __init__(self, config: RelayConfig, db: Database, tz: str = "America/Chicago"):
+        if config.push_url:
+            validate_push_url(config.push_url)
         self.config = config
         self.db = db
         self.tz = ZoneInfo(tz)

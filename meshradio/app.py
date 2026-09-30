@@ -143,7 +143,12 @@ async def run(config, demo: bool = False) -> None:
             )
         )
     if config.relay.push_url and config.relay.token:
-        services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
+        try:
+            services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
+        except ValueError as exc:
+            # A misconfigured relay must not take the radio down with it (or
+            # loop the systemd unit); it just doesn't push until fixed.
+            log.error("relay disabled: %s", exc)
     if config.backup.enabled:
         services.append(BackupService(config.backup, config.db_path, config.backup_dir))
 
