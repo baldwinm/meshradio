@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 from datetime import datetime
@@ -344,7 +345,7 @@ class PlayerService(Service):
     async def seek(self, seconds: float) -> None:
         """Jump within the current track. The backend follows; for WebBackend
         the speaker tab either initiated this or follows via the state push."""
-        if self.current is None:
+        if self.current is None or not math.isfinite(seconds):
             return
         duration = self.current.get("duration")
         seconds = max(0.0, min(seconds, float(duration)) if duration else seconds)
@@ -522,10 +523,15 @@ class PlayerService(Service):
 
     async def report_duration(self, track_id: int, seconds: float) -> None:
         """The embed speaker tab learned the real duration from its player
-        (oEmbed metadata has no duration, so embed tracks start without one)."""
-        if seconds <= 0:
+        (oEmbed metadata has no duration, so embed tracks start without one).
+
+        Fills a blank only. The report comes from whichever browser is
+        playing, and the row is shared by every session, so a value that is
+        already known is never overwritten — the client sends one exactly
+        when the track has none, and the server holds it to the same rule."""
+        if not (seconds > 0 and math.isfinite(seconds)):
             return
-        await self.db.update_track_metadata(track_id, duration=seconds)
+        await self.db.fill_track_duration(track_id, seconds)
         changed = False
         for t in [self.current, *self.queue]:
             if t and t["id"] == track_id and not t.get("duration"):

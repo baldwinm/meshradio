@@ -626,6 +626,20 @@ class Database:
         )
         await self.db.commit()
 
+    async def fill_track_duration(self, track_id: int, seconds: float) -> bool:
+        """Set a track's duration only if it has none. Returns whether it did.
+
+        The browser-reported length (``/api/duration``) goes through here
+        rather than ``update_track_metadata``: that report is unauthenticated
+        and the row is shared, so it may complete a blank but never replace a
+        value the archive already holds."""
+        cur = await self.db.execute(
+            "UPDATE tracks SET duration=? WHERE id=? AND duration IS NULL",
+            (seconds, track_id),
+        )
+        await self.db.commit()
+        return cur.rowcount > 0
+
     async def set_cache_status(
         self, track_id: int, status: str, cache_path: str | None = None
     ) -> None:
