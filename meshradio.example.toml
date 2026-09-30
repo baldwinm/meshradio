@@ -52,6 +52,12 @@ host = "0.0.0.0"
 port = 8080
 ingest_token = ""               # non-empty enables POST /api/ingest (relay receiver);
                                 # on hosts prefer the MESHRADIO_INGEST_TOKEN env var
+allowed_hosts = []              # host names this instance answers to, e.g.
+                                # ["meshradio.local", "192.168.1.20"]; empty = any.
+                                # Pinning it stops DNS-rebinding pages reaching the radio.
+public_url = ""                 # how visitors reach it, e.g. "https://meshradio.example.org";
+                                # canonical links, previews and the sitemap use this
+                                # rather than the request's Host header
 
 [relay]
 # Mirror this node's channel history to a hosted instance that can't poll

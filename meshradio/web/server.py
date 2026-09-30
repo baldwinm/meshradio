@@ -16,13 +16,17 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import Headers
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import PlainTextResponse
 
 from ..bus import EventBus, INGEST_STATUS
 from ..db import Database
@@ -60,6 +64,79 @@ def _asset_version() -> int:
     return int(max(f.stat().st_mtime for f in static.rglob("*") if f.is_file()))
 
 
+def _authority(netloc: str) -> str:
+    """``host[:port]`` normalised for comparison: lower-cased, default ports
+    dropped (a browser's Origin omits ``:443``; a Host header may carry it)."""
+    netloc = netloc.strip().lower()
+    for default in (":80", ":443"):
+        if netloc.endswith(default):
+            return netloc[: -len(default)]
+    return netloc
+
+
+def same_site(origin: str | None, host: str, fetch_site: str | None = None) -> bool:
+    """Did this request come from a page we served?
+
+    Browsers attach ``Origin`` to every POST and WebSocket handshake, so a
+    mismatch with ``Host`` is another site driving the radio. No ``Origin`` at
+    all means no browser was involved (curl, the relay pusher, tests) and is
+    allowed. ``Sec-Fetch-Site`` is the belt to that brace where present."""
+    if fetch_site is not None and fetch_site.strip().lower() == "cross-site":
+        return False
+    if origin is None:
+        return True
+    if origin.strip().lower() == "null":   # sandboxed frame, file://, redirects
+        return False
+    return _authority(urlsplit(origin).netloc) == _authority(host)
+
+
+class OriginGuard:
+    """Refuse cross-site state changes and WebSocket hijacks.
+
+    The appliance is a communal player with no login: any page a LAN user has
+    open could otherwise POST ``/api/skip`` or ``/api/output/bluetooth`` at
+    it, or open ``/ws`` to read state and claim the speaker role (browsers
+    don't enforce same-origin on WebSockets). Reads stay open — a cross-site
+    page can't see their bodies without CORS headers, and a link into the
+    archive from a chat is a cross-site GET that must keep working."""
+
+    SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        kind = scope["type"]
+        if kind == "websocket" or (kind == "http" and scope["method"] not in self.SAFE_METHODS):
+            headers = Headers(scope=scope)
+            if not same_site(headers.get("origin"), headers.get("host", ""),
+                             headers.get("sec-fetch-site")):
+                if kind == "websocket":
+                    await self._deny_websocket(scope, send)
+                else:
+                    response = PlainTextResponse("cross-site request refused", status_code=403)
+                    await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _deny_websocket(scope, send) -> None:
+        """Answer the handshake with a 403 where the server lets us (uvicorn
+        and Starlette's test client both do); otherwise close before accept,
+        which the server reports the same way."""
+        if "websocket.http.response" in scope.get("extensions", {}):
+            body = b"cross-site websocket refused"
+            await send({
+                "type": "websocket.http.response.start",
+                "status": 403,
+                "headers": [(b"content-type", b"text/plain; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode())],
+            })
+            await send({"type": "websocket.http.response.body", "body": body})
+        else:
+            await send({"type": "websocket.close", "code": 1008})
+
+
 class VersionedStatic(StaticFiles):
     """Static files that tell the browser how long to keep them.
 
@@ -92,6 +169,8 @@ def create_app(
     ingest=None,
     ingest_token: str = "",
     player_factory: Callable[[EventBus], PlayerService] | None = None,
+    allowed_hosts: Sequence[str] = (),
+    public_url: str = "",
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
@@ -184,6 +263,8 @@ def create_app(
     app.state.ctx = ctx
     app.state.sessions = sessions
     app.state.speakers = ctx.speakers
+    # See context.absolute_url: the one place the site names itself.
+    app.state.public_url = public_url.rstrip("/")
 
     @app.exception_handler(404)
     async def not_found(request: Request, exc):
@@ -209,4 +290,12 @@ def create_app(
     app.include_router(routes_api.router)
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
+
+    # Outermost, so a refused request never reaches the session or skin
+    # middleware either (each add_middleware wraps everything before it).
+    app.add_middleware(OriginGuard)
+    if allowed_hosts:
+        app.add_middleware(
+            TrustedHostMiddleware, allowed_hosts=list(allowed_hosts), www_redirect=False
+        )
     return app

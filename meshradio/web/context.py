@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import URL
 
 # Sunday-first weeks (US convention; the channel is Austin-local).
 WEEKDAY_HEADERS = ["S", "M", "T", "W", "T", "F", "S"]
@@ -88,15 +89,23 @@ def absolute_url(request: Request, path: str | None = None) -> str:
     """A full ``https://host/path`` URL for this request (or for ``path`` on the
     same host) — what link previews, canonical links and the sitemap need.
 
-    Hosted deployments sit behind a TLS-terminating proxy, so the scheme the app
-    sees is plain http; ``x-forwarded-proto`` is the one that matches the URL a
-    visitor would paste. Query strings are dropped: a preview for
-    ``/archive?m=2026-08`` is a preview of the archive."""
+    With ``[web] public_url`` configured that is the authority, whatever Host
+    header the request carried: a canonical link is a statement about where the
+    page lives, and a spoofed Host must not be able to make one. Without it,
+    the request's own host is used. Hosted deployments sit behind a
+    TLS-terminating proxy, so the scheme the app sees is plain http;
+    ``x-forwarded-proto`` is the one that matches the URL a visitor would
+    paste, and only ``http``/``https`` are believed. Query strings are dropped:
+    a preview for ``/archive?m=2026-08`` is a preview of the archive."""
     url = request.url.replace(query="", fragment="") if path is None else (
         request.base_url.replace(path=path, query="", fragment="")
     )
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    if forwarded:
+    public = getattr(request.app.state, "public_url", "")
+    if public:
+        base = URL(public)
+        return str(url.replace(scheme=base.scheme, netloc=base.netloc))
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if forwarded in ("http", "https"):
         url = url.replace(scheme=forwarded)
     return str(url)
 

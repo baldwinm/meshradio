@@ -177,6 +177,8 @@ async def run(config, demo: bool = False) -> None:
         ingest=ingest,
         ingest_token=config.web.ingest_token,
         player_factory=player_factory,
+        allowed_hosts=config.web.allowed_hosts,
+        public_url=config.web.public_url,
     )
     server = uvicorn.Server(
         uvicorn.Config(

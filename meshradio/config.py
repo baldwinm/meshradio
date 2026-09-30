@@ -79,6 +79,15 @@ class WebConfig:
     port: int = 8080
     ingest_token: str = ""         # enables POST /api/ingest (relay receiver); empty = off.
                                    # Prefer the MESHRADIO_INGEST_TOKEN env var on hosts.
+    # Host names this instance answers to (Starlette TrustedHost syntax;
+    # "*.example.org" wildcards allowed). Empty = any, which is what a LAN
+    # appliance reached by IP, .local name and port-forward all need. Set it
+    # to pin the appliance against DNS rebinding, or a host to its domain.
+    allowed_hosts: list = field(default_factory=list)
+    # The URL visitors use ("https://meshradio.example.org"): canonical
+    # links, link previews and the sitemap are built from it instead of from
+    # whatever Host header a request carried. Empty = derive from the request.
+    public_url: str = ""
 
 
 @dataclass
