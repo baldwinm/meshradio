@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/thumb.html" import thumb %}
 {% block title %}{{ name }} · MeshRadio{% endblock %}
 {% block content %}
 <h2>{{ name }}</h2>
@@ -44,6 +45,7 @@
 <ol class="results">
   {% for tr in tracks %}
   <li>
+    {{ thumb(tr) }}
     <span class="title">{{ tr.title or tr.video_id }}</span>
     {% if tr.artist %}<span class="artist">— {{ tr.artist }}</span>{% endif %}
     <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>

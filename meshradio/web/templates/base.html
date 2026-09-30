@@ -21,6 +21,9 @@
      "Songs shared each day on the Austin MeshCore #music channel, played against that day's theme." %}
   <meta name="description" content="{{ og_desc }}">
   <link rel="canonical" href="{{ page_url }}">
+  {# Feed readers and browsers look for this on any page the visitor lands on. #}
+  <link rel="alternate" type="application/atom+xml" title="MeshRadio — daily themes and songs"
+        href="{{ absolute_url(request, '/feed.xml') }}">
   <meta property="og:site_name" content="MeshRadio">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ og_title }}">
@@ -142,6 +145,9 @@
   <script src="/static/js/nav.js?v={{ asset_v }}"></script>
   {# after playbar.js: the shortcuts drive its volume/seek helpers. #}
   <script src="/static/js/keys.js?v={{ asset_v }}"></script>
+  {# after playbar.js (seekTo) and radio.js (lastState, audio): the OS media
+     controls reuse both. #}
+  <script src="/static/js/mediasession.js?v={{ asset_v }}"></script>
   <script src="/static/js/queue.js?v={{ asset_v }}"></script>
   <script src="/static/js/fx.js?v={{ asset_v }}"></script>
 </body>

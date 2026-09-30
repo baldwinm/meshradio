@@ -153,7 +153,8 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   **+ queue** adds a single track. New visitors land with the newest day cued
   up so there's something to press play on.
   A day's page steps to the days either side of it, so you can read the archive
-  straight through instead of going back to the calendar each time.
+  straight through instead of going back to the calendar each time. Songs carry
+  a small cover-art thumbnail on the day, search and member pages.
 - **☰ All themes** — the calendar's companion view: every theme the channel has
   run, newest first, a year at a time, grouped by month, each linking to its
   day. A title used on more than one day carries an `N×` badge, so it's easy to
@@ -164,11 +165,22 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   volume, <kbd>M</kbd> mute, <kbd>?</kbd> help. They drive the on-screen
   controls, so nothing gets out of step, and they keep out of the way while
   you're typing in the search box.
+- **Lock-screen controls** — the tab that's playing shows the song (title,
+  artist, cover, a scrub bar) on a phone's lock screen and in the notification
+  shade, and headset buttons work too: play/pause, next, and scrubbing act like
+  the on-screen controls, including while you're browsing the Archive. Only the
+  speaker tab owns them, so a second tab doesn't fight for the lock screen.
+  How much a given phone shows depends on its browser — in embed mode the audio
+  plays inside YouTube's frame, which the page can't fully speak for.
 - **Stats** — the channel's numbers: songs, shares, sharers, days, themes and
   plays, plus top sharers, most-shared songs, and the busiest themes.
 - **Member pages** — every sharer's name is a link: what they've shared, the
   days they named, the artists they keep coming back to, and the span they've
   been on the channel.
+- **Feed** — `/feed.xml` is an Atom feed of the last 30 days, one entry per
+  day: the theme, the songs (each linked), and the day's first cover. Subscribe
+  in any feed reader to hear the day's theme without opening the site; every
+  page advertises it, so most readers find it from the site's address alone.
 - **Shareable links** — a day pasted into a chat unfurls with its theme, song
   count, and cover art, so a link to `/archive/2026-08-11` says something
   before anyone clicks it.
@@ -389,6 +401,7 @@ meshradio/
     ├── routes_api.py    # player/queue control API
     ├── routes_ingest.py # /audio streaming, relay /api/ingest, /healthz
     ├── ws.py            # WebSocket: forwards bus events → htmx re-fetch
+    ├── feed.py          # /feed.xml Atom builder (pure; safe against hostile text)
     ├── static/         # vendored htmx + js/ (embed, eq, playbar, radio), style.css
     └── templates/      # Jinja2 (base, index, archive, partials/)
 

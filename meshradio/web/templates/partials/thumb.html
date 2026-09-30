@@ -1,0 +1,12 @@
+{# Cover-art stamp for a song row (archive day, search, member pages).
+
+   Decorative — the title beside it is the text, so alt is empty. Sized in the
+   markup as well as in CSS, and lazy, so a 100-row list neither fetches every
+   still up front nor shifts as they arrive. mqdefault is the same 16:9 still
+   Now Playing uses, so the song that's playing is already cached; the smaller
+   default.jpg has letterbox bars baked in. The id is 11 chars of [A-Za-z0-9_-]
+   (db.VIDEO_ID_RE), and i.ytimg.com is already in the image CSP. #}
+{% macro thumb(track) -%}
+<img class="thumb" src="https://i.ytimg.com/vi/{{ track.video_id }}/mqdefault.jpg"
+     width="56" height="32" loading="lazy" alt="">
+{%- endmacro %}

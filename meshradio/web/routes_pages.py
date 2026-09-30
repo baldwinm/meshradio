@@ -22,6 +22,7 @@ from .context import (
     yt_export_url,
     yt_thumbnail,
 )
+from .feed import build_feed
 
 router = APIRouter()
 
@@ -236,6 +237,22 @@ async def sitemap(request: Request):
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
         f"{urls}</urlset>",
         media_type="application/xml",
+    )
+
+
+@router.get("/feed.xml")
+async def feed(request: Request):
+    """The channel's last month as an Atom feed, one entry per day — so the
+    day's theme reaches a subscriber without their opening the site."""
+    ctx = ctx_of(request)
+    return Response(
+        build_feed(
+            await ctx.recent_days_tracks(),
+            feed_url=absolute_url(request, "/feed.xml"),
+            site_url=absolute_url(request, "/"),
+            day_url=lambda date: absolute_url(request, f"/archive/{date}"),
+        ),
+        media_type="application/atom+xml",
     )
 
 

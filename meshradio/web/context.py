@@ -26,6 +26,7 @@ _CAL = Calendar(firstweekday=6)
 from ..bus import EventBus
 from ..db import Database
 from ..media.player import PlayerService
+from .feed import FEED_DAYS
 from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry
 
 # YouTube's anonymous "make a playlist from these ids" endpoint. Undocumented
@@ -197,6 +198,14 @@ class WebContext:
     async def all_themes(self) -> list[dict[str, Any]]:
         """``Database.all_themes`` behind the TTL."""
         return await self._cached("themes", self.db.all_themes)
+
+    async def recent_days_tracks(self) -> list[dict[str, Any]]:
+        """The feed's rows behind the TTL. /feed.xml is public and polled, and
+        a reader or crawler hammering it should cost one query per few seconds,
+        not one per request."""
+        return await self._cached(
+            "feed", lambda: self.db.recent_days_tracks(FEED_DAYS)
+        )
 
     async def stats(self) -> dict[str, Any]:
         """Everything the Stats page shows, behind the TTL."""
