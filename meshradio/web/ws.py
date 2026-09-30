@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi.responses import PlainTextResponse
 
 from ..bus import OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
 from ..media.player import PlayerService
@@ -34,17 +34,24 @@ async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
 @router.websocket("/ws")
 async def ws(websocket: WebSocket):
     ctx = ctx_of(websocket)
-    await websocket.accept()
     if ctx.sessions is not None:
-        # Per-visitor session: this browser's own player/bus/speakers.
-        # A forged cookie sid is ignored, same as the HTTP middleware.
+        # Per-visitor session: this browser's own player/bus/speakers. The
+        # page that opens this socket always carries the cookie (the HTTP
+        # middleware issued it with the page), so a handshake without a
+        # valid one is not our page. Minting a sid here would open a session
+        # nothing could ever present again — one per bot connection.
         sid = websocket.cookies.get(SESSION_COOKIE)
         if not valid_sid(sid):
-            sid = secrets.token_hex(16)
+            await websocket.send_denial_response(
+                PlainTextResponse("session cookie required", status_code=403)
+            )
+            return
+        await websocket.accept()
         session = await ctx.sessions.get(sid)
         reg, p = session.speakers, session.player
         sub = session.bus.subscribe(PLAYER_STATE)
     else:
+        await websocket.accept()
         reg, p = ctx.speakers, ctx.player
         sub = ctx.bus.subscribe(PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
     reg.join(websocket)

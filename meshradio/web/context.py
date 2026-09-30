@@ -189,9 +189,20 @@ class WebContext:
         return days
 
     async def get_player(self, request: Request) -> PlayerService:
+        """The player this request acts on.
+
+        Appliance: the one communal player. Embed hosting: the visitor's own
+        session player — opened by a POST (they pressed something) or found
+        by a GET (their page's WebSocket, or a returning cookie's snapshot,
+        opened it). A GET from a visitor with no session gets a throwaway
+        preview instead: the page still renders cued, but a crawler or a
+        cookie-spraying bot leaves no session behind."""
         if self.sessions is None:
             return self.player
-        sid = getattr(request.state, "sid", None) or request.cookies.get(SESSION_COOKIE)
+        sid = getattr(request.state, "sid", None) or request.cookies.get(SESSION_COOKIE) or ""
+        if request.method in ("GET", "HEAD"):
+            session = await self.sessions.lookup(sid) if sid else None
+            return session.player if session else await self.sessions.preview()
         return (await self.sessions.get(sid or "anonymous")).player
 
     def today(self) -> str:

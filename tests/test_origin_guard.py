@@ -13,7 +13,7 @@ import pytest
 with warnings.catch_warnings():
     # Starlette would rather we used httpx2; the WebSocket handshake tests
     # below only need the client, and httpx is what the project pins.
-    warnings.simplefilter("ignore", DeprecationWarning)
+    warnings.simplefilter("ignore")
     from starlette.testclient import TestClient, WebSocketDenialResponse
 
 from meshradio.audio.routing import make_router

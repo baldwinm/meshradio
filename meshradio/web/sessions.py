@@ -77,7 +77,14 @@ class SessionManager:
 
     Sessions persist: state snapshots flush to the web_sessions table a few
     seconds after changes, and a returning cookie (or the whole process,
-    after a deploy) restores from there — reaping only evicts from memory."""
+    after a deploy) restores from there — reaping only evicts from memory.
+
+    A session is opened by the page's WebSocket connecting, by a POST, or
+    by a returning cookie that has a snapshot on disk — never by a bare GET.
+    A crawler walking the sitemap, or a bot spraying fresh cookies, used to
+    mint a player, a task and a bus subscription per request and churn the
+    cap; now a visitor with no session gets ``preview()``, a cued player
+    that is thrown away with the response."""
 
     # Hard ceiling on live in-memory sessions. Every session carries a
     # PlayerService plus a supervised task, so without a cap a bot spraying
@@ -101,39 +108,77 @@ class SessionManager:
         return len(self._sessions)
 
     async def get(self, sid: str) -> Session:
+        """The visitor's session, opened (fresh or from its snapshot) if it
+        isn't live. What a POST and the WebSocket use: both mean a real
+        browser is driving a player of its own."""
         session = self._sessions.get(sid)
         if session is None:
-            if len(self._sessions) >= self.MAX_SESSIONS:
-                await self._evict_one()
-            out_bus = EventBus()
-            player = self._factory(out_bus)
-            session = Session(player=player, bus=out_bus)
-            self._sessions[sid] = session
-            saved = await self._db.load_web_session(sid)
-            if saved:
-                try:
-                    await player.restore(json.loads(saved))
-                except Exception:
-                    log.exception("session %s… restore failed; starting fresh", sid[:8])
-            # A brand-new or freshly-restored session lands on the newest day.
-            # A restored "playing" flag is stale — a page load never has audio
-            # going yet in embed mode — so we advance it too; only a warm,
-            # actually-playing session (handled below) is spared.
-            await self._cue_latest(player)
-            player.on_state = lambda: self._dirty.add(sid)
-            log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
-            if self._maintenance is None:
-                self._maintenance = supervise("session-maintenance", self._maintenance_loop)
-                if self._bus is not None:
-                    supervise("session-day-watch", self._watch_new_days)
-        elif session.player.status != "playing" and session.player.day != self._local_today(session.player):
-            # Existing (warm) session that isn't mid-playback and is parked on an
-            # older day: roll it forward if a newer day has appeared since (e.g.
-            # overnight), so "Now Playing" always shows the latest day. A session
-            # that's genuinely playing is left alone — never yank a listener.
-            await self._cue_latest(session.player)
+            session = await self._open(sid, await self._db.load_web_session(sid))
+        else:
+            await self._refresh(session)
         session.last_seen = time.monotonic()
         return session
+
+    async def lookup(self, sid: str) -> Session | None:
+        """The visitor's session if one exists — live, or on disk from an
+        earlier visit — else ``None``. What a GET uses: a page view never
+        opens a session on its own, so an unknown cookie (or none) leaves
+        nothing behind, and the caller shows ``preview()`` instead."""
+        session = self._sessions.get(sid)
+        if session is None:
+            saved = await self._db.load_web_session(sid)
+            if saved is None:
+                return None
+            session = await self._open(sid, saved)
+        else:
+            await self._refresh(session)
+        session.last_seen = time.monotonic()
+        return session
+
+    async def preview(self) -> PlayerService:
+        """A cued player for a visitor with no session: what the landing page
+        shows until its WebSocket (or a first press) opens one. Not registered,
+        not started, not saved — it lives for one response."""
+        player = self._factory(EventBus())
+        await self._cue_latest(player)
+        return player
+
+    async def _open(self, sid: str, saved: str | None) -> Session:
+        if len(self._sessions) >= self.MAX_SESSIONS:
+            await self._evict_one()
+        out_bus = EventBus()
+        player = self._factory(out_bus)
+        session = Session(player=player, bus=out_bus)
+        self._sessions[sid] = session
+        if saved:
+            try:
+                await player.restore(json.loads(saved))
+            except Exception:
+                log.exception("session %s… restore failed; starting fresh", sid[:8])
+        # A brand-new or freshly-restored session lands on the newest day.
+        # A restored "playing" flag is stale — a page load never has audio
+        # going yet in embed mode — so we advance it too; only a warm,
+        # actually-playing session (see _refresh) is spared.
+        await self._cue_latest(player)
+        player.on_state = lambda: self._dirty.add(sid)
+        # The manager owns the player's lifetime: started here, stopped by
+        # reap/evict. (A preview() player is never started.)
+        player.start()
+        log.info("session %s… started (%d live)", sid[:8], len(self._sessions))
+        if self._maintenance is None:
+            self._maintenance = supervise("session-maintenance", self._maintenance_loop)
+            if self._bus is not None:
+                supervise("session-day-watch", self._watch_new_days)
+        return session
+
+    async def _refresh(self, session: Session) -> None:
+        """A warm session that isn't mid-playback and is parked on an older
+        day rolls forward if a newer day has appeared since (e.g. overnight),
+        so "Now Playing" always shows the latest day. A session that's
+        genuinely playing is left alone — never yank a listener."""
+        player = session.player
+        if player.status != "playing" and player.day != self._local_today(player):
+            await self._cue_latest(player)
 
     def _local_today(self, player: PlayerService) -> str:
         return datetime.now(player.tz).date().isoformat()

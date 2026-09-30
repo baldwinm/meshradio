@@ -133,8 +133,10 @@ async def test_warm_idle_session_advances_when_a_new_day_arrives(db, bus):
     await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
     app = embed_app(db, bus)
     async with client_for(app) as client:
+        await client.post("/api/volume/70")       # a press: the session is live now
         state = (await client.get("/api/state")).json()
         assert state["day"] == "2026-07-06" and state["status"] == "paused"
+        assert app.state.sessions.count() == 1
 
         await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")   # new day, same session
         state = (await client.get("/api/state")).json()
@@ -162,6 +164,7 @@ async def test_new_day_song_rolls_idle_tabs_forward(db, bus):
     await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
     app = embed_app(db, bus)
     async with client_for(app) as client:
+        await client.post("/api/volume/70")       # a press: the session is live now
         assert (await client.get("/api/state")).json()["day"] == "2026-07-06"
         sid = client.cookies["mr_sid"]
         await asyncio.sleep(0.05)   # let the day-watcher subscribe to the bus
@@ -256,10 +259,10 @@ async def test_session_cap_evicts_stalest(db, bus):
     app = embed_app(db, bus)
     app.state.sessions.MAX_SESSIONS = 2
     async with client_for(app) as c1, client_for(app) as c2, client_for(app) as c3:
-        await c1.get("/api/state")
+        await c1.post("/api/volume/70")                # a press opens each session
         sid1 = c1.cookies["mr_sid"]
-        await c2.get("/api/state")
-        await c3.get("/api/state")                     # cap hit: c1 evicted
+        await c2.post("/api/volume/70")
+        await c3.post("/api/volume/70")                # cap hit: c1 evicted
         assert app.state.sessions.count() == 2
         assert sid1 not in app.state.sessions._sessions
         assert await db.load_web_session(sid1) is not None   # snapshot kept
@@ -330,3 +333,98 @@ async def test_appliance_mode_still_shares_one_player(db, bus):
         await alice.post("/api/play-day/2026-07-06")
         assert (await bob.get("/api/state")).json()["status"] == "playing"
         assert "mr_sid" not in (await bob.get("/api/state")).cookies
+
+
+# -- who opens a session ------------------------------------------------------
+
+async def test_page_views_open_no_session(db, bus):
+    """A crawler walking the sitemap (no cookie jar) or a bot spraying fresh
+    cookies used to mint a player, a task and a bus subscription per request.
+    A GET now renders from a throwaway preview: still cued on the newest day,
+    but nothing is kept."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        for _ in range(5):
+            client.cookies.clear()
+            page = await client.get("/")
+            assert page.status_code == 200 and "mr_sid" in page.cookies
+            state = (await client.get("/api/state")).json()   # now with that cookie
+            assert state["status"] == "paused"
+            assert state["current"]["video_id"] == "aaaaaaaaaaa"
+        assert app.state.sessions.count() == 0
+        assert await db.load_web_session(client.cookies["mr_sid"]) is None
+
+
+async def test_a_press_opens_the_session(db, bus):
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.get("/api/state")
+        assert app.state.sessions.count() == 0
+        await client.post("/api/pause")                 # play
+        assert app.state.sessions.count() == 1
+        assert (await client.get("/api/state")).json()["status"] == "playing"
+
+
+async def test_well_formed_but_unknown_cookie_opens_no_session_on_get(db, bus):
+    """The cap's worst case: a bot presenting random valid-looking sids."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        for i in range(5):
+            client.cookies.set("mr_sid", f"{i:032x}")
+            assert (await client.get("/api/state")).status_code == 200
+        assert app.state.sessions.count() == 0
+
+
+async def _websocket(app, cookie=None):
+    """Drive the ASGI app through one WebSocket handshake by hand (the test
+    client would run the app on another thread and loop, away from the
+    fixture's database). Returns the messages the app sent."""
+    headers = [(b"host", b"test")]
+    if cookie is not None:
+        headers.append((b"cookie", f"mr_sid={cookie}".encode()))
+    scope = {
+        "type": "websocket", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "scheme": "ws", "path": "/ws", "raw_path": b"/ws", "root_path": "",
+        "query_string": b"", "headers": headers, "client": ("1.2.3.4", 5),
+        "server": ("test", 80), "subprotocols": [],
+        "extensions": {"websocket.http.response": {}},
+    }
+    inbox: asyncio.Queue = asyncio.Queue()
+    sent: list[dict] = []
+    await inbox.put({"type": "websocket.connect"})
+
+    async def send(message):
+        sent.append(message)
+        # One state push is all we wanted; hang up.
+        if message["type"] in ("websocket.send", "websocket.http.response.body"):
+            await inbox.put({"type": "websocket.disconnect", "code": 1000})
+
+    await asyncio.wait_for(app(scope, inbox.get, send), 2)
+    return sent
+
+
+async def test_websocket_opens_the_session(db, bus):
+    """The page's socket is what turns a visitor into a session."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        sid = (await client.get("/")).cookies["mr_sid"]
+    assert app.state.sessions.count() == 0
+    sent = await _websocket(app, cookie=sid)
+    assert sent[0]["type"] == "websocket.accept"
+    assert '"player.state"' in sent[1]["text"]
+    assert app.state.sessions.count() == 1
+
+
+async def test_websocket_without_a_cookie_is_refused(db, bus):
+    """No cookie means not our page; minting one here would open a session
+    nothing could ever present again — one per bot connection."""
+    app = embed_app(db, bus)
+    for cookie in (None, "forged", "x" * 32):
+        sent = await _websocket(app, cookie=cookie)
+        assert sent[0]["type"] == "websocket.http.response.start"
+        assert sent[0]["status"] == 403
+    assert app.state.sessions.count() == 0

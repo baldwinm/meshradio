@@ -158,7 +158,10 @@ async def run(config, demo: bool = False) -> None:
     player_factory = None
     if isinstance(player.backend, EmbedBackend):
         def player_factory(out_bus: EventBus) -> PlayerService:
-            p = PlayerService(
+            # Not started here: the SessionManager starts the players it
+            # keeps and never starts the throwaway one a session-less page
+            # view renders from.
+            return PlayerService(
                 config.player,
                 db,
                 bus,                       # hears shared TRACK_READY events
@@ -166,8 +169,6 @@ async def run(config, demo: bool = False) -> None:
                 output_getter=lambda: "embed",
                 events_out=out_bus,        # announces state only to its session
             )
-            p.start()
-            return p
 
     web_app = create_app(
         bus,

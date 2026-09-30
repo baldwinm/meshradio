@@ -463,8 +463,17 @@ still hearing the shared `track.ready` stream. Snapshots persist to the
 path there's no factory — it stays the single shared player with the
 "one-speaker-at-a-time" speaker registry.
 
+A session is opened by the page's WebSocket connecting, by a POST (the visitor
+pressed something), or by a returning cookie that has a snapshot on disk — never
+by a bare GET. A page view from a visitor with no session renders from a
+throwaway cued player instead, so a crawler walking the sitemap or a bot spraying
+fresh cookies leaves nothing behind (each used to mint a player, a task and a bus
+subscription per request and churn the session cap). A WebSocket handshake
+without a valid cookie is refused rather than given a session nothing could
+present again.
+
 The manager keeps every session's landing view current. It cues the newest
-day-with-songs when a session is created or restored, re-checks on each visit for
+day-with-songs when a session is opened or restored, re-checks on each visit for
 an idle/paused session parked on an older day, and — via a `track.ready` watcher —
 rolls idle sessions forward the moment a newer day's first song lands, pushing
 state to open tabs so they update with no reload. A session that's *actually*
