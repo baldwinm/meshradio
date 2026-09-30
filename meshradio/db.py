@@ -310,6 +310,15 @@ MIGRATIONS: list[str] = [
         UNIQUE(date, video_id)
     );
     """,
+    # v12 — index tracks.sender, case-insensitively. The member pages look a
+    # name up with ``sender = ? COLLATE NOCASE`` four times per visit
+    # (member_name, member_profile, member_tracks, member_artists), and every
+    # one was a full scan of tracks; an index declared with the same
+    # collation serves them. Any future rebuild of tracks (v2/v5/v10 style)
+    # must recreate this one along with the five before it.
+    """
+    CREATE INDEX idx_tracks_sender ON tracks(sender COLLATE NOCASE);
+    """,
 ]
 
 

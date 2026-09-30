@@ -313,6 +313,20 @@ async def test_ingested_at_indexed(db: Database):
     assert "idx_tracks_ingested" in {r["name"] for r in rows}
 
 
+async def test_sender_indexed_case_insensitively(db: Database):
+    """The member pages look a name up with COLLATE NOCASE four times per
+    visit; the planner must find the index (migration v12), not scan."""
+    rows = await db._fetchall(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tracks'"
+    )
+    assert "idx_tracks_sender" in {r["name"] for r in rows}
+    plan = await db._fetchall(
+        "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM tracks "
+        "WHERE sender = ? COLLATE NOCASE AND source != 'radio'", ("Ana",)
+    )
+    assert any("idx_tracks_sender" in r["detail"] for r in plan), plan
+
+
 async def test_search_escapes_like_wildcards(db: Database):
     """A query containing % or _ searches for the literal characters instead
     of degenerating into a match-everything wildcard."""
@@ -347,7 +361,8 @@ async def test_v10_rebuild_keeps_rows_and_indexes(tmp_path):
     """Rebuilding tracks to widen the source CHECK must carry every row over
     and put back all five indexes v2-v8 accumulated — DROP TABLE takes the
     indexes with it, so a rebuild that only recreates v2's pair silently
-    un-optimizes the cacher, the relay pusher, and the playlist backstop."""
+    un-optimizes the cacher, the relay pusher, and the playlist backstop.
+    (v12 adds the sender index on top; a rebuild after it must carry six.)"""
     path = tmp_path / "legacy.db"
     conn = await _build_v9_db(path)
     theme = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
@@ -368,6 +383,7 @@ async def test_v10_rebuild_keeps_rows_and_indexes(tmp_path):
             "idx_tracks_video",
             "idx_tracks_ingested",
             "idx_tracks_theme_video",
+            "idx_tracks_sender",
         }
         # The widened CHECK is what the migration is for.
         assert await db.add_track(**_track_args(theme_id=theme, source="comchan"))
