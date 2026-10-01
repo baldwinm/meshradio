@@ -23,8 +23,8 @@ from .audio.routing import make_router
 from . import backup as backup_mod
 from .backup import BackupService
 from .bus import EventBus
-from .config import load_config
-from .db import Database, VIDEO_ID_RE
+from .config import ConfigError, load_config, validate_config
+from .db import MAX_TITLE, Database, VIDEO_ID_RE, clean_text
 from .ingest import parse
 from .ingest.corescope import CoreScopePoller, probe
 from .ingest.mesh import MeshIngest
@@ -258,11 +258,18 @@ def main() -> None:
     )
     logging.getLogger("aiosqlite").setLevel(logging.INFO)
 
-    config = load_config(args.config)
-    if args.profile:
-        config.hardware_profile = args.profile
-    if args.port:
-        config.web.port = args.port
+    # A value the radio can't run on stops it here, with every offending key
+    # named, rather than as a loop crashing under the supervisor forever.
+    try:
+        config = load_config(args.config)
+        if args.profile:
+            config.hardware_profile = args.profile
+        if args.port:
+            config.web.port = args.port
+            validate_config(config)
+    except ConfigError as exc:
+        print(f"meshradio: {exc}", file=sys.stderr)
+        raise SystemExit(2)
 
     if args.list_backups or args.restore_backup is not None:
         raise SystemExit(_run_backup_cli(config, args))
@@ -320,7 +327,7 @@ async def _run_set_theme(config, args) -> int:
     relay to a hosted receiver: the receiver's own theme for that day is
     locked, so it ignores the replayed theme message the same way it ignores a
     corrected repost on the channel."""
-    title = args.set_theme.strip()
+    title = clean_text(args.set_theme, MAX_TITLE)   # the archive's own bounds
     if not title:
         print("--set-theme needs a non-empty title", file=sys.stderr)
         return 1

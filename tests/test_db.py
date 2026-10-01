@@ -1,6 +1,10 @@
-import aiosqlite
+import sqlite3
 
-from meshradio.db import MIGRATIONS, Database, dedupe_hash, utcnow
+import aiosqlite
+import pytest
+
+from meshradio import db as db_mod
+from meshradio.db import MAX_SENDER, MAX_TITLE, MIGRATIONS, Database, dedupe_hash, utcnow
 
 VID = "dQw4w9WgXcQ"
 
@@ -389,3 +393,66 @@ async def test_v10_rebuild_keeps_rows_and_indexes(tmp_path):
         assert await db.add_track(**_track_args(theme_id=theme, source="comchan"))
     finally:
         await db.close()
+
+
+async def test_a_failing_migration_leaves_nothing_behind(tmp_path, monkeypatch):
+    """executescript commits statement by statement, so a script that failed
+    part-way used to leave a half-migrated archive with the version unbumped,
+    which the next boot then tried to migrate again from the top. Each script
+    is one transaction now, version bump included."""
+    path = tmp_path / "atomic.db"
+    db = Database(path)
+    await db.connect()                                  # fully migrated
+    await db.close()
+    bad = "CREATE TABLE extra(x); INSERT INTO extra VALUES(1); CREATE TABLE extra(x);"
+    monkeypatch.setattr(db_mod, "MIGRATIONS", MIGRATIONS + [bad])
+    db = Database(path)
+    with pytest.raises(sqlite3.OperationalError):
+        await db.connect()
+    assert not db.db.in_transaction                     # rolled back, not left open
+    await db.close()
+    monkeypatch.setattr(db_mod, "MIGRATIONS", MIGRATIONS)   # the bad script is pulled
+    db = Database(path)
+    await db.connect()
+    try:
+        tables = {r["name"] for r in await db._fetchall(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "extra" not in tables                    # nothing of it survived
+        (row,) = await db._fetchall("PRAGMA user_version")
+        assert row["user_version"] == len(MIGRATIONS)
+        (fk,) = await db._fetchall("PRAGMA foreign_keys")
+        assert fk["foreign_keys"] == 1                  # enforcement is back on
+        assert await db.create_theme("2026-07-06", "still works")
+    finally:
+        await db.close()
+
+
+async def test_free_text_and_lengths_are_bounded_at_the_row(db: Database):
+    """Titles, artists, sender names and durations arrive from the mesh, two
+    analyzers, the relay and yt-dlp. The row is where they're bounded, so no
+    source has to be trusted: control characters become spaces and collapse,
+    lengths are capped, and a length that isn't one is simply not written."""
+    theme = await db.create_theme("2026-07-06", "rain \x08\n songs\x7f", set_by="alice\x00")
+    assert theme["title"] == "rain songs" and theme["set_by"] == "alice"
+    track = await db.add_track(
+        video_id="aaaaaaaaaaa", url="https://www.youtube.com/watch?v=aaaaaaaaaaa",
+        channel="#music", sender="S" * 500, mesh_ts=1.0, source="corescope",
+        theme_id=theme["id"], title="T" * 5000, artist="\x1b[31mA\x1b[0m",
+    )
+    assert len(track["sender"]) == MAX_SENDER and len(track["title"]) == MAX_TITLE
+    assert track["artist"] == "[31mA [0m"
+    inf = float("inf")
+    for bad in (inf, -inf, float("nan"), 0, -5, "inf", "abc", 10 ** 9, None):
+        await db.update_track_metadata(track["id"], duration=bad)
+        assert (await db.track_by_id(track["id"]))["duration"] is None, bad
+        assert await db.fill_track_duration(track["id"], bad) is False, bad
+    await db.update_track_metadata(track["id"], duration=213.0)
+    # Neither a bad length nor an empty title can replace a good value.
+    await db.update_track_metadata(track["id"], title="\x00 \x1f", duration=inf)
+    row = await db.track_by_id(track["id"])
+    assert row["duration"] == 213.0 and row["title"] == "T" * MAX_TITLE
+    # Renames and adoptions are bounded the same way; an empty title is refused.
+    renamed = await db.rename_theme(theme["id"], "  water\tsongs  ")
+    assert renamed["title"] == "water songs"
+    with pytest.raises(ValueError):
+        await db.rename_theme(theme["id"], "\x00")

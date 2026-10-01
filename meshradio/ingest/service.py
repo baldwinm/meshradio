@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from ..bus import EventBus, THEME_CREATED, TRACK_DISCOVERED
-from ..db import Database
+from ..db import MAX_SENDER, MAX_TITLE, Database, clean_duration, clean_text
 from . import parse
 
 log = logging.getLogger(__name__)
@@ -44,11 +44,14 @@ class IngestService:
         never has to ask YouTube for what the home node already knows."""
         # Channel messages are short; anything huge is hostile or corrupt.
         # Cap before regex work (mesh RF, CoreScope, and relay all land here).
-        text = text[:4096]
+        # The sender is bounded the same way the archive bounds it, up front,
+        # so the log lines below carry the name the rows will.
+        text = str(text or "")[:4096]
+        sender = clean_text(sender, MAX_SENDER) or "unknown"
         date = self.local_date(ts)
 
         theme = None
-        theme_title = parse.parse_theme(text)
+        theme_title = clean_text(parse.parse_theme(text), MAX_TITLE)
         if theme_title:
             existing = await self.db.latest_theme_for_date(date)
             if existing is None:
@@ -90,7 +93,12 @@ class IngestService:
             theme = await self.db.create_theme(date, parse.untitled_theme(date))
             self.bus.publish(THEME_CREATED, {"theme": theme})
 
+        # The relay's metadata is only as good as the node that sent it. Title
+        # and artist are bounded where they're stored (Database.add_track,
+        # update_track_metadata); the duration is checked here so a value that
+        # isn't one is simply not supplied, never written.
         meta = meta or {}
+        duration = clean_duration(meta.get("duration"))
         inserted = 0
         for link in links:
             track = await self.db.add_track(
@@ -115,11 +123,11 @@ class IngestService:
                             row["id"],
                             title=meta.get("title"),
                             artist=meta.get("artist"),
-                            duration=float(meta["duration"]) if meta.get("duration") else None,
+                            duration=duration,
                         )
                 continue
-            if meta.get("duration"):
-                await self.db.update_track_metadata(track["id"], duration=float(meta["duration"]))
+            if duration is not None:
+                await self.db.update_track_metadata(track["id"], duration=duration)
                 track = await self.db.track_by_id(track["id"])
             inserted += 1
             log.info("new track %s from %s via %s", link.video_id, sender, source)

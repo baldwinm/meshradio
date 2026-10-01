@@ -40,6 +40,9 @@ radio_batch = 10                # tracks pulled per YouTube Mix fetch in radio m
 station_batch = 10              # archived songs queued per "Keep playing" (archive station) top-up
 live_window_s = 1800            # only songs posted within this many seconds auto-play or queue;
                                 # older ones are backfill and stay archive-only
+max_queue = 200                 # most songs a queue holds; a song already playing or queued is
+                                # never added twice, and at the ceiling only a fresh channel
+                                # post still gets in (by displacing station filler)
 
 [cache]
 max_bytes = 8589934592          # 8 GB LRU cap
@@ -72,7 +75,9 @@ csp_report_only = false         # true = the policy only reports (browser consol
 # both keys are set.
 push_url = ""                   # e.g. "https://meshradio.example.org" — https only (the
                                 # token rides on every push); plain http just for localhost
-token = ""                      # must match the receiver's ingest token
+token = ""                      # must match the receiver's ingest token; prefer the
+                                # MESHRADIO_RELAY_TOKEN env var (a systemd EnvironmentFile)
+                                # over writing it here
 interval_s = 120
 
 [backup]

@@ -6,8 +6,17 @@ duration of infinity went into the shared tracks row, breaking every session
 that queued the song. Both are refused at the route now."""
 
 import math
+import time
 
 import pytest
+
+from meshradio.audio.routing import make_router
+from meshradio.bus import EventBus
+from meshradio.config import PlayerConfig
+from meshradio.db import MAX_SENDER, MAX_TITLE
+from meshradio.ingest.service import IngestService
+from meshradio.media.player import EmbedBackend, PlayerService
+from meshradio.web.server import _mmss, create_app
 
 from .test_sessions import client_for, embed_app, make_ready_on
 
@@ -65,3 +74,73 @@ async def test_report_duration_guards_in_the_service_too(db, bus):
     await player.report_duration(track["id"], 100)
     await player.report_duration(track["id"], 200)
     assert (await db.track_by_id(track["id"]))["duration"] == 100
+
+
+def relay_embed_app(db, bus, token="s3cret"):
+    """The hosted deployment: per-visitor embed sessions plus the relay
+    receiver, so a push lands in the rows every visitor is cued onto."""
+    ingest = IngestService(db, bus, channel="#music")
+    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+
+    def factory(out_bus: EventBus) -> PlayerService:
+        return PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend(), events_out=out_bus)
+
+    return create_app(
+        bus, db, player, make_router("dev", bus),
+        ingest=ingest, ingest_token=token, player_factory=factory,
+    )
+
+
+async def test_relay_metadata_cannot_poison_the_shared_row(db, bus):
+    """The relay's ``meta`` used to go straight into the row. One push carrying
+    ``"duration": "inf"`` then broke the home page and the state API for every
+    visitor — new sessions are cued onto the newest day, which is the day the
+    push landed on — and nothing capped a title or a sender name."""
+    app = relay_embed_app(db, bus)
+    headers = {"Authorization": "Bearer s3cret"}
+    now = time.time()
+    async with client_for(app) as client:
+        resp = await client.post("/api/ingest", headers=headers, json={"messages": [
+            {"sender": "alice", "text": "Theme: test", "ts": now - 10},
+            {"sender": "alice", "text": "https://youtu.be/aaaaaaaaaaa", "ts": now - 5,
+             "meta": {"title": "T" * 5000, "artist": "A", "duration": "inf"}},
+            {"sender": "S" * 500, "text": "https://youtu.be/bbbbbbbbbbb", "ts": now - 4,
+             "meta": {"title": "ok", "duration": -3}},
+        ]})
+        assert resp.status_code == 200 and resp.json()["inserted"] == 2
+        (bad,) = await db.tracks_for_video("aaaaaaaaaaa")
+        assert bad["duration"] is None and len(bad["title"]) == MAX_TITLE
+        (other,) = await db.tracks_for_video("bbbbbbbbbbb")
+        assert len(other["sender"]) == MAX_SENDER and other["duration"] is None
+        # A relayed track arrives titled, so the cacher marks it ready as-is
+        # and the pages show it to everyone cued onto the day.
+        for row in (bad, other):
+            await db.set_cache_status(row["id"], "ready")
+        for path in ("/", "/api/state", "/feed.xml"):
+            assert (await client.get(path)).status_code == 200, path
+        # Late metadata for a known track still fills in (the relay re-pushing
+        # history), and a bad value in the same push can't undo a good one.
+        await client.post("/api/ingest", headers=headers, json={"messages": [
+            {"sender": "alice", "text": "https://youtu.be/aaaaaaaaaaa", "ts": now - 5,
+             "meta": {"duration": 213}},
+            {"sender": "alice", "text": "https://youtu.be/aaaaaaaaaaa", "ts": now - 5,
+             "meta": {"duration": "nan"}},
+        ]})
+        assert (await db.tracks_for_video("aaaaaaaaaaa"))[0]["duration"] == 213
+
+
+async def test_a_bad_length_already_in_a_row_cannot_break_a_page(db, bus):
+    """Rows written before lengths were bounded (or edited by hand) may still
+    hold one. The player's clock, the state JSON and the template filter all
+    treat it as unknown rather than raising mid-render."""
+    track = await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06", duration=None)
+    await db.db.execute("UPDATE tracks SET duration=1e999 WHERE id=?", (track["id"],))
+    assert (await db.track_by_id(track["id"]))["duration"] == math.inf
+    async with client_for(embed_app(db, bus)) as client:
+        assert (await client.get("/")).status_code == 200
+        assert (await client.post("/api/play-day/2026-07-06")).status_code == 303
+        state = await client.get("/api/state")
+        assert state.status_code == 200 and state.json()["current"]["duration"] is None
+        assert (await client.post("/api/seek/30")).json()["position"] >= 30
+    assert _mmss(math.inf) == "" and _mmss(math.nan) == "" and _mmss(-1) == ""
+    assert _mmss(None) == "" and _mmss(3725) == "1:02:05"

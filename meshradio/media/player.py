@@ -34,6 +34,19 @@ def _is_filler(track: dict[str, Any]) -> bool:
     return track.get("source") == "radio" or bool(track.get("filler"))
 
 
+def _duration(track: dict[str, Any] | None) -> float | None:
+    """A usable length for the track, in seconds, or None.
+
+    The archive refuses non-finite and absurd lengths at the row, so this is
+    the belt to that brace: an old row or a stale snapshot must not be able
+    to leave the clock unserialisable or a page unrenderable."""
+    try:
+        seconds = float((track or {}).get("duration"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
+
+
 class NullBackend:
     """Simulated playback for dev machines and tests: 'plays' a track for its
     duration (or a few seconds if unknown), then fires on_end."""
@@ -245,8 +258,31 @@ class PlayerService(Service):
             return True
         return (time.time() - float(mesh_ts)) <= self.config.live_window_s
 
-    def _enqueue(self, track: dict[str, Any]) -> None:
-        """Channel posts go ahead of station filler; filler appends at the end."""
+    def _enqueue(self, track: dict[str, Any]) -> bool:
+        """Add a track to the queue if it belongs there; says whether it did.
+
+        Channel posts go ahead of station filler; filler appends at the end.
+        A song that is already playing or already queued is not added again —
+        a repost, a double press on "+ queue" — and the queue has a ceiling
+        (``max_queue``): a visitor pressing "+ queue" a thousand times used to
+        get a thousand entries, with every state push and session snapshot
+        growing to match. At the ceiling a channel post still gets in by
+        displacing the last piece of filler; more filler is simply not added."""
+        video_id = track.get("video_id")
+        if video_id and any(
+            t.get("video_id") == video_id for t in (self.current, *self.queue) if t
+        ):
+            return False
+        if len(self.queue) >= max(1, int(self.config.max_queue)):
+            if _is_filler(track):
+                return False
+            last_filler = next(
+                (i for i in range(len(self.queue) - 1, -1, -1) if _is_filler(self.queue[i])),
+                None,
+            )
+            if last_filler is None:
+                return False
+            self.queue.pop(last_filler)
         if _is_filler(track):
             self.queue.append(track)
         else:
@@ -254,6 +290,7 @@ class PlayerService(Service):
                 (i for i, t in enumerate(self.queue) if _is_filler(t)), len(self.queue)
             )
             self.queue.insert(idx, track)
+        return True
 
     async def on_track_ready(self, track: dict[str, Any]) -> None:
         # Radio tracks were explicitly requested (even if radio has been
@@ -269,8 +306,7 @@ class PlayerService(Service):
             and not self.in_quiet_hours()
         ):
             await self.play_track(track)
-        else:
-            self._enqueue(track)
+        elif self._enqueue(track):
             self.publish_state()
 
     def in_quiet_hours(self, now: datetime | None = None) -> bool:
@@ -313,7 +349,7 @@ class PlayerService(Service):
         self._pos_base = 0.0
         self._pos_epoch = time.monotonic()
         self._play_id = await self.db.record_play(track["id"], self.output_getter())
-        await self.backend.play(track["cache_path"], track.get("duration"))
+        await self.backend.play(track["cache_path"], _duration(track))
         self.publish_state()
 
     async def skip(self) -> None:
@@ -337,9 +373,9 @@ class PlayerService(Service):
         pos = self._pos_base
         if self._pos_epoch is not None:
             pos += time.monotonic() - self._pos_epoch
-        duration = (self.current or {}).get("duration")
+        duration = _duration(self.current)
         if duration:
-            pos = min(pos, float(duration))
+            pos = min(pos, duration)
         return max(pos, 0.0)
 
     async def seek(self, seconds: float) -> None:
@@ -347,8 +383,8 @@ class PlayerService(Service):
         the speaker tab either initiated this or follows via the state push."""
         if self.current is None or not math.isfinite(seconds):
             return
-        duration = self.current.get("duration")
-        seconds = max(0.0, min(seconds, float(duration)) if duration else seconds)
+        duration = _duration(self.current)
+        seconds = max(0.0, min(seconds, duration) if duration else seconds)
         self._pos_base = seconds
         self._pos_epoch = time.monotonic() if self.status == "playing" else None
         await self.backend.seek(seconds)
@@ -359,15 +395,19 @@ class PlayerService(Service):
         await self.backend.set_volume(self.volume)
         self.publish_state()
 
-    async def enqueue_track_id(self, track_id: int, play_if_idle: bool = True) -> None:
+    async def enqueue_track_id(self, track_id: int, play_if_idle: bool = True) -> bool:
+        """Queue (or, if idle, play) a track by id. False if nothing changed:
+        no such playable track, or it's already playing or queued."""
         track = await self.db.track_by_id(track_id)
         if not track or not self._is_playable(track):
-            return
+            return False
         if self.status == "idle" and play_if_idle:
             await self.play_track(track)
-        else:
-            self._enqueue(track)
-            self.publish_state()
+            return True
+        if not self._enqueue(track):
+            return False
+        self.publish_state()
+        return True
 
     async def play_day(self, date: str) -> None:
         """Archive mode: replay a whole day's tracks in posted order."""
@@ -501,11 +541,10 @@ class PlayerService(Service):
             exclude_video_ids=seen,
             ready_only=not self.embed,
         )
-        for track in tracks:
-            self.queue.append(dict(track, filler=True))
+        added = sum(self._enqueue(dict(track, filler=True)) for track in tracks)
         if not tracks:
             log.info("archive station: nothing playable to queue")
-        return len(tracks)
+        return added
 
     def _maybe_extend_radio(self, seed: dict[str, Any] | None) -> None:
         if self.station == "radio" and self.radio is not None and seed is not None:
@@ -584,7 +623,7 @@ class PlayerService(Service):
                 "title": t.get("title"),
                 "artist": t.get("artist"),
                 "sender": t.get("sender"),
-                "duration": t.get("duration"),
+                "duration": _duration(t),
                 "source": t.get("source"),
                 "filler": bool(t.get("filler")),
             }
@@ -640,9 +679,6 @@ class PlayerService(Service):
         # One query for the lot: a restore is a returning visitor's first
         # request, and a long day is a couple of hundred ids.
         rows = await self.db.tracks_by_ids(queue_ids + ([current_id] if current_id is not None else []))
-        self.queue = [
-            dict(rows[i]) for i in queue_ids if i in rows and self._is_playable(rows[i])
-        ]
         current = rows.get(current_id) if current_id is not None else None
         if current and not self._is_playable(current):
             current = None
@@ -650,12 +686,19 @@ class PlayerService(Service):
         if current and status in ("playing", "paused"):
             self.current = current
             self.status = status
+        # The queue is rebuilt through _enqueue, so a snapshot from before the
+        # ceiling (or a tampered one) comes back deduplicated and bounded.
+        self.queue = []
+        for i in queue_ids:
+            if i in rows and self._is_playable(rows[i]):
+                self._enqueue(dict(rows[i]))
+        if current and status in ("playing", "paused"):
             position = max(float(snap.get("position") or 0.0), 0.0)
             if status == "playing" and snap.get("saved_at"):
                 position += max(0.0, time.time() - float(snap["saved_at"]))
-            duration = current.get("duration")
+            duration = _duration(current)
             if duration:
-                position = min(position, max(float(duration) - 1.0, 0.0))
+                position = min(position, max(duration - 1.0, 0.0))
             self._pos_base = position
             self._pos_epoch = time.monotonic() if status == "playing" else None
         self.publish_state()

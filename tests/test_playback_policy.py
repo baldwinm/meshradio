@@ -3,7 +3,7 @@
 import time
 
 from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService
+from meshradio.media.player import NullBackend, PlayerService, _is_filler
 from meshradio.web.server import SpeakerRegistry
 
 from .test_player import make_ready_track
@@ -127,3 +127,56 @@ def test_speaker_registry_leave_unknown_is_noop():
     reg.join("a")
     reg.leave("ghost")
     assert reg.is_speaker("a")
+
+
+# -- queue bounds ---------------------------------------------------------------
+
+async def test_queue_refuses_a_song_already_queued_or_playing(db, bus):
+    """A repost, or a double press on "+ queue", must not list a song twice."""
+    a = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    b = await make_ready_track(db, "bbbbbbbbbbb", duration=60)
+    player = make_player(db, bus)
+    await player.play_track(a)
+    assert await player.enqueue_track_id(b["id"]) is True
+    for _ in range(3):
+        assert await player.enqueue_track_id(b["id"]) is False
+    assert [t["id"] for t in player.queue] == [b["id"]]
+    assert await player.enqueue_track_id(a["id"]) is False      # it's playing
+    assert len(player.queue) == 1
+
+
+async def test_queue_has_a_ceiling_that_a_channel_post_still_crosses(db, bus):
+    """Pressing "+ queue" a thousand times used to make a thousand entries,
+    and every state push and snapshot grew with them. Filler stops at the
+    ceiling; a fresh channel post displaces the last piece of filler."""
+    player = make_player(db, bus, max_queue=3)
+    tracks = [await make_ready_track(db, f"{i:011d}", duration=60) for i in range(6)]
+    await player.play_track(tracks[0])
+    for t in tracks[1:4]:
+        assert player._enqueue(dict(t, filler=True))
+    assert not player._enqueue(dict(tracks[4], filler=True))     # full: filler is dropped
+    assert player._enqueue(tracks[5])                             # a post displaces filler
+    assert [t["id"] for t in player.queue] == [tracks[5]["id"], tracks[1]["id"], tracks[2]["id"]]
+    assert player._enqueue(tracks[4])                             # the last filler, again
+    assert [t["id"] for t in player.queue] == [tracks[5]["id"], tracks[4]["id"], tracks[1]["id"]]
+    assert player._enqueue(tracks[3])                             # and the one left
+    assert not any(_is_filler(t) for t in player.queue)
+    # Nothing displaces a channel post: the queue is all posts now, so the
+    # next one is refused rather than pushing somebody's pick out.
+    extra = await make_ready_track(db, "eeeeeeeeeee", duration=60)
+    assert not player._enqueue(extra)
+    assert [t["id"] for t in player.queue] == [tracks[5]["id"], tracks[4]["id"], tracks[3]["id"]]
+
+
+async def test_restore_bounds_and_deduplicates_the_queue(db, bus):
+    """A snapshot from before the ceiling (or a tampered row) can't bring an
+    unbounded or duplicated queue back."""
+    a = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    b = await make_ready_track(db, "bbbbbbbbbbb", duration=60)
+    player = make_player(db, bus, max_queue=5)
+    await player.restore({
+        "status": "paused", "current_track_id": a["id"], "position": 0,
+        "queue_track_ids": [a["id"], b["id"]] * 50,
+    })
+    assert player.current["id"] == a["id"] and player.status == "paused"
+    assert [t["id"] for t in player.queue] == [b["id"]]

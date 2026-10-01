@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.1 — the core software is built, tested (360+ tests), and running:
+*Status: v0.1 — the core software is built, tested (390+ tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member pages, feed),
 and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -134,7 +134,7 @@ see §14):*
 meshradio/
 ├── app.py              # asyncio entrypoint, wires modules to the bus
 ├── bus.py              # tiny pub/sub EventBus (asyncio queues)
-├── config.py           # TOML over dataclass defaults; secrets from env
+├── config.py           # TOML over dataclass defaults, checked at load; secrets from env
 ├── db.py               # aiosqlite layer + migrations; one connection, writers serialised
 ├── backup.py           # rotating DB snapshots; --list-backups / --restore-backup (§14)
 ├── net.py              # shared outbound HTTP client (User-Agent, timeouts)
@@ -170,7 +170,7 @@ meshradio/
 ├── system/
 │   ├── power.py        # fuel gauge polling, safe shutdown
 │   └── provision.py    # first-boot AP-mode WiFi setup (nmcli)
-tests/                  # top-level; 360+ tests, pytest-asyncio
+tests/                  # top-level; 390+ tests, pytest-asyncio
 ```
 
 **Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `httpx`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node. Only the web/ingest core is a hard dependency: yt-dlp and python-mpv sit behind the `media` extra and the Pi hardware libraries (`meshcore`, `luma.oled`, `gpiozero`) behind `hw`, so a public embed host or a dev box installs neither. yt-dlp's YouTube extractor also needs a JavaScript runtime (deno) on the machine to solve YouTube's challenge.
@@ -331,7 +331,7 @@ The nav is **hx-boosted**, swapping `<main>` (`hx-select`) rather than reloading
 
 **Hot-path reads.** Every player-state push makes each open page re-fetch, and the whole-archive aggregates behind those pages (`archive_days`, `all_themes`, the stats queries, the feed's rows) each scan the themes×tracks join. `WebContext` keeps them behind a 5-second TTL (`CACHE_TTL_S`): nothing in them changes until a song lands, so at worst the day arrows lag one event, and a crawler or feed reader hammering a page costs one query per few seconds rather than one per request. Broadcasting a state push is parallel (`asyncio.gather`) with a per-socket send timeout (`SEND_TIMEOUT_S`, 5 s), so a page that stopped reading — a laptop lid closing mid-send — can't delay every page after it.
 
-**Hardening.** The player has no login, so `server.py` wraps the app in three layers, outermost first. *Security headers* (`SecurityHeaders`) put a Content-Security-Policy on every response — scripts and styles are our own files (the templates carry no inline handlers; `eq.js` and `playbar.js` use delegated listeners instead), images are ours plus YouTube stills, audio streams from `/audio`, fetch and the WebSocket stay on the origin, the only frame is YouTube's player, and embed hosting additionally allows the YouTube IFrame API and the donation button — together with `nosniff`, a strict referrer policy and `X-Frame-Options: SAMEORIGIN`. The policy is the part with teeth: with no inline script allowed, markup that reached a page through a mesh name or an oEmbed title couldn't run even if escaping slipped. A handler that already set one of these keeps its own value, and the policy is switchable (`security_headers`) or report-only (`csp_report_only`) for trying a change out. *Host pinning* (`TrustedHostMiddleware`, from `[web] allowed_hosts`) is off by default, because an appliance reached by IP, `.local` name and port-forward needs any host; turning it on keeps DNS-rebinding pages from reaching a LAN radio. *The origin guard* (`OriginGuard`) refuses cross-site state changes: browsers attach `Origin` to every POST and WebSocket handshake, so one that doesn't match `Host` (or is `null`, or `Sec-Fetch-Site: cross-site`) is another site driving the radio — otherwise any page a LAN user has open could `POST /api/skip`, or open `/ws` to claim the speaker role, since browsers don't enforce same-origin on WebSockets. A request with no `Origin` is not a browser (curl, the relay pusher, tests) and passes; reads stay open so an archive link pasted into a chat keeps working. The WebSocket is refused by closing before `accept`, which uvicorn turns into a plain 403 — the ASGI denial-response extension would let us write the 403 ourselves, but the websockets implementation then logs a failed handshake and tries a 500 on top. Inputs are bounded at the edge too: seek and duration values must be finite and at most a day, and the relay endpoint caps a push at 16 MiB / 5,000 messages (§14).
+**Hardening.** The player has no login, so `server.py` wraps the app in three layers, outermost first. *Security headers* (`SecurityHeaders`) put a Content-Security-Policy on every response — scripts and styles are our own files (the templates carry no inline handlers; `eq.js` and `playbar.js` use delegated listeners instead), images are ours plus YouTube stills, audio streams from `/audio`, fetch and the WebSocket stay on the origin, the only frame is YouTube's player, and embed hosting additionally allows the YouTube IFrame API and the donation button — together with `nosniff`, a strict referrer policy and `X-Frame-Options: SAMEORIGIN`. The policy is the part with teeth: with no inline script allowed, markup that reached a page through a mesh name or an oEmbed title couldn't run even if escaping slipped. A handler that already set one of these keeps its own value, and the policy is switchable (`security_headers`) or report-only (`csp_report_only`) for trying a change out. *Host pinning* (`TrustedHostMiddleware`, from `[web] allowed_hosts`) is off by default, because an appliance reached by IP, `.local` name and port-forward needs any host; turning it on keeps DNS-rebinding pages from reaching a LAN radio. *The origin guard* (`OriginGuard`) refuses cross-site state changes: browsers attach `Origin` to every POST and WebSocket handshake, so one that doesn't match `Host` (or is `null`, or `Sec-Fetch-Site: cross-site`) is another site driving the radio — otherwise any page a LAN user has open could `POST /api/skip`, or open `/ws` to claim the speaker role, since browsers don't enforce same-origin on WebSockets. A request with no `Origin` is not a browser (curl, the relay pusher, tests) and passes; reads stay open so an archive link pasted into a chat keeps working. The WebSocket is refused by closing before `accept`, which uvicorn turns into a plain 403 — the ASGI denial-response extension would let us write the 403 ourselves, but the websockets implementation then logs a failed handshake and tries a 500 on top. Inputs are bounded at the edge too: seek and duration values must be finite and at most a day, and the relay endpoint caps a push at 16 MiB / 5,000 messages (§14). Free text is bounded where rows are written rather than per source (`Database.clean_text`, `clean_duration`): titles, artists and theme titles are one line of at most 256 characters, sender names 64, control characters dropped, and a track length that isn't a finite number of seconds within a day is not stored — the relay's `meta` used to go straight into the shared row, and one `"duration": "inf"` broke the home page and `/api/state` for every visitor cued onto that day. The player reads lengths through one guard (`_duration`) and the `mmss` filter formats nothing it can't, so a row from before the bound can't take a page down either. A queue holds at most `[player] max_queue` (200) songs and never the same video twice; at the ceiling a fresh channel post displaces station filler and nothing displaces a post. Open WebSockets are counted — 8 per session, 64 on the communal registry, 1,024 per process, a refused handshake closed before `accept` with 1013 — and a page may claim the speaker role once a second, never when it already has it, since each claim fans state out to every socket. The config file is checked before any of this runs (`validate_config`): every numeric key's type and range, the flags, the enumerations (profile, backend, audio format), the quiet-hours shape and the time zone, with every problem reported at once and startup refused, because a negative interval made `asyncio.sleep` return at once and a quoted number crashed a loop the supervisor then restarted forever; unknown keys are logged and ignored.
 
 Now Playing always tracks the latest day: the server re-cues an idle session onto the newest day both on each visit and live (a bus watcher rolls open tabs forward the moment a new day's first song lands), while never interrupting one that's actively playing. Playback controls include **🔀 shuffle** (reorders the upcoming queue) and a persistent **⤴ Export** that opens the whole day's songs as an anonymous YouTube `watch_videos` playlist regardless of what's playing. The queue uses a selection model: click a track, then **⤒ Play next** / **✕ Remove** act on it from the bar beside **Clear queue** — one tap-target set instead of per-row buttons, which reads better on touch. The spectrum-analyzer canvas renders only where it can be driven (web-playback mode); embed hosting streams inside a cross-origin YouTube iframe, so it's omitted there rather than sitting blank.
 
@@ -510,12 +510,20 @@ path there's no factory — it stays the single shared player with the
 
 A session is opened by the page's WebSocket connecting, by a POST (the visitor
 pressed something), or by a returning cookie that has a snapshot on disk — never
-by a bare GET. A page view from a visitor with no session renders from a
-throwaway cued player instead, so a crawler walking the sitemap or a bot spraying
-fresh cookies leaves nothing behind (each used to mint a player, a task and a bus
-subscription per request and churn the session cap). A WebSocket handshake
-without a valid cookie is refused rather than given a session nothing could
-present again.
+by a bare GET, and only ever for a cookie this server signed. The cookie is
+`<sid>.<hmac>` (`sessions.issue_cookie` / `verify_cookie`), keyed by a secret
+created on first use and kept in the `settings` table, so cookies outlive a
+redeploy along with the snapshots they name. A page view from a visitor with no
+session renders from a throwaway cued player, and so does a POST that presented
+no cookie of ours (the middleware minted one on that very request): a browser
+always carries the cookie it got with the page, so that press is a script's.
+Each such request used to mint a player, a task and a row on disk and churn the
+session cap — a cheap POST flood could fill the hosted disk — and a well-formed
+random sid did the same, so checking the shape was no defence. A WebSocket
+handshake without a cookie we signed is refused rather than given a session
+nothing could present again. Static files, audio, the health check, the feed,
+the sitemap and the relay endpoint are outside the session middleware entirely
+and carry no cookie.
 
 The manager keeps every session's landing view current. It cues the newest
 day-with-songs when a session is opened or restored, re-checks on each visit for
@@ -531,13 +539,20 @@ playing is always left alone; a restored "playing" flag is treated as stale
   [meshradio.render.toml](meshradio.render.toml); Python 3.11 to match CI;
   `MESHRADIO_INGEST_TOKEN` generated as a secret. A **persistent disk** mounts at
   the data dir so the archive survives deploys/restarts (disks need a paid
-  instance, hence the Starter plan).
+  instance, hence the Starter plan). The build is `uv sync --locked --no-dev`
+  (Render adds uv when `uv.lock` is in the repo root), so production runs the
+  pinned set the suite gated rather than a fresh resolution from the index.
 - **CI gate** ([.github/workflows/test.yml](.github/workflows/test.yml)) — Render
   deploys `main` only after the test suite is green (`autoDeployTrigger:
   checksPass`), so a red suite never reaches production. CI installs from
   `uv.lock` (`uv sync --locked`, which fails if the lock is stale), so what it
   tests is the pinned set the project resolved, not whatever the index serves
-  that day.
+  that day. A second workflow ([audit.yml](.github/workflows/audit.yml)) runs
+  `pip-audit` over the exported pins — every extra, no dev tooling — on pull
+  requests, weekly and on demand, and Dependabot opens a weekly grouped PR for
+  the lock and the pinned actions. The audit deliberately doesn't run on push:
+  an advisory against a library on a path the radio never touches shouldn't
+  hold a deploy.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
   session count); Render's health check hits it, and a stale age means *every*
   ingest source (relay, CoreScope) went quiet.
@@ -546,7 +561,17 @@ playing is always left alone; a restored "playing" flag is treated as stale
   independent of host disk snapshots. Restore with `meshradio --list-backups` /
   `--restore-backup`, which snapshots the current DB first so it's reversible.
 - **The Pi relay** runs under systemd ([deploy/meshradio.service](deploy/meshradio.service)):
-  `Restart=on-failure` rides out transient network/CoreScope hiccups.
+  `Restart=on-failure` rides out transient network/CoreScope hiccups. The unit
+  sandboxes the service — it runs yt-dlp, ffmpeg and deno against whatever the
+  channel links to — so the file system is read-only to it apart from
+  `/var/lib/meshradio` (the `StateDirectory`, also the working directory, where
+  `data_dir` belongs), its cache directory and a private `/tmp`; no new
+  privileges, an empty capability set, the `@system-service` syscall set, Unix
+  and IP sockets only, and a memory ceiling. Device isolation is left out so the
+  appliance profiles keep the OLED, GPIO and the node's serial port. The tokens
+  come from `/etc/meshradio/env` (`MESHRADIO_RELAY_TOKEN`, and
+  `MESHRADIO_INGEST_TOKEN` for a node that is itself a receiver), read as an
+  `EnvironmentFile`, instead of sitting in `config.toml`.
 - **Hardening config** — a public host should also set `[web] public_url` (canonical
   links and previews from config, not the `Host` header); a LAN appliance may set
   `[web] allowed_hosts`. The origin guard and security headers are on by default

@@ -9,12 +9,21 @@ Search order: --config CLI arg, $MESHRADIO_CONFIG, ./meshradio.toml,
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+log = logging.getLogger(__name__)
 
 VALID_PROFILES = ("dev", "pi4", "lite")
+VALID_BACKENDS = ("auto", "mpv", "web", "embed", "null")
+# What yt-dlp's --audio-format accepts. The value is also the cache file's
+# extension, so this doubles as the path-safe set.
+VALID_AUDIO_FORMATS = ("best", "aac", "alac", "flac", "m4a", "mp3", "opus", "vorbis", "wav")
 
 
 @dataclass
@@ -60,6 +69,8 @@ class PlayerConfig:
     station_batch: int = 10        # archived songs queued per archive-station top-up
     live_window_s: int = 1800      # only tracks posted within this window auto-play;
                                    # older ones are backfill and stay archive-only
+    max_queue: int = 200           # ceiling on queued tracks per player; a song already
+                                   # playing or queued is never added twice
 
 
 @dataclass
@@ -143,13 +154,133 @@ class Config:
         return Path(self.backup.dir) if self.backup.dir else self.data_dir / "backups"
 
 
-def _apply(section_obj, data: dict) -> None:
+class ConfigError(ValueError):
+    """The config says something the radio can't run on. The message names
+    every offending key, so a file is fixed in one pass."""
+
+
+def _apply(section_obj, data: dict, label: str) -> None:
     for key, value in data.items():
-        if hasattr(section_obj, key):
-            current = getattr(section_obj, key)
-            if isinstance(current, Path):
-                value = Path(value)
-            setattr(section_obj, key, value)
+        if not hasattr(section_obj, key):
+            # A misspelt key silently leaving the default in force is the
+            # kind of mistake that only shows up as "why isn't it polling".
+            log.warning("config: unknown key %r in %s ignored", key, label)
+            continue
+        current = getattr(section_obj, key)
+        if isinstance(current, Path):
+            value = Path(value)
+        setattr(section_obj, key, value)
+
+
+# Every numeric key, with its floor and ceiling. TOML parses what it's given,
+# and a value that parses isn't a value the radio can run on: a negative
+# interval makes asyncio.sleep return at once, so one typo turned a poller
+# into a hot loop against the analyzer; a quoted number crashes the loop
+# that uses it, which the supervisor then restarts forever.
+_INTS: list[tuple[str, str, int | None, int | None]] = [
+    ("corescope", "poll_interval_s", 1, None),
+    ("comchan", "poll_interval_s", 1, None),
+    ("player", "volume", 0, 100),
+    ("player", "radio_batch", 1, None),
+    ("player", "station_batch", 1, None),
+    ("player", "live_window_s", 0, None),
+    ("player", "max_queue", 1, None),
+    ("cache", "max_bytes", 0, None),
+    ("cache", "max_retries", 1, None),
+    ("cache", "retry_backoff_s", 0, None),
+    ("cache", "concurrency", 1, None),
+    ("web", "port", 1, 65535),
+    ("relay", "interval_s", 1, None),
+    ("backup", "interval_s", 1, None),
+    ("backup", "keep", 0, None),
+]
+_BOOLS = [
+    ("mesh", "enabled"), ("corescope", "enabled"), ("comchan", "enabled"),
+    ("player", "live_autoplay"), ("web", "security_headers"),
+    ("web", "csp_report_only"), ("backup", "enabled"),
+]
+_STRINGS = [
+    ("mesh", "serial_port"), ("mesh", "channel"), ("mesh", "channel_key"),
+    ("corescope", "base_url"), ("corescope", "channel"),
+    ("comchan", "base_url"), ("comchan", "channel"),
+    ("player", "backend"), ("player", "quiet_hours"), ("player", "timezone"),
+    ("cache", "ytdlp_bin"), ("cache", "audio_format"), ("cache", "ffmpeg_location"),
+    ("web", "host"), ("web", "ingest_token"), ("web", "public_url"),
+    ("relay", "push_url"), ("relay", "token"), ("backup", "dir"),
+]
+_STRING_LISTS = [("web", "allowed_hosts"), ("cache", "ytdlp_extra_args")]
+
+
+def _quiet_hours_ok(spec: str) -> bool:
+    """Empty, or ``HH:MM-HH:MM`` (the shape PlayerService.in_quiet_hours reads)."""
+    if not spec:
+        return True
+    parts = spec.split("-")
+    if len(parts) != 2:
+        return False
+    try:
+        for part in parts:
+            datetime.strptime(part.strip(), "%H:%M")
+    except ValueError:
+        return False
+    return True
+
+
+def validate_config(cfg: Config) -> None:
+    """Raise ConfigError naming every key whose value the radio can't run on."""
+    problems: list[str] = []
+
+    def key(section: str, name: str) -> str:
+        return f"[{section}] {name}"
+
+    for section, name, lo, hi in _INTS:
+        value = getattr(getattr(cfg, section), name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            problems.append(f"{key(section, name)} must be an integer, got {value!r}")
+        elif (lo is not None and value < lo) or (hi is not None and value > hi):
+            bounds = f"at least {lo}" if hi is None else f"between {lo} and {hi}"
+            problems.append(f"{key(section, name)} must be {bounds}, got {value!r}")
+    for section, name in _BOOLS:
+        value = getattr(getattr(cfg, section), name)
+        if not isinstance(value, bool):
+            problems.append(f"{key(section, name)} must be true or false, got {value!r}")
+    for section, name in _STRINGS:
+        value = getattr(getattr(cfg, section), name)
+        if not isinstance(value, str):
+            problems.append(f"{key(section, name)} must be a string, got {value!r}")
+    for section, name in _STRING_LISTS:
+        value = getattr(getattr(cfg, section), name)
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            problems.append(f"{key(section, name)} must be a list of strings, got {value!r}")
+
+    if cfg.hardware_profile not in VALID_PROFILES:
+        problems.append(
+            f"hardware_profile must be one of {VALID_PROFILES}, got {cfg.hardware_profile!r}"
+        )
+    if isinstance(cfg.player.backend, str) and cfg.player.backend not in VALID_BACKENDS:
+        problems.append(
+            f"{key('player', 'backend')} must be one of {VALID_BACKENDS}, "
+            f"got {cfg.player.backend!r}"
+        )
+    if isinstance(cfg.cache.audio_format, str) and cfg.cache.audio_format not in VALID_AUDIO_FORMATS:
+        problems.append(
+            f"{key('cache', 'audio_format')} must be one of {VALID_AUDIO_FORMATS}, "
+            f"got {cfg.cache.audio_format!r}"
+        )
+    if isinstance(cfg.player.quiet_hours, str) and not _quiet_hours_ok(cfg.player.quiet_hours):
+        problems.append(
+            f"{key('player', 'quiet_hours')} must be empty or \"HH:MM-HH:MM\", "
+            f"got {cfg.player.quiet_hours!r}"
+        )
+    if isinstance(cfg.player.timezone, str):
+        try:
+            ZoneInfo(cfg.player.timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            problems.append(
+                f"{key('player', 'timezone')} is not a known time zone: {cfg.player.timezone!r}"
+            )
+    if problems:
+        raise ConfigError("config:\n  " + "\n  ".join(problems))
 
 
 def load_config(path: str | Path | None = None) -> Config:
@@ -168,17 +299,22 @@ def load_config(path: str | Path | None = None) -> Config:
                         "web", "relay", "backup")
             for section in sections:
                 if section in raw:
-                    _apply(getattr(cfg, section), raw[section])
-            _apply(cfg, {k: v for k, v in raw.items() if not isinstance(v, dict)})
+                    _apply(getattr(cfg, section), raw[section], f"[{section}]")
+            top = {k: v for k, v in raw.items() if not isinstance(v, dict)}
+            _apply(cfg, top, "the top level")
+            for section in raw:
+                if isinstance(raw[section], dict) and section not in sections:
+                    log.warning("config: unknown section [%s] ignored", section)
             break
 
-    # Secrets belong in the environment, not in a committed config file.
+    # Secrets belong in the environment, not in a committed config file: the
+    # receiver's token on a host, the pusher's on the home node.
     env_token = os.environ.get("MESHRADIO_INGEST_TOKEN")
     if env_token:
         cfg.web.ingest_token = env_token
+    env_relay = os.environ.get("MESHRADIO_RELAY_TOKEN")
+    if env_relay:
+        cfg.relay.token = env_relay
 
-    if cfg.hardware_profile not in VALID_PROFILES:
-        raise ValueError(
-            f"hardware_profile must be one of {VALID_PROFILES}, got {cfg.hardware_profile!r}"
-        )
+    validate_config(cfg)
     return cfg

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import re
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -39,6 +40,44 @@ _TXN_OWNER: ContextVar[asyncio.Task | None] = ContextVar("meshradio_txn_owner", 
 # The delete CLI checks its argument against the same rule, so an id that could
 # never have been stored is rejected before it goes looking for one.
 VIDEO_ID_RE = re.compile(r"\A[A-Za-z0-9_-]{11}\Z")
+
+# Free text reaches the archive from the mesh, two analyzers, the relay, yt-dlp
+# and oEmbed, and from there it lands in every page, the feed, the WebSocket
+# and the log. It is bounded here, where rows are written, so that no source
+# has to be trusted to bound it: a title is a line, not a document, and a mesh
+# node name is short. Control characters go — one in a title took the feed
+# down once, and one in a sender name is a forged log line — and whitespace
+# collapses to single spaces. Durations get the same treatment because
+# ``inf`` and ``nan`` parse as floats, and either one in a shared row breaks
+# every page and state read that formats it (the relay used to be able to
+# plant one; the browser's own report was already refused at the route).
+MAX_TITLE = 256          # track and theme titles, artists
+MAX_SENDER = 64          # MeshCore node names are at most 32 characters
+MAX_DURATION_S = 24 * 3600
+
+# C0 and C1 controls (newlines and tabs included: these fields are one line),
+# plus the two non-characters XML forbids, which the feed had to strip itself.
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f￾￿]")
+
+
+def clean_text(value: Any, limit: int) -> str | None:
+    """``value`` as one bounded line of text, or None when nothing is left."""
+    if value is None:
+        return None
+    text = " ".join(_CONTROL.sub(" ", str(value)).split())
+    return text[:limit].strip() or None
+
+
+def clean_duration(value: Any) -> float | None:
+    """A track length in seconds, or None for anything that isn't one."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(seconds) or not 0 < seconds <= MAX_DURATION_S:
+        return None
+    return seconds
+
 
 MIGRATIONS: list[str] = [
     # v1 — initial schema
@@ -419,11 +458,41 @@ class Database:
     async def _migrate(self) -> None:
         cur = await self.db.execute("PRAGMA user_version")
         (version,) = await cur.fetchone()
-        for i, script in enumerate(MIGRATIONS[version:], start=version + 1):
-            # executescript runs each migration as its own statement group;
-            # the version bump follows only once the script has finished.
-            await self.db.executescript(script)
-            await self.db.execute(f"PRAGMA user_version={i}")
+        pending = MIGRATIONS[version:]
+        if not pending:
+            return
+        # Each script runs as one transaction with its version bump inside,
+        # so a failure part-way leaves the archive exactly as it was — not
+        # the half-migrated state that executescript's statement-by-statement
+        # autocommit left behind, with the version unbumped, for the next boot
+        # to run into again from the top.
+        #
+        # Foreign keys are off for the run and checked after each script, the
+        # SQLite documentation's own procedure for schema changes: the scripts
+        # that rebuild tracks drop a table plays references, which enforcement
+        # inside a transaction refuses, and a PRAGMA foreign_keys inside a
+        # transaction is a no-op in any case (the scripts' own only ever
+        # worked because they ran in autocommit).
+        await self.db.execute("PRAGMA foreign_keys=OFF")
+        try:
+            for i, script in enumerate(pending, start=version + 1):
+                try:
+                    await self.db.executescript(
+                        f"BEGIN;\n{script}\nPRAGMA user_version={i};\nCOMMIT;"
+                    )
+                except BaseException:
+                    if self.db.in_transaction:
+                        await self.db.execute("ROLLBACK")
+                    raise
+                cur = await self.db.execute("PRAGMA foreign_key_check")
+                orphans = await cur.fetchall()
+                if orphans:
+                    log.warning(
+                        "migration v%d left %d row(s) referencing a missing parent",
+                        i, len(orphans),
+                    )
+        finally:
+            await self.db.execute("PRAGMA foreign_keys=ON")
 
     # -- settings ----------------------------------------------------------
 
@@ -456,6 +525,10 @@ class Database:
         to reset a locked theme, so a later "Theme: …" message can't spawn a
         rival playlist. Auto-created "Untitled —" placeholders stay unlocked so
         the real theme can still adopt them (see ``adopt_theme``)."""
+        title = clean_text(title, MAX_TITLE)
+        if title is None:
+            raise ValueError("a theme needs a title")
+        set_by = clean_text(set_by, MAX_SENDER)
         # RETURNING (not lastrowid, which is unreliable after DO NOTHING)
         # distinguishes a fresh insert from a conflict no-op.
         async with self.transaction():
@@ -490,6 +563,10 @@ class Database:
         created_at because the relay's cursor is usually sitting on exactly
         this row — the push that skipped the placeholder — and an equal
         second would leave the adoption invisible to it."""
+        title = clean_text(title, MAX_TITLE)
+        if title is None:
+            raise ValueError("a theme needs a title")
+        set_by = clean_text(set_by, MAX_SENDER)
         async with self.transaction():
             row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
             assert row is not None
@@ -521,6 +598,9 @@ class Database:
 
         Raises ``sqlite3.IntegrityError`` if the date already has a theme with
         this title (UNIQUE(date, title)); callers report that as a no-op."""
+        title = clean_text(title, MAX_TITLE)
+        if title is None:
+            raise ValueError("a theme needs a title")
         async with self.transaction():
             row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
             assert row is not None
@@ -573,6 +653,11 @@ class Database:
         if not VIDEO_ID_RE.match(video_id):
             log.warning("rejecting track with malformed video_id %r", video_id)
             return None
+        # Bounded before the dedupe hash, so the same message hashes the same
+        # whichever path (and whatever trailing junk) it arrived with.
+        sender = clean_text(sender, MAX_SENDER) or ""
+        title = clean_text(title, MAX_TITLE)
+        artist = clean_text(artist, MAX_TITLE)
         # Check and insert under one transaction: the write lock means no other
         # ingest path can slip a repost in between them.
         async with self.transaction():
@@ -701,6 +786,12 @@ class Database:
         artist: str | None = None,
         duration: float | None = None,
     ) -> None:
+        """Fill or replace a track's metadata. A value that doesn't survive
+        cleaning (an empty or control-only title, a non-finite length) is
+        treated as not supplied, so it can never replace a good one."""
+        title = clean_text(title, MAX_TITLE)
+        artist = clean_text(artist, MAX_TITLE)
+        duration = clean_duration(duration)
         async with self.transaction():
             await self.db.execute(
                 "UPDATE tracks SET title=COALESCE(?,title), artist=COALESCE(?,artist), "
@@ -715,6 +806,9 @@ class Database:
         rather than ``update_track_metadata``: that report is unauthenticated
         and the row is shared, so it may complete a blank but never replace a
         value the archive already holds."""
+        seconds = clean_duration(seconds)
+        if seconds is None:
+            return False
         async with self.transaction():
             cur = await self.db.execute(
                 "UPDATE tracks SET duration=? WHERE id=? AND duration IS NULL",

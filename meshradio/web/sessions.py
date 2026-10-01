@@ -9,9 +9,12 @@ mid-song.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import re
+import secrets
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -26,13 +29,46 @@ log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "mr_sid"
 
-# Session ids are always server-issued secrets.token_hex(16). Anything else in
-# the cookie is forged — reject it before it becomes a dict key and a DB row.
-_SID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
+# The settings row holding the key cookies are signed with. In the archive
+# rather than in memory so a cookie outlives a redeploy the way the snapshot
+# it names does.
+SECRET_KEY = "web.session_secret"
+
+# A cookie is ``<sid>.<signature>``: the session id (secrets.token_hex(16),
+# the key in memory and on disk) and the first 32 hex digits of an HMAC over
+# it. A session costs a player, a task and a row on disk, and a cookie is the
+# only thing that opens one — so a value this server didn't sign (forged,
+# mangled, sprayed by a bot, or minted under an earlier key) is worth
+# nothing, not a session nothing could ever present again.
+_COOKIE_RE = re.compile(r"\A([0-9a-f]{32})\.([0-9a-f]{32})\Z")
 
 
-def valid_sid(sid: str | None) -> bool:
-    return bool(sid) and _SID_RE.match(sid) is not None
+def _sign(sid: str, secret: bytes) -> str:
+    return hmac.new(secret, sid.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def issue_cookie(secret: bytes) -> tuple[str, str]:
+    """A fresh session id and the cookie value that proves this server set it."""
+    sid = secrets.token_hex(16)
+    return sid, f"{sid}.{_sign(sid, secret)}"
+
+
+def verify_cookie(value: str | None, secret: bytes) -> str | None:
+    """The session id a cookie names, if this server issued it; else None."""
+    match = _COOKIE_RE.match(value or "")
+    if match is None:
+        return None
+    sid, signature = match.groups()
+    return sid if hmac.compare_digest(signature, _sign(sid, secret)) else None
+
+
+# Ceilings on open WebSockets. A visitor's own tabs are a handful; a bot with
+# one cookie could otherwise open sockets without end, each a pair of tasks
+# and one more target for every state fan-out. The communal (appliance)
+# registry is shared by everyone on the LAN, so it gets more room; the
+# process-wide cap (web/ws.py) is the backstop across all sessions.
+MAX_SOCKETS_PER_SESSION = 8
+MAX_SOCKETS_COMMUNAL = 64
 
 
 class SpeakerRegistry:
@@ -40,11 +76,19 @@ class SpeakerRegistry:
     plays audio. Everyone else is a silent remote. Newest connection wins;
     any tab can claim the role explicitly."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_clients: int = MAX_SOCKETS_COMMUNAL) -> None:
         self._conns: list = []
+        self.max_clients = max_clients
 
-    def join(self, conn) -> None:
+    def full(self) -> bool:
+        return len(self._conns) >= self.max_clients
+
+    def join(self, conn) -> bool:
+        """Add a page; False (and nothing changes) once the registry is full."""
+        if self.full():
+            return False
         self._conns.append(conn)
+        return True
 
     def leave(self, conn) -> None:
         if conn in self._conns:
@@ -68,7 +112,9 @@ class Session:
     and their own speaker election among their tabs."""
     player: PlayerService
     bus: EventBus
-    speakers: SpeakerRegistry = field(default_factory=SpeakerRegistry)
+    speakers: SpeakerRegistry = field(
+        default_factory=lambda: SpeakerRegistry(MAX_SOCKETS_PER_SESSION)
+    )
     last_seen: float = field(default_factory=time.monotonic)
 
 
@@ -80,11 +126,12 @@ class SessionManager:
     after a deploy) restores from there — reaping only evicts from memory.
 
     A session is opened by the page's WebSocket connecting, by a POST, or
-    by a returning cookie that has a snapshot on disk — never by a bare GET.
-    A crawler walking the sitemap, or a bot spraying fresh cookies, used to
-    mint a player, a task and a bus subscription per request and churn the
-    cap; now a visitor with no session gets ``preview()``, a cued player
-    that is thrown away with the response."""
+    by a returning cookie that has a snapshot on disk — never by a bare GET,
+    and only ever for a cookie this server signed (``verify_cookie``). A
+    crawler walking the sitemap, or a bot spraying requests with no cookie
+    or a forged one, used to mint a player, a task and a row on disk per
+    request and churn the cap; now a visitor with no session gets
+    ``preview()``, a cued player that is thrown away with the response."""
 
     # Hard ceiling on live in-memory sessions. Every session carries a
     # PlayerService plus a supervised task, so without a cap a bot spraying
@@ -103,9 +150,25 @@ class SessionManager:
         self._maintenance: asyncio.Task | None = None
         self._newest_day: str | None = None   # newest-day query cache
         self._rolled_day: str | None = None   # last day the watcher rolled tabs to
+        self._secret: bytes | None = None     # cookie signing key, see secret()
+        self._secret_lock = asyncio.Lock()
 
     def count(self) -> int:
         return len(self._sessions)
+
+    async def secret(self) -> bytes:
+        """The key session cookies are signed with: created on first use and
+        kept in the settings table, so the cookies visitors already hold keep
+        naming their sessions across a redeploy."""
+        if self._secret is None:
+            async with self._secret_lock:
+                if self._secret is None:
+                    stored = await self._db.get_setting(SECRET_KEY)
+                    if not stored:
+                        stored = secrets.token_hex(32)
+                        await self._db.set_setting(SECRET_KEY, stored)
+                    self._secret = bytes.fromhex(stored)
+        return self._secret
 
     async def get(self, sid: str) -> Session:
         """The visitor's session, opened (fresh or from its snapshot) if it

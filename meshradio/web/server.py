@@ -12,7 +12,6 @@ hosting) in sessions.SessionManager.
 from __future__ import annotations
 
 import logging
-import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,7 +33,14 @@ from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
 from .context import WebContext, absolute_url
-from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry, valid_sid
+from .sessions import (
+    MAX_SOCKETS_COMMUNAL,
+    SESSION_COOKIE,
+    SessionManager,
+    SpeakerRegistry,
+    issue_cookie,
+    verify_cookie,
+)
 
 log = logging.getLogger(__name__)
 
@@ -47,12 +53,33 @@ _HERE = Path(__file__).parent
 ALLOWED_SKINS = {"winamp", "itunes", "wmp", "aurora"}
 DEFAULT_SKIN = "winamp"
 
+# Responses that carry no page get no session cookie. Minting one is a token
+# and a header per request for nothing, and it hands a crawler fetching the
+# stylesheet, the relay pushing to /api/ingest and the host's health checker
+# a cookie they will present straight back. The sitemap and the feed are
+# documents, but documents nobody presses anything from.
+_NO_SESSION_PREFIXES = ("/static/", "/audio/")
+_NO_SESSION_PATHS = frozenset(
+    {"/healthz", "/robots.txt", "/sitemap.xml", "/feed.xml", "/api/ingest"}
+)
+
+
+def _sessionless(path: str) -> bool:
+    return path in _NO_SESSION_PATHS or path.startswith(_NO_SESSION_PREFIXES)
+
 
 def _mmss(value) -> str:
-    """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations."""
-    if value is None:
+    """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations.
+
+    Unknown includes anything that isn't a finite non-negative number: the
+    archive refuses those now, but a filter that can raise mid-render turns
+    one bad row into a 500 on every page that shows it."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError, OverflowError):
         return ""
-    value = int(value)
+    if value < 0:
+        return ""
     if value >= 3600:
         return f"{value // 3600}:{value % 3600 // 60:02d}:{value % 60:02d}"
     return f"{value // 60}:{value % 60:02d}"
@@ -291,12 +318,19 @@ def create_app(
     if sessions is not None:
         @app.middleware("http")
         async def ensure_session_cookie(request: Request, call_next):
-            sid = request.cookies.get(SESSION_COOKIE)
-            # A forged/garbage sid never becomes a session key — reissue.
-            fresh = not valid_sid(sid)
+            if _sessionless(request.url.path):
+                return await call_next(request)
+            # Only a cookie this server signed names a session; anything else
+            # (none, garbage, forged, an earlier key's) is reissued, and the
+            # request is marked as having presented nothing — a session may
+            # not be opened on it (see context.get_player).
+            secret = await sessions.secret()
+            sid = verify_cookie(request.cookies.get(SESSION_COOKIE), secret)
+            fresh = sid is None
             if fresh:
-                sid = secrets.token_hex(16)
+                sid, cookie = issue_cookie(secret)
             request.state.sid = sid
+            request.state.fresh_sid = fresh
             response = await call_next(request)
             if fresh:
                 # Secure when the visitor reached us over HTTPS (hosted embed
@@ -308,7 +342,7 @@ def create_app(
                     .split(",")[0].strip() == "https"
                 )
                 response.set_cookie(
-                    SESSION_COOKIE, sid,
+                    SESSION_COOKIE, cookie,
                     max_age=365 * 24 * 3600, httponly=True, samesite="lax",
                     secure=https,
                 )
@@ -323,7 +357,7 @@ def create_app(
         ingest_token=ingest_token,
         sessions=sessions,
         templates=templates,
-        speakers=SpeakerRegistry(),
+        speakers=SpeakerRegistry(MAX_SOCKETS_COMMUNAL),
         health=health,
     )
     app.state.ctx = ctx

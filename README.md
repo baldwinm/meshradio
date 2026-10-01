@@ -146,8 +146,14 @@ fields its messages carry, and the newest few posts as the poller reads them.
 Config precedence: `--config` flag → `$MESHRADIO_CONFIG` → `./meshradio.toml`
 → `/etc/meshradio/config.toml` → built-in defaults. Every key is optional;
 see [meshradio.example.toml](meshradio.example.toml) for the full annotated
-set. Secrets (the relay/ingest token) belong in the environment
-(`MESHRADIO_INGEST_TOKEN`), not the committed file.
+set. Secrets belong in the environment, not the committed file:
+`MESHRADIO_INGEST_TOKEN` for the receiver's token (`[web] ingest_token`) and
+`MESHRADIO_RELAY_TOKEN` for the pusher's (`[relay] token`); either overrides
+the file. Values are checked at startup — a number of the wrong type or out of
+range, an unknown backend, audio format or time zone — and a bad one stops
+the radio with a message naming every offending key, instead of a loop
+crashing (or, for a negative interval, spinning) under the supervisor. A key
+that isn't one the radio knows is logged and ignored.
 
 **Command line.** Run `meshradio` with no flags to start the radio; the rest
 are overrides and one-shot maintenance commands that act on the archive and
@@ -184,7 +190,10 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   and **✕ Remove** in the bar up top; **Clear queue** empties it (the current
   song keeps playing; radio mode switches off so it doesn't refill what you
   just cleared). A song already on the day's playlist won't be added twice, no
-  matter how many people repost it.
+  matter how many people repost it, and a song that's already playing or
+  queued isn't queued again however many times **+ queue** is pressed. A queue
+  tops out at 200 songs (`[player] max_queue`); at that point only a fresh
+  channel post still gets in, by displacing station filler.
 - **Live jukebox** — when a new song lands on the channel it auto-plays if
   the radio is idle, or joins the queue if something's already playing. A new
   arrival never interrupts the current song.
@@ -312,7 +321,9 @@ source stopped).
 
 The DB is also snapshotted on a rotation (`[backup]` config): a copy is taken
 before migrations on each boot and every few hours after, so a bad migration or
-corruption has a clean rollback point. Snapshots default to `<data_dir>/backups`;
+corruption has a clean rollback point. Each migration also runs as a single
+transaction, so one that fails part-way leaves the archive exactly as it was
+rather than half-converted. Snapshots default to `<data_dir>/backups`;
 for whole-disk loss, pair them with host-level disk snapshots (Render takes
 automatic daily ones on paid instances) or set `[backup].dir` to separate storage.
 To restore, stop the service and run `meshradio --list-backups` then
@@ -320,7 +331,14 @@ To restore, stop the service and run `meshradio --list-backups` then
 the current DB first, so a restore is itself reversible.
 
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
-for the unit and install/update commands.
+for the unit and install/update commands. The unit sandboxes the service: it
+runs yt-dlp, ffmpeg and deno against whatever the channel links to, so the
+file system is read-only to it apart from `/var/lib/meshradio` (where
+`data_dir` belongs), its cache directory and a private `/tmp`, with no
+capabilities, no setuid, no kernel knobs and a memory ceiling. The tokens
+go in `/etc/meshradio/env` (`MESHRADIO_RELAY_TOKEN`, and
+`MESHRADIO_INGEST_TOKEN` if the node is itself a receiver), mode 0600, which
+the unit reads as an `EnvironmentFile`.
 
 ### Hardening
 
@@ -332,6 +350,21 @@ able to drive it:
   different or `null` origin, or `Sec-Fetch-Site: cross-site`, gets a 403. Reads
   stay open, so an archive link pasted into a chat still works, and non-browser
   callers (curl, the relay) send no `Origin` and are unaffected.
+- **Sessions open only for a cookie this server signed.** On the public embed
+  host every browser gets its own session player, and a session costs a
+  player, a task and a row on disk — so the cookie that names one carries a
+  signature, and a press or a WebSocket that arrives without one (no cookie,
+  a forged one, a bot spraying requests) acts on a throwaway preview instead
+  of opening anything. A real browser always carries the cookie it got with
+  the page. The signing key lives in the archive, so cookies outlive a
+  redeploy the way the sessions they name do. Static files, audio, the health
+  check, the feed, the sitemap and the relay endpoint carry no cookie at all.
+- **Sockets are counted.** A session may hold 8 open WebSockets (a visitor's
+  tabs), the communal appliance player 64, and the process 1,024 in all; past
+  that a handshake is closed with "try again later" rather than accepted. A
+  page may claim the speaker role once a second, and a claim from the page
+  that already has it is ignored, since each claim re-sends state to every
+  open socket.
 - **Security headers and a Content-Security-Policy** go on every response: no
   inline script, YouTube's stills and player as the only third parties (plus the
   donation button on the embed host), `nosniff`, a strict referrer policy and
@@ -348,7 +381,12 @@ able to drive it:
   `Host` header.
 - **Inputs are bounded.** `/api/ingest` takes at most 16 MiB / 5,000 messages per
   push, an analyzer response past 64 MiB is abandoned, and seek or duration
-  values that are not finite (or run past a day) are rejected.
+  values that are not finite (or run past a day) are rejected. Free text is
+  bounded where rows are written, whatever fed it (mesh, analyzer, relay,
+  yt-dlp): titles and artists are one line of at most 256 characters, sender
+  names 64, with control characters dropped, and a track length that isn't a
+  finite number of seconds is simply not stored — so a relay's metadata can't
+  plant a value that breaks every page showing the day.
 
 ### Fixing a theme
 

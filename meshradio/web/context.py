@@ -27,7 +27,7 @@ from ..bus import EventBus
 from ..db import Database
 from ..media.player import PlayerService
 from .feed import FEED_DAYS
-from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry
+from .sessions import SessionManager, SpeakerRegistry
 
 # YouTube's anonymous "make a playlist from these ids" endpoint. Undocumented
 # but long-standing; gets unreliable past ~50 ids, so we cap.
@@ -170,6 +170,7 @@ class WebContext:
     templates: Jinja2Templates
     speakers: SpeakerRegistry      # communal speaker election
     health: dict
+    open_sockets: int = 0          # WebSockets live right now, across every session
     _cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
 
     # Whole-archive aggregates behind a short TTL. Every player-state push
@@ -227,14 +228,19 @@ class WebContext:
         by a GET (their page's WebSocket, or a returning cookie's snapshot,
         opened it). A GET from a visitor with no session gets a throwaway
         preview instead: the page still renders cued, but a crawler or a
-        cookie-spraying bot leaves no session behind."""
+        cookie-spraying bot leaves no session behind. So does a POST that
+        presented no cookie of ours (the middleware minted one on this very
+        request): a browser always carries the cookie it got with the page,
+        so that press is a script's, and it used to open — and persist — a
+        session per request."""
         if self.sessions is None:
             return self.player
-        sid = getattr(request.state, "sid", None) or request.cookies.get(SESSION_COOKIE) or ""
-        if request.method in ("GET", "HEAD"):
-            session = await self.sessions.lookup(sid) if sid else None
+        sid = getattr(request.state, "sid", None)
+        presented = sid is not None and not getattr(request.state, "fresh_sid", True)
+        if request.method in ("GET", "HEAD") or not presented:
+            session = await self.sessions.lookup(sid) if presented else None
             return session.player if session else await self.sessions.preview()
-        return (await self.sessions.get(sid or "anonymous")).player
+        return (await self.sessions.get(sid)).player
 
     def today(self) -> str:
         return datetime.now(self.player.tz).date().isoformat()
