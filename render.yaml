@@ -9,8 +9,15 @@ services:
     name: meshradio
     runtime: python
     plan: starter
-    buildCommand: pip install .
-    startCommand: meshradio --config meshradio.render.toml --port $PORT
+    # Render adds uv to the Python runtime when uv.lock is in the repo root.
+    # Install exactly the pinned set the test suite gated (--locked fails
+    # the build if the lock is stale) rather than resolving fresh from the
+    # index at build time, which is what `pip install .` did — so production
+    # could carry versions CI never ran. No dev group; no media extra (embed
+    # mode never downloads audio). The start command runs the venv the build
+    # made, so startup does no resolving at all.
+    buildCommand: uv sync --locked --no-dev
+    startCommand: .venv/bin/meshradio --config meshradio.render.toml --port $PORT
     # Deploy only after GitHub Actions is green; restart if /healthz stops
     # answering (dashboard equivalents: Settings -> Build & Deploy).
     autoDeployTrigger: checksPass
