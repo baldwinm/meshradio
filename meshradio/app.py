@@ -26,13 +26,14 @@ from .bus import EventBus
 from .config import load_config
 from .db import Database, VIDEO_ID_RE
 from .ingest import parse
-from .ingest.corescope import CoreScopePoller
+from .ingest.corescope import CoreScopePoller, probe
 from .ingest.mesh import MeshIngest
 from .ingest.relay import RelayPusher
 from .ingest.service import IngestService
 from .media.cacher import Cacher
 from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
 from .media.radio import RadioService
+from .net import http_client
 from .runtime import spawn
 from .system.power import StaticPowerMonitor, UpsPowerMonitor
 from .ui.panel import make_panel
@@ -236,6 +237,13 @@ def main() -> None:
     parser.add_argument("--track-date", metavar="YYYY-MM-DD",
                         help="which day --delete-track applies to (default: today, in the "
                              "configured player timezone)")
+    parser.add_argument("--probe-feed", metavar="FEED", nargs="?", const="all",
+                        choices=("all", "corescope", "comchan"),
+                        help="poll an analyzer feed once from this machine and exit, "
+                             "without writing to the archive: is it reachable, does it "
+                             "list the channel, and does its API still parse? "
+                             "'corescope', 'comchan', or both when the name is left off. "
+                             "Exits non-zero if a probed feed fails.")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -267,6 +275,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(_run_delete_track(config, args)))
     if args.track_date is not None:
         parser.error("--track-date only applies with --delete-track")
+    if args.probe_feed is not None:
+        raise SystemExit(asyncio.run(_run_probe_feed(config, args)))
 
     try:
         asyncio.run(run(config, demo=args.demo))
@@ -413,6 +423,68 @@ async def _run_delete_track(config, args) -> int:
         return 0
     finally:
         await db.close()
+
+
+async def _run_probe_feed(config, args) -> int:
+    """Handle --probe-feed: one live request per analyzer feed, then exit.
+
+    The poller logs a feed's failures but never shows what a working one is
+    answering, and the hosts aren't reachable from every network — so this
+    is the check to run from the machine that will do the polling. Reports
+    whether the host answered, whether it lists the channel, which fields
+    its messages carry, and the newest few posts as the poller would read
+    them. The archive is never opened."""
+    feeds = {"corescope": config.corescope, "comchan": config.comchan}
+    chosen = list(feeds) if args.probe_feed == "all" else [args.probe_feed]
+    failed = 0
+    for name in chosen:
+        feed = feeds[name]
+        if not feed.base_url:
+            print(f"{name}: no base_url configured — nothing to probe")
+            if args.probe_feed != "all":
+                failed += 1
+            continue
+        state = "" if feed.enabled else "  (enabled = false — the radio won't poll it)"
+        print(f"{name}: {feed.base_url}  {feed.channel}{state}")
+        async with http_client(base_url=feed.base_url) as client:
+            report = await probe(client, feed.channel, name=name)
+        for line in _format_probe(report):
+            print(f"  {line}")
+        if not report.ok:
+            failed += 1
+    return 1 if failed else 0
+
+
+def _format_probe(report) -> list[str]:
+    lines = []
+    if report.channels_error:
+        lines.append(f"channel listing failed: {report.channels_error}")
+    elif report.channels:
+        listed = ", ".join(report.channels[:12])
+        more = f", … ({len(report.channels)} in all)" if len(report.channels) > 12 else ""
+        lines.append(f"channels listed: {listed}{more}")
+        if report.channel_listed is False:
+            lines.append(f"{report.channel} is NOT among them — check [corescope]/[comchan] channel")
+    if not report.ok and not report.served:
+        lines.append(f"FAILED after {report.elapsed_s:.1f}s: {report.error}")
+        return lines
+    total = "unknown" if report.total is None else f"{report.total:,}"
+    lines.append(f"messages: {total} on the analyzer; newest page served {report.served}, "
+                 f"{report.parsed} parse")
+    if report.fields:
+        lines.append("fields: " + ", ".join(report.fields))
+    if report.newest:
+        lines.append("newest:")
+        for msg in report.newest:
+            text = msg["text"].replace("\n", " ")
+            if len(text) > 72:
+                text = text[:71] + "…"
+            lines.append(f"  {msg['first_seen'] or '(no first_seen)'}  {msg['sender']}: {text}")
+    if report.ok:
+        lines.append(f"ok ({report.elapsed_s:.1f}s)")
+    else:
+        lines.append(f"FAILED: {report.error}")
+    return lines
 
 
 def _drop_cache_file(config, track: dict) -> None:

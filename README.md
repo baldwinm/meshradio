@@ -110,7 +110,9 @@ time (`[cache] concurrency`), so a fresh backfill takes a few minutes. Run
 `uv sync --locked --group dev && uv run pytest`).
 
 Verify it's working: the log shows `corescope poll: N new tracks`, and the
-Archive page fills with real days and themes.
+Archive page fills with real days and themes. `meshradio --probe-feed` asks
+each analyzer for its newest page from the command line, without starting
+the radio or touching the archive, and prints what came back.
 
 **The backup feed.** A single analyzer instance is a single point of failure
 for ingestion, so a second CoreScope-compatible one
@@ -124,6 +126,22 @@ visible which analyzer covered a given day. `base_url` defaults to a real
 instance (unlike `[corescope]`, whose URL is set at provisioning) so existing
 appliance configs get the backup without being edited; turn it off with
 `enabled = false`.
+
+Both hosts run CoreScope (analyzer.comchan.net runs the
+[ComchanNet fork](https://github.com/ComchanNet/CoreScope), whose channel API
+is upstream's unchanged) and go through one adapter: the analyzer pages
+channel history 500 posts at a time, newest first, and the poller walks back
+from the end until it reaches what the last poll handled, so a first boot or
+a long outage recovers the whole channel rather than the newest hundred. To
+see what a feed is answering from the machine that will poll it:
+
+```
+meshradio --probe-feed            # both feeds
+meshradio --probe-feed comchan    # one of them; exits 1 if it fails
+```
+
+It reports whether the host answered, whether it lists the channel, which
+fields its messages carry, and the newest few posts as the poller reads them.
 
 Config precedence: `--config` flag → `$MESHRADIO_CONFIG` → `./meshradio.toml`
 → `/etc/meshradio/config.toml` → built-in defaults. Every key is optional;
@@ -145,6 +163,7 @@ exit:
 | `--list-backups`, `--restore-backup WHICH` | list / restore DB snapshots — see *Public hosting* |
 | `--set-theme TITLE`, `--theme-date DATE` | retitle a day — see [Fixing a theme](#fixing-a-theme) |
 | `--delete-track VIDEO`, `--track-date DATE` | drop a song from a day — see [Removing a song](#removing-a-song) |
+| `--probe-feed [corescope\|comchan]` | poll an analyzer feed once and show what it answered — see *The backup feed* |
 
 ---
 
@@ -427,7 +446,7 @@ integration pending.**
 | Link/theme parsing (matches real channel usage) | ✅ working, tested |
 | Ingest pipeline + mesh/CoreScope dedupe | ✅ working, tested |
 | CoreScope poller (Austin instance) | ✅ working, verified against live channel |
-| Backup analyzer feed (analyzer.comchan.net) | 🟡 wired + tested, needs a live poll to confirm the API shape |
+| Backup analyzer feed (analyzer.comchan.net) | ✅ working, tested — API shape confirmed from the analyzer's source, paged backfill, `--probe-feed` for a live check |
 | Cache-first downloader (yt-dlp) + self-healing retries | ✅ working, tested |
 | Player: live policy, queue, archive replay, quiet hours | ✅ working, tested |
 | Web player (browser audio, radio-station mode, EQ/analyzer) | ✅ working, tested |
