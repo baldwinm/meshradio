@@ -388,6 +388,7 @@ async def test_v10_rebuild_keeps_rows_and_indexes(tmp_path):
             "idx_tracks_ingested",
             "idx_tracks_theme_video",
             "idx_tracks_sender",
+            "idx_tracks_lru",
         }
         # The widened CHECK is what the migration is for.
         assert await db.add_track(**_track_args(theme_id=theme, source="comchan"))
@@ -456,3 +457,80 @@ async def test_free_text_and_lengths_are_bounded_at_the_row(db: Database):
     assert renamed["title"] == "water songs"
     with pytest.raises(ValueError):
         await db.rename_theme(theme["id"], "\x00")
+
+
+async def test_search_is_a_substring_match_from_the_index(db: Database):
+    """Search keeps LIKE's semantics — any substring, case-insensitive — but
+    answers from the trigram index (migration v13), which also folds Unicode
+    case the way LIKE never did. Under three characters the index can't see
+    the query, so LIKE still answers; and the triggers keep the index in step
+    with renames, metadata updates and deletions."""
+    theme = await db.create_theme("2026-07-06", "Café del Mar")
+    other = await db.create_theme("2026-07-07", "quiet day")
+    cafe = await db.add_track(**_track_args(
+        theme_id=theme["id"], video_id="aaaaaaaaaaa", title="Strange Overtones",
+        artist="David Byrne", sender="alice"))
+    rain = await db.add_track(**_track_args(
+        theme_id=other["id"], video_id="bbbbbbbbbbb", title="Purple Rain",
+        artist="Prince", sender='bob "the" builder'))
+    await db.add_track(**_track_args(
+        theme_id=None, video_id="ccccccccccc", title="Rain filler", source="radio",
+        sender="radio"))
+
+    async def ids(query):
+        return [t["id"] for t in await db.search_tracks(query)]
+
+    assert await ids("vert") == [cafe["id"]]            # inside a word
+    assert await ids("CAFÉ") == [cafe["id"]]            # theme title, case-folded
+    assert await ids("café") == [cafe["id"]]
+    assert await ids("ain") == [rain["id"]]             # radio filler never listed
+    assert await ids('"the"') == [rain["id"]]           # quotes are literal
+    assert await ids("ob") == [rain["id"]]              # two chars: the LIKE path
+    assert await ids("zzz") == []
+    await db.rename_theme(theme["id"], "Beach bar")
+    assert await ids("café") == [] and await ids("beach") == [cafe["id"]]
+    await db.update_track_metadata(cafe["id"], title="Glass, Concrete & Stone")
+    assert await ids("overtones") == [] and await ids("concrete") == [cafe["id"]]
+    await db.delete_track(rain["id"])
+    assert await ids("purple") == [] and await ids("ob") == []
+
+
+async def test_v13_backfills_last_played_and_indexes_the_text(tmp_path):
+    """An archive from before v13 gets last_played_at from its plays and a
+    search index over the rows it already holds."""
+    path = tmp_path / "v13.db"
+    conn = await _build_v9_db(path)
+    theme = await _add_theme_v3(conn, "2026-07-06", "Rain songs")
+    played = await _add_track_v5(conn, theme, "aaaaaaaaaaa", 1.0)
+    silent = await _add_track_v5(conn, theme, "bbbbbbbbbbb", 2.0)
+    await conn.execute(
+        "UPDATE tracks SET title='Purple Rain', cache_status='ready', cache_path='/c/a' "
+        "WHERE id=?", (played,))
+    await conn.execute(
+        "UPDATE tracks SET cache_status='ready', cache_path='/c/b' WHERE id=?", (silent,))
+    await conn.executemany(
+        "INSERT INTO plays(track_id,played_at) VALUES(?,?)",
+        [(played, "2026-07-06T20:00:00Z"), (played, "2026-07-07T20:00:00Z")])
+    await conn.commit()
+    await conn.close()
+    db = Database(path)
+    await db.connect()
+    try:
+        assert (await db.track_by_id(played))["last_played_at"] == "2026-07-07T20:00:00Z"
+        assert (await db.track_by_id(silent))["last_played_at"] is None
+        assert [t["id"] for t in await db.cached_tracks_lru()] == [silent, played]
+        assert [t["id"] for t in await db.search_tracks("purple")] == [played]
+        assert {t["id"] for t in await db.search_tracks("rain")} == {played, silent}
+    finally:
+        await db.close()
+
+
+async def test_record_play_stamps_the_track(db: Database):
+    theme = await db.create_theme("2026-07-06", "t")
+    a = await db.add_track(**_track_args(theme_id=theme["id"]))
+    assert a["last_played_at"] is None
+    await db.record_play(a["id"], "speaker")
+    stamped = (await db.track_by_id(a["id"]))["last_played_at"]
+    assert stamped is not None
+    (play,) = await db._fetchall("SELECT played_at FROM plays WHERE track_id=?", (a["id"],))
+    assert play["played_at"] == stamped

@@ -236,3 +236,33 @@ async def test_search_says_when_the_list_is_cut_off(db, bus):
         body = (await client.get("/search", params={"q": "Song"})).text
     assert "first 100 matches" in body
     assert body.count("+ queue") <= 100
+
+
+async def test_a_landing_song_drops_the_cached_aggregates(db, bus):
+    """The caches go on the event that changes the archive, not on a clock:
+    the render after a song lands sees it, and nothing is recomputed between
+    songs however hard a crawler or a feed reader polls."""
+    from meshradio.bus import TRACK_DISCOVERED
+
+    app = page_app(db, bus)
+    ctx = app.state.ctx
+    await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
+    calls = 0
+    original = db.archive_days
+
+    async def counted():
+        nonlocal calls
+        calls += 1
+        return await original()
+
+    db.archive_days = counted
+    try:
+        for _ in range(3):
+            await ctx.archive_days()
+        assert calls == 1
+        await seed_day(db, "2026-08-02", "bbbbbbbbbbb")        # no event: a direct write
+        assert len(await ctx.archive_days()) == 1 and calls == 1   # still served from memory
+        bus.publish(TRACK_DISCOVERED, {"track": {"id": 2}})
+        assert len(await ctx.archive_days()) == 2 and calls == 2
+    finally:
+        db.archive_days = original

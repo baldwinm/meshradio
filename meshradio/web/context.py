@@ -173,15 +173,24 @@ class WebContext:
     open_sockets: int = 0          # WebSockets live right now, across every session
     _cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
 
-    # Whole-archive aggregates behind a short TTL. Every player-state push
-    # makes each open page re-fetch the now-playing and day-nav partials, and
-    # both rebuild day_context — so archive_days(), which aggregates the whole
-    # themes×tracks join, ran twice per event per tab; the stats and theme
-    # pages (both in the sitemap) recomputed five and one full scans per hit.
-    # None of it changes until a song lands, so a few seconds of staleness
-    # costs nothing (at worst the day arrows lag one event) and takes the
-    # queries off the hot path entirely.
-    CACHE_TTL_S = 5.0
+    # Whole-archive aggregates, kept until the archive changes. Every
+    # player-state push makes each open page re-fetch the now-playing and
+    # day-nav partials, and both rebuild day_context — so archive_days(),
+    # which aggregates the whole themes×tracks join, ran twice per event per
+    # tab; the stats and theme pages (both in the sitemap) recomputed five
+    # and one full scans per hit. None of it changes until a song or a theme
+    # lands, and those arrive as bus events, so the cache is dropped on the
+    # event (``invalidate``, wired up in create_app) and otherwise kept: no
+    # staleness, and nothing recomputed between songs however hard a crawler
+    # or a feed reader polls. The TTL is only the safety net for a change
+    # that sends no event — the operator CLI editing the archive from another
+    # process, a play landing in the stats — and bounds how long such a one
+    # can go unseen.
+    CACHE_TTL_S = 60.0
+
+    def invalidate(self, _topic: str | None = None, _payload: Any = None) -> None:
+        """Forget every cached aggregate; shaped as a bus listener."""
+        self._cache.clear()
 
     async def _cached(self, key: str, load: Callable[[], Awaitable[Any]]) -> Any:
         now = monotonic()

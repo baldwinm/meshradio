@@ -48,3 +48,28 @@ async def test_slow_subscriber_drops_oldest(bus: EventBus):
         bus.publish("t", {"n": n})
     assert (await sub.get())[1] == {"n": 1}
     assert (await sub.get())[1] == {"n": 2}
+
+
+async def test_listen_runs_on_the_publisher_stack(bus: EventBus):
+    """A listener is called before publish returns — no task, no queue — and
+    only for its topics, until it is stopped."""
+    seen = []
+    stop = bus.listen(lambda topic, payload: seen.append((topic, payload)), "wanted")
+    bus.publish("unwanted", {"n": 1})
+    bus.publish("wanted", {"n": 2})
+    assert seen == [("wanted", {"n": 2})]          # already, with nothing awaited
+    stop()
+    bus.publish("wanted", {"n": 3})
+    assert seen == [("wanted", {"n": 2})]
+
+
+async def test_a_failing_listener_never_reaches_the_publisher(bus: EventBus, caplog):
+    def boom(topic, payload):
+        raise RuntimeError("listener bug")
+
+    bus.listen(boom)
+    sub = bus.subscribe("a.topic")
+    bus.publish("a.topic", {"n": 1})               # must not raise here
+    _, payload = await asyncio.wait_for(sub.get(), 1)
+    assert payload == {"n": 1}                     # subscribers are still served
+    assert "listener on a.topic failed" in caplog.text

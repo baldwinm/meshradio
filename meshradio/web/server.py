@@ -27,7 +27,14 @@ from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 
-from ..bus import EventBus, INGEST_STATUS
+from ..bus import (
+    EventBus,
+    INGEST_STATUS,
+    THEME_CREATED,
+    TRACK_DISCOVERED,
+    TRACK_FAILED,
+    TRACK_READY,
+)
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
@@ -292,8 +299,10 @@ def create_app(
     # HTML, CSS and JS are mostly repeated markup — the archive pages compress
     # better than 10:1. Audio is already compressed, and gzipping it would just
     # burn CPU on the Pi, but it's over the 500-byte floor either way, so the
-    # /audio route sets its own no-op encoding (see routes_ingest).
-    app.add_middleware(GZipMiddleware, minimum_size=500)
+    # /audio route sets its own no-op encoding (see routes_ingest). Level 6
+    # rather than Starlette's default 9: the same size within a percent at
+    # about half the CPU, and every partial re-render goes through here.
+    app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
     # base.html builds every page's link-preview tags from the live request.
@@ -363,6 +372,10 @@ def create_app(
     app.state.ctx = ctx
     app.state.sessions = sessions
     app.state.speakers = ctx.speakers
+    # The whole-archive aggregates change exactly when a song or a theme
+    # lands; drop them then, on the publisher's own stack, rather than on a
+    # clock (see WebContext.CACHE_TTL_S).
+    bus.listen(ctx.invalidate, TRACK_DISCOVERED, TRACK_READY, TRACK_FAILED, THEME_CREATED)
     # See context.absolute_url: the one place the site names itself.
     app.state.public_url = public_url.rstrip("/")
 
