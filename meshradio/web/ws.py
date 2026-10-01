@@ -10,7 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from ..bus import OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
 from ..media.player import PlayerService
 from .context import ctx_of
-from .sessions import SESSION_COOKIE, SpeakerRegistry, valid_sid
+from .sessions import SESSION_COOKIE, SpeakerRegistry, verify_cookie
 
 log = logging.getLogger(__name__)
 
@@ -50,11 +50,11 @@ async def ws(websocket: WebSocket):
     if ctx.sessions is not None:
         # Per-visitor session: this browser's own player/bus/speakers. The
         # page that opens this socket always carries the cookie (the HTTP
-        # middleware issued it with the page), so a handshake without a
-        # valid one is not our page. Minting a sid here would open a session
+        # middleware issued it with the page), so a handshake without one we
+        # signed is not our page. Minting a sid here would open a session
         # nothing could ever present again — one per bot connection.
-        sid = websocket.cookies.get(SESSION_COOKIE)
-        if not valid_sid(sid):
+        sid = verify_cookie(websocket.cookies.get(SESSION_COOKIE), await ctx.sessions.secret())
+        if sid is None:
             # Close before accept: uvicorn turns that into a 403 (see
             # server.OriginGuard._deny_websocket for why not a denial body).
             await websocket.close(code=1008)

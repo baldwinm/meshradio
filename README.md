@@ -332,6 +332,14 @@ able to drive it:
   different or `null` origin, or `Sec-Fetch-Site: cross-site`, gets a 403. Reads
   stay open, so an archive link pasted into a chat still works, and non-browser
   callers (curl, the relay) send no `Origin` and are unaffected.
+- **Sessions open only for a cookie this server signed.** On the public embed
+  host every browser gets its own session player, and a session costs a
+  player, a task and a row on disk — so the cookie that names one carries a
+  signature, and a press or a WebSocket that arrives without one (no cookie,
+  a forged one, a bot spraying requests) acts on a throwaway preview instead
+  of opening anything. A real browser always carries the cookie it got with
+  the page. The signing key lives in the archive, so cookies outlive a
+  redeploy the way the sessions they name do.
 - **Security headers and a Content-Security-Policy** go on every response: no
   inline script, YouTube's stills and player as the only third parties (plus the
   donation button on the embed host), `nosniff`, a strict referrer policy and

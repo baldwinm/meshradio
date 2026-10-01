@@ -12,7 +12,6 @@ hosting) in sessions.SessionManager.
 from __future__ import annotations
 
 import logging
-import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,7 +33,7 @@ from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
 from .context import WebContext, absolute_url
-from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry, valid_sid
+from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry, issue_cookie, verify_cookie
 
 log = logging.getLogger(__name__)
 
@@ -298,12 +297,17 @@ def create_app(
     if sessions is not None:
         @app.middleware("http")
         async def ensure_session_cookie(request: Request, call_next):
-            sid = request.cookies.get(SESSION_COOKIE)
-            # A forged/garbage sid never becomes a session key — reissue.
-            fresh = not valid_sid(sid)
+            # Only a cookie this server signed names a session; anything else
+            # (none, garbage, forged, an earlier key's) is reissued, and the
+            # request is marked as having presented nothing — a session may
+            # not be opened on it (see context.get_player).
+            secret = await sessions.secret()
+            sid = verify_cookie(request.cookies.get(SESSION_COOKIE), secret)
+            fresh = sid is None
             if fresh:
-                sid = secrets.token_hex(16)
+                sid, cookie = issue_cookie(secret)
             request.state.sid = sid
+            request.state.fresh_sid = fresh
             response = await call_next(request)
             if fresh:
                 # Secure when the visitor reached us over HTTPS (hosted embed
@@ -315,7 +319,7 @@ def create_app(
                     .split(",")[0].strip() == "https"
                 )
                 response.set_cookie(
-                    SESSION_COOKIE, sid,
+                    SESSION_COOKIE, cookie,
                     max_age=365 * 24 * 3600, httponly=True, samesite="lax",
                     secure=https,
                 )

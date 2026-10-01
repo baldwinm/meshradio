@@ -3,6 +3,7 @@ player, so visitors can't pause, skip, or steal audio from each other."""
 
 import asyncio
 import time
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -42,10 +43,23 @@ def embed_app(db, bus):
     )
 
 
-def client_for(app):
-    return httpx.AsyncClient(
+@asynccontextmanager
+async def client_for(app, visited=True):
+    """A browser. By default it has loaded a page before the test starts
+    pressing things — that is where a real one gets its session cookie, and
+    a press that arrives without one opens nothing (see
+    ``WebContext.get_player``). ``visited=False`` is the first visit itself."""
+    async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
-    )
+    ) as client:
+        if visited:
+            await client.get("/")
+        yield client
+
+
+def sid_of(client) -> str:
+    """The session key a client's cookie names: the id without its signature."""
+    return client.cookies["mr_sid"].split(".")[0]
 
 
 async def test_visitors_get_independent_players(db, bus):
@@ -98,7 +112,7 @@ async def test_returning_session_moves_to_a_newer_day(db, bus):
     # A newer day arrives; "redeploy" rebuilds the session from its snapshot.
     await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
     app2 = embed_app(db, bus)
-    async with client_for(app2) as client:
+    async with client_for(app2, visited=False) as client:   # the returning visitor's first request
         client.cookies.set("mr_sid", sid)
         state = (await client.get("/api/state")).json()
         assert state["day"] == "2026-07-07"                 # re-cued to newest
@@ -119,7 +133,7 @@ async def test_returning_session_advances_even_if_snapshot_was_playing(db, bus):
 
     await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
     app2 = embed_app(db, bus)
-    async with client_for(app2) as client:
+    async with client_for(app2, visited=False) as client:   # the returning visitor's first request
         client.cookies.set("mr_sid", sid)
         state = (await client.get("/api/state")).json()
         assert state["day"] == "2026-07-07"                 # rolled forward
@@ -166,7 +180,7 @@ async def test_new_day_song_rolls_idle_tabs_forward(db, bus):
     async with client_for(app) as client:
         await client.post("/api/volume/70")       # a press: the session is live now
         assert (await client.get("/api/state")).json()["day"] == "2026-07-06"
-        sid = client.cookies["mr_sid"]
+        sid = sid_of(client)
         await asyncio.sleep(0.05)   # let the day-watcher subscribe to the bus
 
         track = await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
@@ -189,7 +203,7 @@ async def test_playing_session_not_moved_by_new_day_song(db, bus):
     app = embed_app(db, bus)
     async with client_for(app) as client:
         await client.post("/api/play-day/2026-07-06")     # warm + playing
-        sid = client.cookies["mr_sid"]
+        sid = sid_of(client)
         await asyncio.sleep(0.05)
         track = await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
         bus.publish(TRACK_READY, {"track": track})
@@ -230,7 +244,7 @@ async def test_home_export_is_persistent_and_full_day(db, bus):
 
 async def test_session_cookie_issued_once(db, bus):
     app = embed_app(db, bus)
-    async with client_for(app) as client:
+    async with client_for(app, visited=False) as client:
         first = await client.get("/api/state")
         assert "mr_sid" in first.cookies
         sid = first.cookies["mr_sid"]
@@ -260,7 +274,7 @@ async def test_session_cap_evicts_stalest(db, bus):
     app.state.sessions.MAX_SESSIONS = 2
     async with client_for(app) as c1, client_for(app) as c2, client_for(app) as c3:
         await c1.post("/api/volume/70")                # a press opens each session
-        sid1 = c1.cookies["mr_sid"]
+        sid1 = sid_of(c1)
         await c2.post("/api/volume/70")
         await c3.post("/api/volume/70")                # cap hit: c1 evicted
         assert app.state.sessions.count() == 2
@@ -296,7 +310,7 @@ async def test_session_survives_process_restart(db, bus):
 
     # "Redeploy": a brand-new app + manager over the same DB and cookie.
     app2 = embed_app(db, bus)
-    async with client_for(app2) as client:
+    async with client_for(app2, visited=False) as client:   # the returning visitor's first request
         client.cookies.set("mr_sid", sid)
         state = (await client.get("/api/state")).json()
         assert state["status"] == "playing"
@@ -317,7 +331,7 @@ async def test_restore_skips_vanished_tracks(db, bus):
     await db.set_cache_status(track["id"], "failed")   # pruned/broken meanwhile
 
     app2 = embed_app(db, bus)
-    async with client_for(app2) as client:
+    async with client_for(app2, visited=False) as client:   # the returning visitor's first request
         client.cookies.set("mr_sid", sid)
         state = (await client.get("/api/state")).json()
         assert state["status"] == "idle"               # graceful, not broken
@@ -353,7 +367,7 @@ async def test_page_views_open_no_session(db, bus):
             assert state["status"] == "paused"
             assert state["current"]["video_id"] == "aaaaaaaaaaa"
         assert app.state.sessions.count() == 0
-        assert await db.load_web_session(client.cookies["mr_sid"]) is None
+        assert await db.load_web_session(sid_of(client)) is None
 
 
 async def test_a_press_opens_the_session(db, bus):
@@ -410,7 +424,7 @@ async def test_websocket_opens_the_session(db, bus):
     """The page's socket is what turns a visitor into a session."""
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)
     app = embed_app(db, bus)
-    async with client_for(app) as client:
+    async with client_for(app, visited=False) as client:
         sid = (await client.get("/")).cookies["mr_sid"]
     assert app.state.sessions.count() == 0
     sent = await _websocket(app, cookie=sid)
@@ -423,8 +437,56 @@ async def test_websocket_without_a_cookie_is_refused(db, bus):
     """No cookie means not our page; minting one here would open a session
     nothing could ever present again — one per bot connection."""
     app = embed_app(db, bus)
-    for cookie in (None, "forged", "x" * 32):
+    # ...nor a well-formed value this server didn't sign.
+    unsigned = f"{'a' * 32}.{'b' * 32}"
+    for cookie in (None, "forged", "x" * 32, "a" * 32, unsigned):
         sent = await _websocket(app, cookie=cookie)
         # Closed before accept, which the server reports as a 403 handshake.
         assert sent == [{"type": "websocket.close", "code": 1008, "reason": ""}]
     assert app.state.sessions.count() == 0
+
+
+async def test_a_press_without_our_cookie_opens_nothing(db, bus):
+    """A browser always carries the cookie it got with the page, so a POST
+    with none — or with one this server didn't sign — is a script's. Each
+    such press used to open a session and persist it: a player, a task and
+    a row on disk per request, with the eviction churn once the cap hit."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    sessions = app.state.sessions
+    for _ in range(5):
+        async with client_for(app, visited=False) as bot:        # no cookie at all
+            resp = await bot.post("/api/pause")
+            assert resp.status_code == 200 and "mr_sid" in resp.cookies
+    for forged in ("f" * 32, f"{'a' * 32}.{'b' * 32}", "x" * 4096):
+        async with client_for(app, visited=False) as bot:
+            bot.cookies.set("mr_sid", forged)
+            resp = await bot.post("/api/pause")
+            assert resp.status_code == 200 and "mr_sid" in resp.cookies   # reissued
+    assert sessions.count() == 0
+    await sessions.flush()
+    row = await db._fetchone("SELECT COUNT(*) AS n FROM web_sessions")
+    assert row["n"] == 0
+    # The press after the page load — a cookie we signed — is the one that opens.
+    async with client_for(app) as browser:
+        await browser.post("/api/pause")
+        assert sessions.count() == 1
+
+
+async def test_the_signing_key_outlives_a_redeploy(db, bus):
+    """The key lives in the archive with the snapshots, so a cookie issued
+    before a redeploy still names its session after one."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    first = embed_app(db, bus)
+    async with client_for(first) as client:
+        await client.post("/api/play-day/2026-07-06")
+        cookie = client.cookies["mr_sid"]
+    await first.state.sessions.flush()
+    second = embed_app(db, bus)                      # fresh process, same DB
+    assert await second.state.sessions.secret() == await first.state.sessions.secret()
+    async with client_for(second, visited=False) as client:
+        client.cookies.set("mr_sid", cookie)
+        resp = await client.get("/api/state")
+        assert "mr_sid" not in resp.cookies          # recognised, not reissued
+        assert resp.json()["current"]["video_id"] == "aaaaaaaaaaa"
+        assert second.state.sessions.count() == 1
