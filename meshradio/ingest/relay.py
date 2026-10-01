@@ -84,7 +84,7 @@ class RelayPusher(Service):
         """Push new messages; an empty batch still POSTs as a heartbeat so a
         wiped receiver (ephemeral hosting resets its disk on deploys and
         spin-downs) is detected by track-count mismatch and re-backfilled."""
-        cursor = await self.db.get_setting(CURSOR_KEY, "")
+        cursor = await self.db.get_setting(CURSOR_KEY, "") or ""
         messages, newest = await self.collect(cursor)
         resp = await client.post(
             self.config.push_url.rstrip("/") + "/api/ingest",

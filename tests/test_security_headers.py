@@ -34,7 +34,8 @@ async def test_every_response_carries_the_headers(db, bus):
             assert h["referrer-policy"] == "strict-origin-when-cross-origin", path
             assert h["x-frame-options"] == "SAMEORIGIN", path
             assert h["cross-origin-opener-policy"] == "same-origin", path
-            assert "camera=()" in h["permissions-policy"] and "microphone=()" in h["permissions-policy"]
+            permissions = h["permissions-policy"]
+            assert "camera=()" in permissions and "microphone=()" in permissions
             assert "frame-ancestors 'self'" in h["content-security-policy"], path
             assert "content-security-policy-report-only" not in h
             assert "strict-transport-security" not in h       # no https site named

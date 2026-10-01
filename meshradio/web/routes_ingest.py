@@ -119,7 +119,7 @@ def json_body(raw: bytes):
     try:
         return json.loads(raw)
     except ValueError:
-        raise HTTPException(400, "invalid JSON")
+        raise HTTPException(400, "invalid JSON") from None
 
 
 @router.get("/healthz")

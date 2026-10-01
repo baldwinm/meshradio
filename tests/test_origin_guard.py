@@ -53,12 +53,14 @@ async def test_cross_site_state_changes_are_refused(db, bus):
         assert app.state.ctx.audio_router.current() == "speaker"
 
         # A browser on our own page sends a matching Origin (client host is "test").
-        assert (await client.post("/api/volume/55", headers={"origin": "http://test"})).status_code == 200
+        same = await client.post("/api/volume/55", headers={"origin": "http://test"})
+        assert same.status_code == 200
         assert player.volume == 55
         # No Origin at all: curl, the relay pusher, this test suite.
         assert (await client.post("/api/volume/56")).status_code == 200
         # Sec-Fetch-Site says cross-site even when Origin is missing.
-        assert (await client.post("/api/volume/57", headers={"sec-fetch-site": "cross-site"})).status_code == 403
+        cross = await client.post("/api/volume/57", headers={"sec-fetch-site": "cross-site"})
+        assert cross.status_code == 403
         assert player.volume == 56
 
 
@@ -83,9 +85,11 @@ def test_cross_site_websocket_is_refused(tmp_path):
     """Closed before it is accepted — which uvicorn reports to the browser
     as a 403 on the handshake."""
     client = TestClient(_communal_app(tmp_path))
-    with pytest.raises(WebSocketDisconnect) as refused:
-        with client.websocket_connect("/ws", headers=EVIL):
-            pass
+    with (
+        pytest.raises(WebSocketDisconnect) as refused,
+        client.websocket_connect("/ws", headers=EVIL),
+    ):
+        pass
     assert refused.value.code == 1008                          # policy violation
 
 
@@ -107,7 +111,8 @@ async def test_allowed_hosts_pin_the_instance(db, bus):
         assert (await client.get("/api/state", headers={"host": "evil.example"})).status_code == 400
     # Unset (the default): any host, as a LAN box reached by IP needs.
     async with client_for(page_app(db, bus)) as client:
-        assert (await client.get("/api/state", headers={"host": "192.168.1.20:8080"})).status_code == 200
+        by_ip = await client.get("/api/state", headers={"host": "192.168.1.20:8080"})
+        assert by_ip.status_code == 200
 
 
 async def test_public_url_pins_canonical_links(db, bus):

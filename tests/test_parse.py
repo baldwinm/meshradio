@@ -7,32 +7,32 @@ VID = "dQw4w9WgXcQ"
 
 def test_youtu_be():
     links = extract_links(f"check this out https://youtu.be/{VID}")
-    assert [l.video_id for l in links] == [VID]
+    assert [link.video_id for link in links] == [VID]
 
 
 def test_watch_url():
     links = extract_links(f"https://www.youtube.com/watch?v={VID}")
-    assert [l.video_id for l in links] == [VID]
+    assert [link.video_id for link in links] == [VID]
 
 
 def test_music_youtube():
     links = extract_links(f"https://music.youtube.com/watch?v={VID}&si=abc123")
-    assert [l.video_id for l in links] == [VID]
+    assert [link.video_id for link in links] == [VID]
 
 
 def test_v_not_first_param():
     links = extract_links(f"https://www.youtube.com/watch?list=PLxyz&v={VID}")
-    assert [l.video_id for l in links] == [VID]
+    assert [link.video_id for link in links] == [VID]
 
 
 def test_shorts():
     links = extract_links(f"https://youtube.com/shorts/{VID}")
-    assert [l.video_id for l in links] == [VID]
+    assert [link.video_id for link in links] == [VID]
 
 
 def test_no_scheme():
     links = extract_links(f"youtu.be/{VID} is a banger")
-    assert [l.video_id for l in links] == [VID]
+    assert [link.video_id for link in links] == [VID]
 
 
 def test_multiple_links_deduped():
@@ -45,7 +45,7 @@ def test_two_distinct_links():
     other = "abcdefghijk"
     text = f"https://youtu.be/{VID}\nhttps://youtu.be/{other}"
     links = extract_links(text)
-    assert [l.video_id for l in links] == [VID, other]
+    assert [link.video_id for link in links] == [VID, other]
 
 
 def test_canonical_url():

@@ -13,11 +13,12 @@ import logging
 import math
 import random
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
-from ..bus import EventBus, PLAYER_STATE, TRACK_READY
+from ..bus import PLAYER_STATE, TRACK_READY, EventBus
 from ..config import PlayerConfig
 from ..db import Database
 from ..runtime import Service, spawn
@@ -40,11 +41,28 @@ def _duration(track: dict[str, Any] | None) -> float | None:
     The archive refuses non-finite and absurd lengths at the row, so this is
     the belt to that brace: an old row or a stale snapshot must not be able
     to leave the clock unserialisable or a page unrenderable."""
+    value = (track or {}).get("duration")
+    if value is None:
+        return None
     try:
-        seconds = float((track or {}).get("duration"))
+        seconds = float(value)
     except (TypeError, ValueError, OverflowError):
         return None
     return seconds if math.isfinite(seconds) and seconds > 0 else None
+
+
+class Backend(Protocol):
+    """What the player needs from a playback engine. ``on_end`` is set by the
+    service and called by the engine when a track finishes."""
+
+    on_end: Callable[[], None] | None
+
+    async def play(self, path: str, duration: float | None) -> None: ...
+    async def stop(self) -> None: ...
+    async def pause(self) -> None: ...
+    async def resume(self) -> None: ...
+    async def set_volume(self, volume: int) -> None: ...
+    async def seek(self, seconds: float) -> None: ...
 
 
 class NullBackend:
@@ -194,7 +212,7 @@ class PlayerService(Service):
         config: PlayerConfig,
         db: Database,
         bus: EventBus,
-        backend: NullBackend | WebBackend | MpvBackend,
+        backend: Backend,
         output_getter: Callable[[], str] = lambda: "speaker",
         events_out: EventBus | None = None,
     ):
@@ -668,8 +686,9 @@ class PlayerService(Service):
         since the save are skipped; a playing position advances by the wall
         time since the save, clamped inside the track."""
         self.volume = int(snap.get("volume", self.volume))
-        self.mode = snap.get("mode") if snap.get("mode") in ("live", "archive") else "live"
-        self.day = snap.get("day")
+        self.mode = "archive" if snap.get("mode") == "archive" else "live"
+        day = snap.get("day")
+        self.day = day if isinstance(day, str) else None
         # A station survives the restart that dropped the session; the queue's
         # per-entry filler flags don't (only track ids are stored), which at
         # worst costs a restored session one mis-ordered live post.
@@ -678,7 +697,8 @@ class PlayerService(Service):
         current_id = snap.get("current_track_id")
         # One query for the lot: a restore is a returning visitor's first
         # request, and a long day is a couple of hundred ids.
-        rows = await self.db.tracks_by_ids(queue_ids + ([current_id] if current_id is not None else []))
+        wanted = queue_ids + ([current_id] if current_id is not None else [])
+        rows = await self.db.tracks_by_ids(wanted)
         current = rows.get(current_id) if current_id is not None else None
         if current and not self._is_playable(current):
             current = None

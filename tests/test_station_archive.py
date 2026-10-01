@@ -5,14 +5,13 @@ pure local SQL, so it's the one that keeps the public embed host from dropping
 into silence when a day's playlist ends.
 """
 
-import asyncio
 import time
 
 from meshradio.config import PlayerConfig
 from meshradio.db import Database
-from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
+from meshradio.media.player import NullBackend, PlayerService
 
-from .test_player import make_embed_player, make_pending_track, make_ready_track
+from .test_player import make_embed_player, make_ready_track
 
 
 async def _channel_day(db: Database, date: str, video_ids: list[str]) -> None:

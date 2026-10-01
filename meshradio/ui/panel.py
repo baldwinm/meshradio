@@ -16,7 +16,7 @@ import asyncio
 import logging
 from typing import Any
 
-from ..bus import EventBus, OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE
+from ..bus import OUTPUT_CHANGED, PLAYER_STATE, POWER_STATE, EventBus
 from ..runtime import Service
 
 log = logging.getLogger(__name__)

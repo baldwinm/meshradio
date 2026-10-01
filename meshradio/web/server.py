@@ -15,9 +15,9 @@ import hashlib
 import logging
 import re
 import time
+from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable, Sequence
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
@@ -30,12 +30,12 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 
 from ..bus import (
-    EventBus,
     INGEST_STATUS,
     THEME_CREATED,
     TRACK_DISCOVERED,
     TRACK_FAILED,
     TRACK_READY,
+    EventBus,
 )
 from ..db import Database
 from ..media.player import PlayerService

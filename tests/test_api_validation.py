@@ -8,8 +8,6 @@ that queued the song. Both are refused at the route now."""
 import math
 import time
 
-import pytest
-
 from meshradio.audio.routing import make_router
 from meshradio.bus import EventBus
 from meshradio.config import PlayerConfig

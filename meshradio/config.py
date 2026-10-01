@@ -83,7 +83,8 @@ class CacheConfig:
     ffmpeg_location: str = ""      # dir/exe passed to yt-dlp when ffmpeg isn't on PATH
     concurrency: int = 2           # downloads (yt-dlp processes) or oEmbed lookups in flight
                                    # at once; one stuck fetch no longer stalls the backlog
-    ytdlp_extra_args: list = field(default_factory=list)  # e.g. ["--js-runtimes", "deno:C:/path/deno.exe"]
+    # e.g. ["--js-runtimes", "deno:C:/path/deno.exe"] when deno isn't on PATH
+    ytdlp_extra_args: list = field(default_factory=list)
 
 
 @dataclass
@@ -275,7 +276,8 @@ def validate_config(cfg: Config) -> None:
             f"{key('player', 'backend')} must be one of {VALID_BACKENDS}, "
             f"got {cfg.player.backend!r}"
         )
-    if isinstance(cfg.cache.audio_format, str) and cfg.cache.audio_format not in VALID_AUDIO_FORMATS:
+    audio_format = cfg.cache.audio_format
+    if isinstance(audio_format, str) and audio_format not in VALID_AUDIO_FORMATS:
         problems.append(
             f"{key('cache', 'audio_format')} must be one of {VALID_AUDIO_FORMATS}, "
             f"got {cfg.cache.audio_format!r}"

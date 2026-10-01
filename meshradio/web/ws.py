@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 
@@ -43,7 +44,7 @@ async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
     state = p.state()  # snapshot once; only the speaker flag is per-connection
 
     async def push(conn) -> None:
-        try:
+        with contextlib.suppress(Exception):
             await asyncio.wait_for(
                 conn.send_json({
                     "topic": PLAYER_STATE,
@@ -51,8 +52,6 @@ async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
                 }),
                 timeout=SEND_TIMEOUT_S,
             )
-        except Exception:
-            pass
 
     clients = reg.clients()
     if clients:
@@ -76,7 +75,7 @@ async def ws(websocket: WebSocket):
             return
         session = await ctx.sessions.get(sid)
         reg, p = session.speakers, session.player
-        topics = (PLAYER_STATE,)
+        topics: tuple[str, ...] = (PLAYER_STATE,)
         bus = session.bus
     else:
         reg, p = ctx.speakers, ctx.player

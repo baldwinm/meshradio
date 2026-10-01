@@ -10,24 +10,25 @@ from __future__ import annotations
 
 from calendar import Calendar, month_name
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from time import monotonic
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from starlette.datastructures import URL
-
-# Sunday-first weeks (US convention; the channel is Austin-local).
-WEEKDAY_HEADERS = ["S", "M", "T", "W", "T", "F", "S"]
-_CAL = Calendar(firstweekday=6)
 
 from ..bus import EventBus
 from ..db import Database
 from ..media.player import PlayerService
 from .feed import FEED_DAYS
 from .sessions import SessionManager, SpeakerRegistry
+
+# Sunday-first weeks (US convention; the channel is Austin-local).
+WEEKDAY_HEADERS = ["S", "M", "T", "W", "T", "F", "S"]
+_CAL = Calendar(firstweekday=6)
 
 # YouTube's anonymous "make a playlist from these ids" endpoint. Undocumented
 # but long-standing; gets unreliable past ~50 ids, so we cap.
@@ -266,9 +267,10 @@ class WebContext:
         if self.sessions is None:
             return self.player
         sid = getattr(request.state, "sid", None)
-        presented = sid is not None and not getattr(request.state, "fresh_sid", True)
-        if request.method in ("GET", "HEAD") or not presented:
-            session = await self.sessions.lookup(sid) if presented else None
+        if sid is None or getattr(request.state, "fresh_sid", True):
+            return await self.sessions.preview()         # nothing of ours presented
+        if request.method in ("GET", "HEAD"):
+            session = await self.sessions.lookup(sid)
             return session.player if session else await self.sessions.preview()
         return (await self.sessions.get(sid)).player
 

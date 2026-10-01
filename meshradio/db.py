@@ -18,11 +18,12 @@ import hashlib
 import logging
 import math
 import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import aiosqlite
 
@@ -425,14 +426,14 @@ FTS_MIN_CHARS = 3
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _next_second(ts: str) -> str:
     """The second after ``ts``. Our timestamps are second-resolution, so this
     is how a row is nudged strictly past a cursor sitting on it."""
     try:
-        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
     except ValueError:
         return ts
     return (dt + timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -533,7 +534,9 @@ class Database:
 
     async def _migrate(self) -> None:
         cur = await self.db.execute("PRAGMA user_version")
-        (version,) = await cur.fetchone()
+        row = await cur.fetchone()
+        assert row is not None
+        (version,) = row
         pending = MIGRATIONS[version:]
         if not pending:
             return
@@ -561,7 +564,7 @@ class Database:
                         await self.db.execute("ROLLBACK")
                     raise
                 cur = await self.db.execute("PRAGMA foreign_key_check")
-                orphans = await cur.fetchall()
+                orphans = list(await cur.fetchall())
                 if orphans:
                     log.warning(
                         "migration v%d left %d row(s) referencing a missing parent",
@@ -601,9 +604,10 @@ class Database:
         to reset a locked theme, so a later "Theme: …" message can't spawn a
         rival playlist. Auto-created "Untitled —" placeholders stay unlocked so
         the real theme can still adopt them (see ``adopt_theme``)."""
-        title = clean_text(title, MAX_TITLE)
-        if title is None:
+        cleaned = clean_text(title, MAX_TITLE)
+        if cleaned is None:
             raise ValueError("a theme needs a title")
+        title = cleaned
         set_by = clean_text(set_by, MAX_SENDER)
         # RETURNING (not lastrowid, which is unreliable after DO NOTHING)
         # distinguishes a fresh insert from a conflict no-op.
@@ -639,9 +643,10 @@ class Database:
         created_at because the relay's cursor is usually sitting on exactly
         this row — the push that skipped the placeholder — and an equal
         second would leave the adoption invisible to it."""
-        title = clean_text(title, MAX_TITLE)
-        if title is None:
+        cleaned = clean_text(title, MAX_TITLE)
+        if cleaned is None:
             raise ValueError("a theme needs a title")
+        title = cleaned
         set_by = clean_text(set_by, MAX_SENDER)
         async with self.transaction():
             row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
@@ -674,9 +679,10 @@ class Database:
 
         Raises ``sqlite3.IntegrityError`` if the date already has a theme with
         this title (UNIQUE(date, title)); callers report that as a no-op."""
-        title = clean_text(title, MAX_TITLE)
-        if title is None:
+        cleaned = clean_text(title, MAX_TITLE)
+        if cleaned is None:
             raise ValueError("a theme needs a title")
+        title = cleaned
         async with self.transaction():
             row = await self._fetchone("SELECT created_at FROM themes WHERE id=?", (theme_id,))
             assert row is not None
@@ -882,9 +888,10 @@ class Database:
         rather than ``update_track_metadata``: that report is unauthenticated
         and the row is shared, so it may complete a blank but never replace a
         value the archive already holds."""
-        seconds = clean_duration(seconds)
-        if seconds is None:
+        cleaned = clean_duration(seconds)
+        if cleaned is None:
             return False
+        seconds = cleaned
         async with self.transaction():
             cur = await self.db.execute(
                 "UPDATE tracks SET duration=? WHERE id=? AND duration IS NULL",
@@ -1257,7 +1264,9 @@ class Database:
         )
         return row["state"] if row else None
 
-    async def delete_web_sessions(self, sids: list[str] | None = None, older_than: str | None = None) -> None:
+    async def delete_web_sessions(
+        self, sids: list[str] | None = None, older_than: str | None = None
+    ) -> None:
         async with self.transaction():
             if sids:
                 await self.db.executemany(

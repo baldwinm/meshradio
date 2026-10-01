@@ -2,7 +2,6 @@ import asyncio
 
 from meshradio.bus import TRACK_DISCOVERED
 from meshradio.config import CacheConfig, PlayerConfig
-from meshradio.db import Database
 from meshradio.media.player import NullBackend, PlayerService, WebBackend
 from meshradio.media.radio import RadioService
 

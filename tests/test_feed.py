@@ -1,8 +1,7 @@
 """/feed.xml: the channel's days as an Atom feed, one entry per day."""
 
-import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from meshradio.ingest.parse import untitled_theme
 from meshradio.web.feed import FEED_DAYS, SONGS_PER_ENTRY, _stamp, build_feed
@@ -51,7 +50,7 @@ async def test_feed_is_well_formed_atom_newest_day_first(db, bus):
     assert first.find("a:id", NS).text == "http://test/archive/2026-08-02"
     assert first.find("a:link", NS).get("href") == "http://test/archive/2026-08-02"
     assert root.find("a:id", NS).text == "http://test/feed.xml"
-    rels = {l.get("rel"): l.get("href") for l in root.findall("a:link", NS)}
+    rels = {link.get("rel"): link.get("href") for link in root.findall("a:link", NS)}
     assert rels == {"self": "http://test/feed.xml", "alternate": "http://test/"}
     assert root.find("a:author/a:name", NS).text == "MeshRadio"
 
@@ -132,7 +131,7 @@ async def test_updated_is_the_days_newest_song_and_does_not_churn(db, bus):
     when a song lands that day — not on every poll."""
     await add_day(db, "2026-08-01", "rain songs",
                   [("aaaaaaaaaaa", "Rain", ""), ("bbbbbbbbbbb", "Storm", "")])
-    newest = datetime.fromtimestamp(T0 + 90, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    newest = datetime.fromtimestamp(T0 + 90, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     first = await fetch(db, bus)
     second = await fetch(db, bus)
     assert first.text == second.text
@@ -221,7 +220,8 @@ async def test_recent_days_tracks_limits_days_and_keeps_posted_order(db):
         ("2026-08-03", "C1"), ("2026-08-02", "B1"),
     ]
     rows = await db.recent_days_tracks(days=5)
-    assert [r["title"] for r in rows] == ["C1", "B1", "A1", "A2"]    # newest day first, posted order within
+    # Newest day first, posted order within a day.
+    assert [r["title"] for r in rows] == ["C1", "B1", "A1", "A2"]
 
 
 async def test_recent_days_counts_days_with_songs_not_empty_themes(db):

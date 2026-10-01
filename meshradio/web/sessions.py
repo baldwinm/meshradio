@@ -9,6 +9,7 @@ mid-song.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -16,11 +17,11 @@ import logging
 import re
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from datetime import UTC, datetime, timedelta
 
-from ..bus import EventBus, TRACK_READY
+from ..bus import TRACK_READY, EventBus
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
@@ -140,7 +141,7 @@ class SessionManager:
     MAX_SESSIONS = 512
 
     def __init__(self, factory: Callable[[EventBus], PlayerService], db: Database,
-                 bus: EventBus | None = None, tz=timezone.utc):
+                 bus: EventBus | None = None, tz=UTC):
         self._factory = factory
         self._db = db
         self._bus = bus                # shared bus: TRACK_READY announces new songs
@@ -243,10 +244,8 @@ class SessionManager:
         for task in (self._maintenance, self._day_watch):
             if task is not None:
                 task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
         self._maintenance = self._day_watch = None
         await self.flush()
         sessions, self._sessions = self._sessions, {}
@@ -313,6 +312,7 @@ class SessionManager:
     async def _watch_new_days(self) -> None:
         """When the first song of a newer day lands, roll idle open tabs onto it
         with no reload — the re-cue publishes state to each session's sockets."""
+        assert self._bus is not None   # only started with a shared bus (see _open)
         sub = self._bus.subscribe(TRACK_READY)
         try:
             async for _topic, payload in sub:
@@ -331,7 +331,7 @@ class SessionManager:
         # rolling the other idle tabs.
         mesh_ts = track.get("mesh_ts")
         if mesh_ts and self._rolled_day is not None:
-            day = datetime.fromtimestamp(float(mesh_ts), timezone.utc).astimezone(
+            day = datetime.fromtimestamp(float(mesh_ts), UTC).astimezone(
                 self._tz).date().isoformat()
             if day <= self._rolled_day:
                 return
@@ -378,5 +378,5 @@ class SessionManager:
                 del self._sessions[sid]
                 await session.player.stop()
                 log.info("session %s… reaped (%d live)", sid[:8], len(self._sessions))
-        stale = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        stale = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         await self._db.delete_web_sessions(older_than=stale)

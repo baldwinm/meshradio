@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 
-from ..bus import EventBus, INGEST_STATUS
+from ..bus import INGEST_STATUS, EventBus
 from ..config import MeshConfig
 from ..runtime import Service
 from .service import IngestService

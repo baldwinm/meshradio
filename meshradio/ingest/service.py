@@ -8,10 +8,10 @@ link extraction, dedupe, and event publication.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from ..bus import EventBus, THEME_CREATED, TRACK_DISCOVERED
+from ..bus import THEME_CREATED, TRACK_DISCOVERED, EventBus
 from ..db import MAX_SENDER, MAX_TITLE, Database, clean_duration, clean_text
 from . import parse
 
@@ -26,7 +26,7 @@ class IngestService:
         self.tz = ZoneInfo(tz)
 
     def local_date(self, ts: float) -> str:
-        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(self.tz).strftime("%Y-%m-%d")
+        return datetime.fromtimestamp(ts, tz=UTC).astimezone(self.tz).strftime("%Y-%m-%d")
 
     async def handle_message(
         self,
@@ -113,7 +113,9 @@ class IngestService:
                 artist=meta.get("artist"),
             )
             if track is None:
-                log.debug("dedupe: %s from %s via %s already ingested", link.video_id, sender, source)
+                log.debug(
+                    "dedupe: %s from %s via %s already ingested", link.video_id, sender, source
+                )
                 if meta:
                     # Late-arriving metadata for a known track (e.g. the relay
                     # re-pushing history the receiver ingested bare): fill it

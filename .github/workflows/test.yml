@@ -1,9 +1,11 @@
 # CI gate: Render deploys main only after this passes (autoDeployTrigger:
-# checksPass in render.yaml), so a red suite never reaches production.
+# checksPass in render.yaml), so a red suite — or a lint or type failure —
+# never reaches production.
 #
 # Installs from uv.lock (--locked fails the run if the lock is stale), so
 # what CI tests is the pinned set the project resolved, not whatever the
-# index serves that day.
+# index serves that day. The suite runs on every Python the project
+# supports; lint and types run once, on the version Render runs.
 name: tests
 
 on:
@@ -13,11 +15,27 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - run: uv sync --locked --group dev
+      - run: uv run pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.11"   # matches the Render runtime
           enable-cache: true
       - run: uv sync --locked --group dev
-      - run: uv run pytest -q
+      - run: uv run ruff check .
+      - run: uv run mypy

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -16,7 +16,7 @@ router = APIRouter()
 # clock unserialisable (every state read 500s), and a reported duration lands
 # in the shared tracks table, where it breaks every session that queues the
 # song. Reject at the edge so nothing downstream has to think about it.
-_SECONDS = dict(allow_inf_nan=False, le=24 * 3600)
+_SECONDS: dict[str, Any] = dict(allow_inf_nan=False, le=24 * 3600)
 
 
 @router.get("/api/state")

@@ -10,7 +10,7 @@ oldest-first. The message objects are copied from a live capture."""
 
 import re
 from argparse import Namespace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -49,7 +49,7 @@ def corescope_msg(sender, text, sender_timestamp, first_seen, **extra):
 
 
 def iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def link_msgs(n, *, start=NOON, sender="bob", step=30, first_id=0):
@@ -207,7 +207,8 @@ async def test_non_link_chatter_ignored(db, poller_factory):
 
 async def test_malformed_message_skipped(db, poller_factory):
     messages = [
-        {"sender": "x", "text": None, "sender_timestamp": NOON, "timestamp": "2026-07-06T17:00:05Z"},
+        {"sender": "x", "text": None, "sender_timestamp": NOON,
+         "timestamp": "2026-07-06T17:00:05Z"},
         {"sender": "y", "text": "hi", "timestamp": "x"},                # no usable time at all
         corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z"),
     ]

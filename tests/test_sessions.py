@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import httpx
 
 from meshradio.audio.routing import make_router
-from meshradio.bus import EventBus, PLAYER_STATE
+from meshradio.bus import PLAYER_STATE, EventBus
 from meshradio.config import PlayerConfig
 from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 from meshradio.web.server import create_app
@@ -215,7 +215,7 @@ async def test_playing_session_not_moved_by_new_day_song(db, bus):
 
 
 def test_yt_export_url_dedupes_and_caps():
-    from meshradio.web.context import yt_export_url, YT_EXPORT_CAP
+    from meshradio.web.context import YT_EXPORT_CAP, yt_export_url
     assert yt_export_url([]) == ""
     url = yt_export_url([{"video_id": "a"}, {"video_id": "b"}, {"video_id": "a"}])
     assert url.endswith("video_ids=a,b")                       # order kept, deduped

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import sqlite3
 import sys
@@ -19,12 +20,12 @@ from zoneinfo import ZoneInfo
 import uvicorn
 
 from . import __version__
-from .audio.routing import make_router
 from . import backup as backup_mod
+from .audio.routing import make_router
 from .backup import BackupService
 from .bus import EventBus
 from .config import ConfigError, load_config, validate_config
-from .db import MAX_TITLE, Database, VIDEO_ID_RE, clean_text
+from .db import MAX_TITLE, VIDEO_ID_RE, Database, clean_text
 from .ingest import parse
 from .ingest.corescope import CoreScopePoller, probe
 from .ingest.mesh import MeshIngest
@@ -205,7 +206,10 @@ async def run(config, demo: bool = False) -> None:
     if not isinstance(player.backend, EmbedBackend):
         # Off the request path: a slow or missing binary must not hold the
         # server up. Embed hosting never runs yt-dlp.
-        spawn("ytdlp-version", _note_ytdlp_version(config.cache.ytdlp_bin, web_app.state.ctx.health))
+        spawn(
+            "ytdlp-version",
+            _note_ytdlp_version(config.cache.ytdlp_bin, web_app.state.ctx.health),
+        )
     try:
         await server.serve()
     finally:
@@ -231,7 +235,8 @@ async def _note_ytdlp_version(binary: str, health: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="meshradio", description="MeshRadio appliance")
     parser.add_argument("--config", help="path to config.toml")
-    parser.add_argument("--profile", choices=("dev", "pi4", "lite"), help="override hardware_profile")
+    parser.add_argument("--profile", choices=("dev", "pi4", "lite"),
+                        help="override hardware_profile")
     parser.add_argument("--port", type=int, help="override web port")
     parser.add_argument("--demo", action="store_true", help="seed fake channel traffic (dev)")
     parser.add_argument("--list-backups", action="store_true",
@@ -291,7 +296,7 @@ def main() -> None:
             validate_config(config)
     except ConfigError as exc:
         print(f"meshradio: {exc}", file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(2) from None
 
     if args.list_backups or args.restore_backup is not None:
         raise SystemExit(_run_backup_cli(config, args))
@@ -307,10 +312,8 @@ def main() -> None:
     if args.probe_feed is not None:
         raise SystemExit(asyncio.run(_run_probe_feed(config, args)))
 
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run(config, demo=args.demo))
-    except KeyboardInterrupt:
-        pass
 
 
 def _run_backup_cli(config, args) -> int:
@@ -493,7 +496,9 @@ def _format_probe(report) -> list[str]:
         more = f", … ({len(report.channels)} in all)" if len(report.channels) > 12 else ""
         lines.append(f"channels listed: {listed}{more}")
         if report.channel_listed is False:
-            lines.append(f"{report.channel} is NOT among them — check [corescope]/[comchan] channel")
+            lines.append(
+                f"{report.channel} is NOT among them — check [corescope]/[comchan] channel"
+            )
     if not report.ok and not report.served:
         lines.append(f"FAILED after {report.elapsed_s:.1f}s: {report.error}")
         return lines
