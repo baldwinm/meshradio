@@ -49,10 +49,17 @@ DEFAULT_SKIN = "winamp"
 
 
 def _mmss(value) -> str:
-    """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations."""
-    if value is None:
+    """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations.
+
+    Unknown includes anything that isn't a finite non-negative number: the
+    archive refuses those now, but a filter that can raise mid-render turns
+    one bad row into a 500 on every page that shows it."""
+    try:
+        value = int(value)
+    except (TypeError, ValueError, OverflowError):
         return ""
-    value = int(value)
+    if value < 0:
+        return ""
     if value >= 3600:
         return f"{value // 3600}:{value % 3600 // 60:02d}:{value % 60:02d}"
     return f"{value // 60}:{value % 60:02d}"

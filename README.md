@@ -348,7 +348,12 @@ able to drive it:
   `Host` header.
 - **Inputs are bounded.** `/api/ingest` takes at most 16 MiB / 5,000 messages per
   push, an analyzer response past 64 MiB is abandoned, and seek or duration
-  values that are not finite (or run past a day) are rejected.
+  values that are not finite (or run past a day) are rejected. Free text is
+  bounded where rows are written, whatever fed it (mesh, analyzer, relay,
+  yt-dlp): titles and artists are one line of at most 256 characters, sender
+  names 64, with control characters dropped, and a track length that isn't a
+  finite number of seconds is simply not stored — so a relay's metadata can't
+  plant a value that breaks every page showing the day.
 
 ### Fixing a theme
 

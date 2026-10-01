@@ -34,6 +34,19 @@ def _is_filler(track: dict[str, Any]) -> bool:
     return track.get("source") == "radio" or bool(track.get("filler"))
 
 
+def _duration(track: dict[str, Any] | None) -> float | None:
+    """A usable length for the track, in seconds, or None.
+
+    The archive refuses non-finite and absurd lengths at the row, so this is
+    the belt to that brace: an old row or a stale snapshot must not be able
+    to leave the clock unserialisable or a page unrenderable."""
+    try:
+        seconds = float((track or {}).get("duration"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
+
+
 class NullBackend:
     """Simulated playback for dev machines and tests: 'plays' a track for its
     duration (or a few seconds if unknown), then fires on_end."""
@@ -313,7 +326,7 @@ class PlayerService(Service):
         self._pos_base = 0.0
         self._pos_epoch = time.monotonic()
         self._play_id = await self.db.record_play(track["id"], self.output_getter())
-        await self.backend.play(track["cache_path"], track.get("duration"))
+        await self.backend.play(track["cache_path"], _duration(track))
         self.publish_state()
 
     async def skip(self) -> None:
@@ -337,9 +350,9 @@ class PlayerService(Service):
         pos = self._pos_base
         if self._pos_epoch is not None:
             pos += time.monotonic() - self._pos_epoch
-        duration = (self.current or {}).get("duration")
+        duration = _duration(self.current)
         if duration:
-            pos = min(pos, float(duration))
+            pos = min(pos, duration)
         return max(pos, 0.0)
 
     async def seek(self, seconds: float) -> None:
@@ -347,8 +360,8 @@ class PlayerService(Service):
         the speaker tab either initiated this or follows via the state push."""
         if self.current is None or not math.isfinite(seconds):
             return
-        duration = self.current.get("duration")
-        seconds = max(0.0, min(seconds, float(duration)) if duration else seconds)
+        duration = _duration(self.current)
+        seconds = max(0.0, min(seconds, duration) if duration else seconds)
         self._pos_base = seconds
         self._pos_epoch = time.monotonic() if self.status == "playing" else None
         await self.backend.seek(seconds)
@@ -584,7 +597,7 @@ class PlayerService(Service):
                 "title": t.get("title"),
                 "artist": t.get("artist"),
                 "sender": t.get("sender"),
-                "duration": t.get("duration"),
+                "duration": _duration(t),
                 "source": t.get("source"),
                 "filler": bool(t.get("filler")),
             }
@@ -653,9 +666,9 @@ class PlayerService(Service):
             position = max(float(snap.get("position") or 0.0), 0.0)
             if status == "playing" and snap.get("saved_at"):
                 position += max(0.0, time.time() - float(snap["saved_at"]))
-            duration = current.get("duration")
+            duration = _duration(current)
             if duration:
-                position = min(position, max(float(duration) - 1.0, 0.0))
+                position = min(position, max(duration - 1.0, 0.0))
             self._pos_base = position
             self._pos_epoch = time.monotonic() if status == "playing" else None
         self.publish_state()

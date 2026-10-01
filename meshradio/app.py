@@ -24,7 +24,7 @@ from . import backup as backup_mod
 from .backup import BackupService
 from .bus import EventBus
 from .config import load_config
-from .db import Database, VIDEO_ID_RE
+from .db import MAX_TITLE, Database, VIDEO_ID_RE, clean_text
 from .ingest import parse
 from .ingest.corescope import CoreScopePoller, probe
 from .ingest.mesh import MeshIngest
@@ -320,7 +320,7 @@ async def _run_set_theme(config, args) -> int:
     relay to a hosted receiver: the receiver's own theme for that day is
     locked, so it ignores the replayed theme message the same way it ignores a
     corrected repost on the channel."""
-    title = args.set_theme.strip()
+    title = clean_text(args.set_theme, MAX_TITLE)   # the archive's own bounds
     if not title:
         print("--set-theme needs a non-empty title", file=sys.stderr)
         return 1

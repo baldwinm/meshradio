@@ -90,7 +90,9 @@ async def test_hostile_text_cannot_break_the_document_or_inject_markup(db, bus):
     resp = await fetch(db, bus)
     root = parse(resp.text)                                # raises if not well-formed
     (entry,) = root.findall("a:entry", NS)
-    assert entry.find("a:title", NS).text == "2026-08-01 — rain  <b>songs</b> "
+    # The row itself now drops the controls (Database.clean_text); the feed's
+    # own stripping stays as the backstop for rows written before it did.
+    assert entry.find("a:title", NS).text == "2026-08-01 — rain <b>songs</b>"
     html = entry.find("a:content", NS).text
     assert "<script>" not in html and "&lt;script&gt;" in html
     assert "<i>" not in html and "&lt;i&gt;" in html
