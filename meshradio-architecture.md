@@ -1,12 +1,15 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.1 — the core software is built, tested (119 tests), and running:
-ingest, cache-first player, browser web player, YouTube-Mix radio mode, and a
-public embed-mode deployment fed by a home-node relay (§14). The hardware kit
-(§2) remains design-locked and not yet built; module status is tracked in the
-[README](README.md). This document is the full design; sections marked below
-note where the implementation has diverged from or gone beyond the original plan.*
+*Status: v0.1 — the core software is built, tested (360+ tests), and running:
+ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
+browsable archive site (calendar, themes, search, stats, member pages, feed),
+and a public embed-mode deployment fed by a home-node relay (§14). The hardware
+kit (§2) remains design-locked and not yet built; module status is tracked in
+the [README](README.md). This document is the full design; sections marked below
+note where the implementation has diverged from or gone beyond the original plan
+— and where a described piece is still only a plan (§7 nightly yt-dlp update and
+iTunes preview, §9 settings page and log viewer, §10 first-boot flow).*
 
 ---
 
@@ -123,7 +126,7 @@ UPS HAT with I2C fuel gauge and pass-through charging (Waveshare UPS HAT (B) or 
 
 A **single asyncio application** with clearly separated modules communicating over an in-process event bus, backed by SQLite. Not microservices, not MQTT-between-daemons. Rationale: this is an appliance, and the failure domain is the whole box anyway; one process means one systemd unit, one log stream, no IPC serialization bugs, and a codebase a future contributor (or an AI pair) can hold in their head. This is the single biggest maintainability decision in the project.
 
-*As-built layout (the design above held; `net.py`, `runtime.py`,
+*As-built layout (the design above held; `backup.py`, `net.py`, `runtime.py`,
 `ingest/relay.py`, `media/radio.py` were added, and `web/` grew a router split —
 see §14):*
 
@@ -132,7 +135,8 @@ meshradio/
 ├── app.py              # asyncio entrypoint, wires modules to the bus
 ├── bus.py              # tiny pub/sub EventBus (asyncio queues)
 ├── config.py           # TOML over dataclass defaults; secrets from env
-├── db.py               # aiosqlite layer + migrations
+├── db.py               # aiosqlite layer + migrations; one connection, writers serialised
+├── backup.py           # rotating DB snapshots; --list-backups / --restore-backup (§14)
 ├── net.py              # shared outbound HTTP client (User-Agent, timeouts)
 ├── runtime.py          # supervised task/Service runtime — restart-with-backoff
 ├── ingest/
@@ -152,23 +156,24 @@ meshradio/
 ├── ui/
 │   └── panel.py        # OLED screens (luma.oled) + encoder/buttons (gpiozero); log panel on dev
 ├── web/                # FastAPI + Jinja2 + htmx + WebSocket (split into routers)
-│   ├── server.py       # create_app: assembly, lifespan, session middleware
-│   ├── context.py      # WebContext — shared state on app.state
+│   ├── server.py       # create_app: assembly, lifespan, session middleware, origin guard, security headers
+│   ├── context.py      # WebContext — shared state on app.state; short-TTL whole-archive caches
 │   ├── sessions.py     # per-visitor session players + speaker registry (embed)
-│   ├── routes_pages.py # HTML pages + htmx partials
+│   ├── routes_pages.py # HTML pages (now playing, archive, search, stats, member, about, feed) + htmx partials
 │   ├── routes_api.py   # player/queue control API
 │   ├── routes_ingest.py# /audio streaming, relay /api/ingest, /healthz
 │   ├── ws.py           # WebSocket: forwards bus events → htmx re-fetch
 │   ├── feed.py         # /feed.xml Atom builder — pure functions over db rows
 │   ├── templates/      # Jinja2 + htmx — no JS build chain, ever
-│   └── static/         # vendored htmx + js/ (embed, eq, playbar, radio), style.css
+│   └── static/         # vendored htmx, style.css, icons, js/ (radio, embed, eq, playbar, queue,
+│                       #   keys, mediasession, nav, help, skin, fx)
 ├── system/
 │   ├── power.py        # fuel gauge polling, safe shutdown
 │   └── provision.py    # first-boot AP-mode WiFi setup (nmcli)
-tests/                  # top-level; 119 tests, pytest-asyncio
+tests/                  # top-level; 360+ tests, pytest-asyncio
 ```
 
-**Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `httpx`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node.
+**Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `httpx`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node. Only the web/ingest core is a hard dependency: yt-dlp and python-mpv sit behind the `media` extra and the Pi hardware libraries (`meshcore`, `luma.oled`, `gpiozero`) behind `hw`, so a public embed host or a dev box installs neither. yt-dlp's YouTube extractor also needs a JavaScript runtime (deno) on the machine to solve YouTube's challenge.
 
 **Supervised runtime.** Every long-lived loop runs under `runtime.supervise()` (or the `Service` base class): an unhandled exception is logged loudly and the loop restarts with backoff (1s → 5s → 30s) instead of dying silently. One-shot background work goes through `spawn()`, which guarantees a logged traceback. This exists because a silently-dead cacher task once shipped to production; the runtime makes that failure class impossible by construction. systemd still restarts the whole process on a hard crash (§4 "one process").
 
@@ -183,7 +188,9 @@ announce on **`theme.created`**; routing, power, and ingest health emit
 **`output.changed`**, **`power.state`**, and **`ingest.status`** (the last also
 feeds `/healthz`). Every module is a subscriber/publisher on the bus and touches
 the DB through `db.py` only. The web WebSocket forwards bus payloads verbatim
-(they're plain dicts), and the page reacts by re-fetching htmx partials.
+(they're plain dicts), and the page reacts by re-fetching htmx partials — on Now
+Playing, a single `/partials/live` request that swaps the player bar, queue and
+day nav together as out-of-band regions, rather than one request per region.
 
 ---
 
@@ -201,16 +208,23 @@ tracks(  id, video_id, url, title, artist, duration,
 plays(   id, track_id → tracks, played_at, output, completed )
 settings(    key, value )
 web_sessions(sid, updated_at, state )       -- per-visitor snapshot, JSON
+deleted_tracks(id, date, video_id, title, sender, deleted_at,
+               UNIQUE(date, video_id))       -- tombstones for operator removals
 ```
 
-Two dedupe rules apply. `dedupe_hash = sha256("channel|sender|video_id|mesh_ts_bucketed_to_60s")` lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the *same message* first wins, the other no-ops on the UNIQUE constraint (an `ON CONFLICT … DO NOTHING` insert). Separately, a **partial unique index on `(theme_id, video_id)`** enforces *one song per day's playlist* — a repost of a video already under a theme is refused, so a song never shows up twice no matter who reposts it. Radio filler (`theme_id` NULL) is exempt; the index's partial `WHERE theme_id IS NOT NULL` lets a Mix echo the same video across days.
+The whole archive sits behind **one aiosqlite connection** in WAL mode, shared by every coroutine. Each `await` inside a write is a point where another coroutine's statements run on that connection, so the driver's implicit transactions let one task's rollback discard another's uncommitted update (an `add_track` dedupe rollback once un-readied a track the cacher had just finished). The connection therefore runs in autocommit mode and every write goes through `Database.transaction()`: writers are serialised behind a lock, `BEGIN IMMEDIATE`/`COMMIT` are explicit, a nested call from the same task joins the open transaction, and reads never wait. Batch writers (a CoreScope poll, a relay push) wrap 500 messages per transaction instead of paying one commit per row.
+
+Three dedupe rules apply. `dedupe_hash = sha256("channel|sender|video_id|mesh_ts_bucketed_to_60s")` lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the *same message* first wins, the other no-ops on the UNIQUE constraint (an `ON CONFLICT … DO NOTHING` insert). Separately, a **partial unique index on `(theme_id, video_id)`** enforces *one song per day's playlist* — a repost of a video already under a theme is refused, so a song never shows up twice no matter who reposts it. Radio filler (`theme_id` NULL) is exempt; the index's partial `WHERE theme_id IS NOT NULL` lets a Mix echo the same video across days. Third, a **tombstone** in `deleted_tracks` keyed on `(date, video_id)`: when the operator removes a song by hand (`--delete-track`) the link is still on the channel, so any re-backfill — the relay's self-healing one, a restore, a cursor reset — would insert it straight back. `add_track` consults the tombstone and ignores the replay, the same way a locked theme ignores a corrected repost. It is scoped to that one day, so the song can be shared again on another.
 
 Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Migrations that landed after the initial design:
 
-- **`radio` / `letsmesh` / `comchan` track sources** — Mix continuations (§7), a since-retired backup analyzer feed, and the backup feed that replaced it (both §6). SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table; `'letsmesh'` stays in the constraint because existing rows may carry it, even though nothing writes it now. A rebuild drops the table's indexes with it, so by the `comchan` migration all five `idx_tracks_*` indexes have to be recreated, not just the two the original schema had.
+- **`radio` / `letsmesh` / `comchan` track sources** — Mix continuations (§7), a since-retired backup analyzer feed, and the backup feed that replaced it (both §6). SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table; `'letsmesh'` stays in the constraint because existing rows may carry it, even though nothing writes it now. A rebuild drops the table's indexes with it, so by the `comchan` migration all five `idx_tracks_*` indexes have to be recreated, not just the two the original schema had — and any future rebuild must also recreate the `sender` index added below.
 - **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives a redeploy (which restarts the process). Keyed by the session cookie.
 - **Lockable themes** — a `locked` flag plus a backfill that merges same-day rival themes into one playlist, so a stray second "Theme:" post can't split a day.
 - **One-song-per-playlist** — collapses any duplicate `(theme_id, video_id)` rows that predate the rule (keeping the earliest, repointing plays) and adds the partial unique index above.
+- **Query indexes** — `tracks(video_id)` (the cacher's reuse-an-existing-file check ran a full scan per download), `tracks(ingested_at)` (the relay's cursor predicate, hit every push interval), and `tracks(sender COLLATE NOCASE)` (the member pages look a name up case-insensitively four times a visit). The last is declared with the query's own collation, or the planner wouldn't use it.
+- **`themes.updated_at`** — stamped when a placeholder is adopted, so the rename reaches the relay receiver (§14).
+- **`deleted_tracks`** — the tombstone table above.
 
 Rotating snapshots of the whole DB (`backup.py`, §14) provide a rollback point for a bad migration or corruption, separate from disk durability.
 
@@ -224,7 +238,9 @@ Rotating snapshots of the whole DB (`backup.py`, §14) provide a rollback point 
 
 ### CoreScope path (fallback + backfill)
 
-Poll the AUS CoreScope instance every 2–5 min for `#music` channel packets; same parser, same dedupe. Serves two jobs: catching messages the local node missed (RF is RF), and **backfilling history on first boot** so a freshly built kit radio arrives with the channel's archive already populated. *(Exact endpoint/auth to be confirmed against the AUS instance's API — isolate in `corescope.py` so it's a one-file adaptation if the API shifts.)*
+Poll the AUS CoreScope instance every 3 min (`poll_interval_s`) for `#music` channel packets; same parser, same dedupe. Serves two jobs: catching messages the local node missed (RF is RF), and **backfilling history on first boot** so a freshly built kit radio arrives with the channel's archive already populated.
+
+*As built:* the adapter targets CoreScope's real API (verified against a live instance in July 2026): `GET /api/channels/{hash}/messages`, with the URL-encoded channel name (`#music` → `%23music`) as the hash, returning each message's `sender`, `text`, `sender_timestamp` (the mesh-side send time, the same value the local node sees — which is what makes cross-source dedupe line up) and `first_seen`. No auth is needed. There is **no `since` parameter**, so every poll returns the channel's whole history; that doubles as the first-boot backfill, and the poller keeps a cursor on `first_seen` in `settings` so steady-state polls skip what they already handled (cursor ties and late RF duplicates fall through to the dedupe hash, which makes reprocessing a no-op). Messages are sorted by mesh time so a theme lands before the links posted after it, and committed 500 per transaction. The response is streamed under a 64 MiB cap and abandoned past it, so an analyzer that misbehaves can't grow the process's memory. Everything API-specific stays in `corescope.py`, so it remains a one-file adaptation if the API shifts.
 
 **Retired backup feed (LetsMesh analyzer).** A second poll instance once ran against the LetsMesh MeshCore analyzer (`analyzer.letsmesh.net`) — a CoreScope-family API — as a fallback for an AUS CoreScope outage. That host retired the endpoint and moved its API behind a Cloudflare challenge a headless poller can't clear, so the feed was dropped rather than repointed. `CoreScopePoller` keeps its generic `name`/`source` parameters, so adding another CoreScope-compatible feed later is still a one-liner in `app.py`; dedupe on channel+sender+video+minute (not source) makes any two overlapping feeds no-op each other.
 
@@ -232,20 +248,20 @@ Poll the AUS CoreScope instance every 2–5 min for `#music` channel packets; sa
 
 ### Theme detection
 
-Proposal: adopt a lightweight channel convention — the daily theme post starts with `Theme:` (case-insensitive), e.g. `Theme: songs about rain`. Parser rule: the first `Theme:` message of the day (America/Chicago) creates the theme row and **locks** it; every link message attaches to that day's theme. Once locked, a later `Theme:` message is ignored — it can't reset the theme or split the day into a second playlist. Fallback when no theme is posted first: auto-create an unlocked `Untitled — <date>` placeholder; the day's first real `Theme:` message then adopts that placeholder in place (renaming it and locking it) so early links stay in the one playlist. This costs the channel nothing (it matches how a human would post anyway) and makes parsing deterministic instead of vibes-based.
+Original proposal: adopt a lightweight channel convention — the daily theme post starts with `Theme:` (case-insensitive), e.g. `Theme: songs about rain`. *As built, the parser is looser than the proposal, because it matches how the channel actually posts:* the word "theme", up to ~40 characters of filler (`Today's theme is: …`, `theme for today: …`), then a colon and the title, on one line. The colon has to be a real delimiter — an emoticon (`:-)`), a URL scheme, or a clock time (`8:30`) is punctuation, so a message with no genuine colon declares nothing and the day keeps its placeholder rather than locking on a garbled title (the day of 2026-07-30 once locked as `-) or trains? …`, and a locked theme can only be fixed out of band with `--set-theme`). Parser rule: the first `Theme:` message of the day (America/Chicago) creates the theme row and **locks** it; every link message attaches to that day's theme. Once locked, a later `Theme:` message is ignored — it can't reset the theme or split the day into a second playlist. Fallback when no theme is posted first: auto-create an unlocked `Untitled — <date>` placeholder; the day's first real `Theme:` message then adopts that placeholder in place (renaming it and locking it) so early links stay in the one playlist. This costs the channel nothing (it matches how a human would post anyway) and makes parsing deterministic instead of vibes-based.
 
 ---
 
 ## 7. Playback pipeline
 
-**Cache-first.** On `track.discovered`, the cacher runs `yt-dlp -f bestaudio -x --audio-format opus` into `/var/lib/meshradio/cache/<video_id>.opus` (~3–5MB/track). The player only ever plays local files. Benefits: archive replay never re-hits YouTube, playback survives net hiccups, and a yt-dlp breakage delays *new* tracks without touching the archive. Cache is LRU-pruned at a configurable cap (default 8GB ≈ 1,600+ tracks — realistically, never prunes).
+**Cache-first.** On `track.discovered`, the cacher runs `yt-dlp -f bestaudio -x --audio-format opus` into `/var/lib/meshradio/cache/<video_id>.opus` (~3–5MB/track). The player only ever plays local files. Benefits: archive replay never re-hits YouTube, playback survives net hiccups, and a yt-dlp breakage delays *new* tracks without touching the archive. Cache is LRU-pruned at a configurable cap (default 8GB ≈ 1,600+ tracks — realistically, never prunes). The cacher works **a few tracks at once** (`[cache] concurrency`, default 2), each in its own task behind a semaphore, because one download yt-dlp sat on for five minutes used to hold up every track behind it. A track is never worked twice at once even though a sweep of `pending` rows (at least once a minute) and the `track.discovered` stream can both hand it over; the sweep is also what recovers events dropped under a backfill burst. A single shared HTTP client serves every oEmbed lookup while the cacher runs, since a fresh TLS handshake per video was most of each lookup's time.
 
 **Fallback ladder** when a track can't be fetched:
 
 1. Cached file (normal path)
-2. Fresh yt-dlp extract retry (with backoff; auto-`pip install -U yt-dlp` as a nightly job, since upstream fixes breakages within days)
+2. Fresh yt-dlp extract retry (`max_retries` attempts, backoff growing with each, and a 5-minute timeout after which the subprocess is killed). The nightly auto-`pip install -U yt-dlp` that the design calls for — upstream fixes breakages within days — is **not built yet**; today yt-dlp is updated by hand.
 3. **Metadata-only mode**: resolve title/artist via YouTube's oEmbed endpoint (no API key needed), display the track on OLED/web with a "couldn't fetch audio" badge — the channel history stays intact and browsable even when playback can't happen
-4. *(Optional, config-off by default)*: play the 30s preview from the iTunes Search API as an audible placeholder
+4. *(Optional, config-off by default; **not built**)*: play the 30s preview from the iTunes Search API as an audible placeholder
 
 **Live mode policy:** a new track never interrupts the current one. If the radio is idle in Live mode, a new arrival auto-plays (with a brief OLED toast: sender + title). If something's playing, it enqueues. Only tracks posted within `live_window_s` (default 30 min) count as live; older ones are backfill and stay archive-only, so a first-boot history download doesn't stampede the queue. Configurable quiet hours suppress auto-play.
 
@@ -285,27 +301,37 @@ Five screens, encoder-navigated: **Now Playing** (theme / title–artist marquee
 
 FastAPI serving Jinja2 + htmx at `http://meshradio.local` (avahi mDNS). WebSocket pushes player state. Pages: Now Playing (with album art fetched via oEmbed thumbnail — the one place the web UI beats the OLED), Archive browser, queue management, output/volume, settings (WiFi, channel key, quiet hours, CoreScope URL), and a log viewer. htmx keeps the frontend a set of HTML templates — no npm, no build step, which is a kit-maintainability feature, not a limitation.
 
-The **Archive** browser is a month calendar (`context.calendar_months`): every day the channel played is a lit, tappable tile carrying its theme title and song count; quiet days render blank. It replaced a flat reverse-chronological list so the channel's rhythm — which days were busy, which went quiet — is visible at a glance.
+*As built:* the pages are **Now Playing** (cover art is YouTube's still for the video, not an oEmbed lookup), the **Archive** (calendar and all-themes list, plus a page per day), **Search**, **Stats**, **Member** pages and **About**, with queue management, shuffle, volume and the stations on Now Playing. The **settings page** (WiFi, channel key, quiet hours, CoreScope URL) and the **log viewer** are *not built* — configuration is the TOML file, logs are `journalctl`. Output selection exists as an API (`/api/output/{name}`, `/api/outputs`) with no control on the page yet. The app listens on port 8080 (`[web] port`); a `meshradio.local` name comes from the OS's mDNS, not from anything the app sets up.
+
+The **Archive** browser is a month calendar (`context.archive_months` and `calendar_month`): every day the channel played is a lit, tappable tile carrying its theme title and song count; quiet days render blank. It replaced a flat reverse-chronological list so the channel's rhythm — which days were busy, which went quiet — is visible at a glance.
 
 The calendar answers "what happened on this day"; **`/archive/themes`** answers the other question members ask — "what have we done already?" It lists every theme the channel has run (`Database.all_themes`), newest first, a year at a time (the calendar's month paging applied to a list, so the page is a fixed size however long the channel runs), grouped into months, each linking to its day. A day page steps to the days either side of it and back to its month, so the archive reads straight through instead of via the calendar every time; a URL that isn't a date, or is a day the channel was quiet, is a 404 rather than a page titled with whatever was typed. `Untitled — <date>` placeholders are filtered out: nobody chose them, and their days are still on the calendar. `context.theme_history` counts how many days share a title (matched case- and space-insensitively) so a repeat carries an `N×` badge — the cheapest way to see whether "rain songs" has been done before. The route is declared *before* `/archive/{date}` so the path isn't taken for a date.
 
-**Keyboard shortcuts** (`keys.js`) drive the *existing* controls rather than talking to the server themselves: play/pause and next click the htmx buttons, volume and mute call playbar.js, and seeking goes through the scrub bar, which already knows this tab's real position. A shortcut therefore can't disagree with what's on screen, and the handler binds nothing up front — the controls live in a swapped partial, so each press looks them up fresh. Keys are ignored while a text field has focus, and Space is left to the browser when a button, link or `<summary>` is focused, so it can't both activate the control and toggle playback.
+**Keyboard shortcuts** (`keys.js`) drive the *existing* controls rather than talking to the server themselves: play/pause and next click the htmx buttons, volume and mute call playbar.js, and seeking goes through the scrub bar, which already knows this tab's real position. A shortcut therefore can't disagree with what's on screen, and the handler binds nothing up front — the controls live in a swapped partial, so each press looks them up fresh. Keys are ignored while a text field has focus, and Space is left to the browser when a button, link or `<summary>` is focused, so it can't both activate the control and toggle playback. `K` is an alias for play/pause that isn't an activation key, so it works even with a button focused.
 
 **Lock-screen controls** (`mediasession.js`). The speaker tab tells the OS what's playing — title, artist, the video's still and, once known, the duration — through the Media Session API, and the OS hands back play, pause, skip and scrub presses. The handlers POST to the same endpoints the buttons do instead of clicking them the way `keys.js` does: the buttons exist only on Now Playing, while the hx-boost nav keeps the music going across every page, so a lock-screen "pause" that went looking for a button would silently do nothing on the Archive. The server stays the source of truth and pushes the result to every tab, so the OS and the page can't disagree. The script listens for `meshradio:state` rather than being called from `applyState`, so a fault in a cosmetic feature can't break playback, and it dedupes on the state *object*: that event also fires for power and output pushes, where re-sending the stale position would yank the lock-screen scrubber backwards. Only the speaker tab owns the session (a silent remote claiming "playing" would fight it for the lock screen), and the mpv backend has no browser audio to describe. OS "play" while the server already says playing resumes this tab's own audio instead of toggling — that is the autoplay-blocked case, and a toggle would pause everyone. Seeking shares `seekTo()` with the scrub bar. *Checked in desktop Chromium against the embed and web backends; how a real lock screen renders varies by OS and browser, and in embed mode the audio lives in YouTube's cross-origin iframe.*
 
 **The listening record.** `plays` is written on every track start and stays largely internal — the cache pruner's LRU ordering comes from it. `/stats` shows only the total (`play_totals`); per-song listening lists (recently played, most played, completion rates) were built and then deliberately pulled, so the stats page stays a picture of what the *channel* did rather than what one deployment's speakers did. The table still carries `completed`, so that view can come back if it's ever wanted.
 
+**Search.** `/search?q=` is a case-insensitive substring match over a track's title, artist, sharer and theme title, newest first, with LIKE wildcards in the query escaped so `100%` searches for the literal text. It asks for one more than the 100 it shows so the page can say the list is cut off instead of reporting the cap as the total; radio filler is excluded; a result offers **+ queue** only for a song that is playable. The path is `Disallow`ed in `robots.txt` — a query string is an unbounded space.
+
+**Skins.** The header dropdown re-themes the whole UI as Winamp (default), iTunes or Media Player. The choice rides in a `skin` cookie that the server reads into `<html data-skin>`, so the first paint is already the right skin — a client-only switch would flash the default on every load. An unrecognised cookie value falls back to the default rather than being echoed into the page.
+
 **Member pages.** `/member/<name>` gathers what the channel already knows about a sharer — their songs, the days they named (`themes.set_by`), the artists they repeat, the span they've been around. Names arrive as typed on the mesh, so lookups are `COLLATE NOCASE` and the page titles itself with the spelling that member uses most; the URL's spelling is never echoed. Radio filler carries the seed track's sender but nobody posted it, so `source != 'radio'` runs through every member query.
 
-**Link previews.** A day of the channel gets pasted into a chat far more often than it gets browsed, and an unfurled card was blank. `base.html` builds Open Graph and Twitter tags for every page, and the day route fills them with the theme, the song count, and the day's first track as `og:image`. `absolute_url` honours `x-forwarded-proto`, because the hosted deployment terminates TLS upstream and would otherwise advertise `http://` URLs. `robots.txt` keeps crawlers off the API, partials, audio and search; `sitemap.xml` lists every archived day. The 404 is `noindex` and points its canonical at the site root rather than reflecting the path that missed.
+**Link previews.** A day of the channel gets pasted into a chat far more often than it gets browsed, and an unfurled card was blank. `base.html` builds Open Graph and Twitter tags for every page, and the day route fills them with the theme, the song count, and the day's first track as `og:image`. `absolute_url` honours `x-forwarded-proto`, because the hosted deployment terminates TLS upstream and would otherwise advertise `http://` URLs. `robots.txt` keeps crawlers off the API, partials, audio and search; `sitemap.xml` lists every archived day. The 404 is `noindex` and points its canonical at the site root rather than reflecting the path that missed. With `[web] public_url` set, `absolute_url` takes the authority from config instead of the request's `Host` header — a canonical link is a statement about where the page lives, and a spoofed `Host` must not be able to make one. For iOS "Add to Home Screen", `base.html` pins `apple-mobile-web-app-title` and links a real 180×180 opaque PNG (`apple-touch-icon.png`): iOS ignores SVG icons and fills transparency black, and without these it names the app after the page `<title>` — on Now Playing, the day's theme — and draws a letter tile.
 
 **Cover art in lists.** Day, search and member pages put a 56×32 still beside each song (`partials/thumb.html` — one macro, so the three can't drift). It is `mqdefault` rather than the smaller `default.jpg`, which has letterbox bars baked in, and it is the still Now Playing already uses, so the song that's playing is already cached; `i.ytimg.com` was already in the image CSP. Images are lazy and sized in both markup and CSS, so a 100-row search neither fetches every still up front nor shifts as they arrive. The queue deliberately has none: it re-renders on every state push, and re-inserting images on each swap would flicker for no gain.
 
 **Feed.** `/feed.xml` is an Atom feed of the newest `FEED_DAYS` (30) days that have songs, one entry per day — the unit people already share. `web/feed.py` is pure functions over `Database.recent_days_tracks`, so the markup is tested without a server. Choices that were deliberate: an entry's `id` and link are the day's permalink, so a reader recognises an entry it has already shown; `updated` is the day's newest song time, not the request time, so entries don't look changed on every poll; free text from the mesh (sender names, theme titles, oEmbed titles) has XML-forbidden control characters stripped, because one of them makes the whole document unparseable and a reader drops the *feed*, not the entry, for as long as that day stays in the window; a huge day is cut at `SONGS_PER_ENTRY` with "…and N more" while the summary keeps the real count; a nonsense mesh clock falls back to the day's midnight instead of taking the feed down; a placeholder `Untitled —` theme is just the date. The query picks days with a per-theme `EXISTS` walking the date index (as `newest_day_with_tracks` does) rather than a `DISTINCT` over the themes×tracks join, which read every track; the rows sit behind the same 5 s TTL as the other whole-archive reads, so a polling stampede costs one query. `base.html` advertises the feed with `<link rel="alternate">` on every page, built with `absolute_url` so it is https behind the proxy.
 
-**Delivery.** The app gzips its own responses (`GZipMiddleware`) — the archive pages are repeated markup and compress better than 10:1, which is what the hosted embed's visitors are actually waiting on. Every asset URL already carries `?v=<newest static mtime>`, so those responses are `immutable` for a year and a navigation costs zero asset requests; a bare, unversioned path can't make that promise and gets five minutes instead (`VersionedStatic`). `/audio` opts out of gzip with `Content-Encoding: identity`: opus is already compressed, and gzipping a ranged 206 would break seeking. htmx is deferred — nothing calls its API at parse time, so there's no reason to block first paint on it.
+**Delivery.** The app gzips its own responses (`GZipMiddleware`) — the archive pages are repeated markup and compress better than 10:1, which is what the hosted embed's visitors are actually waiting on. Every first-party asset URL carries `?v=<newest static mtime>`, so those responses are `immutable` for a year and a navigation costs zero asset requests; a bare, unversioned path can't make that promise and gets five minutes instead (`VersionedStatic`) — which is what the vendored `htmx.min.js`, referenced without a version, gets. `/audio` opts out of gzip with `Content-Encoding: identity`: opus is already compressed, and gzipping a ranged 206 would break seeking. htmx is deferred — nothing calls its API at parse time, so there's no reason to block first paint on it.
 
 The nav is **hx-boosted**, swapping `<main>` (`hx-select`) rather than reloading the document. That keeps the `<audio>` element, the WebSocket and the speaker role alive across a click, so moving between Now Playing and the Archive no longer interrupts the song — the reason `hx-select` matters is that a default boost would replace the whole body and re-run every script, opening a second socket. The header sits outside the swap, so `nav.js` recomputes `aria-current` from the URL on settle and on back/forward.
+
+**Hot-path reads.** Every player-state push makes each open page re-fetch, and the whole-archive aggregates behind those pages (`archive_days`, `all_themes`, the stats queries, the feed's rows) each scan the themes×tracks join. `WebContext` keeps them behind a 5-second TTL (`CACHE_TTL_S`): nothing in them changes until a song lands, so at worst the day arrows lag one event, and a crawler or feed reader hammering a page costs one query per few seconds rather than one per request. Broadcasting a state push is parallel (`asyncio.gather`) with a per-socket send timeout (`SEND_TIMEOUT_S`, 5 s), so a page that stopped reading — a laptop lid closing mid-send — can't delay every page after it.
+
+**Hardening.** The player has no login, so `server.py` wraps the app in three layers, outermost first. *Security headers* (`SecurityHeaders`) put a Content-Security-Policy on every response — scripts and styles are our own files (the templates carry no inline handlers; `eq.js` and `playbar.js` use delegated listeners instead), images are ours plus YouTube stills, audio streams from `/audio`, fetch and the WebSocket stay on the origin, the only frame is YouTube's player, and embed hosting additionally allows the YouTube IFrame API and the donation button — together with `nosniff`, a strict referrer policy and `X-Frame-Options: SAMEORIGIN`. The policy is the part with teeth: with no inline script allowed, markup that reached a page through a mesh name or an oEmbed title couldn't run even if escaping slipped. A handler that already set one of these keeps its own value, and the policy is switchable (`security_headers`) or report-only (`csp_report_only`) for trying a change out. *Host pinning* (`TrustedHostMiddleware`, from `[web] allowed_hosts`) is off by default, because an appliance reached by IP, `.local` name and port-forward needs any host; turning it on keeps DNS-rebinding pages from reaching a LAN radio. *The origin guard* (`OriginGuard`) refuses cross-site state changes: browsers attach `Origin` to every POST and WebSocket handshake, so one that doesn't match `Host` (or is `null`, or `Sec-Fetch-Site: cross-site`) is another site driving the radio — otherwise any page a LAN user has open could `POST /api/skip`, or open `/ws` to claim the speaker role, since browsers don't enforce same-origin on WebSockets. A request with no `Origin` is not a browser (curl, the relay pusher, tests) and passes; reads stay open so an archive link pasted into a chat keeps working. The WebSocket is refused by closing before `accept`, which uvicorn turns into a plain 403 — the ASGI denial-response extension would let us write the 403 ourselves, but the websockets implementation then logs a failed handshake and tries a 500 on top. Inputs are bounded at the edge too: seek and duration values must be finite and at most a day, and the relay endpoint caps a push at 16 MiB / 5,000 messages (§14).
 
 Now Playing always tracks the latest day: the server re-cues an idle session onto the newest day both on each visit and live (a bus watcher rolls open tabs forward the moment a new day's first song lands), while never interrupting one that's actively playing. Playback controls include **🔀 shuffle** (reorders the upcoming queue) and a persistent **⤴ Export** that opens the whole day's songs as an anonymous YouTube `watch_videos` playlist regardless of what's playing. The queue uses a selection model: click a track, then **⤒ Play next** / **✕ Remove** act on it from the bar beside **Clear queue** — one tap-target set instead of per-row buttons, which reads better on touch. The spectrum-analyzer canvas renders only where it can be driven (web-playback mode); embed hosting streams inside a cross-origin YouTube iframe, so it's omitted there rather than sitting blank.
 
@@ -317,6 +343,8 @@ Now Playing always tracks the latest day: the server re-cues an idle session ont
 - **First boot:** no known WiFi → `provision.py` brings up a `MeshRadio-Setup` AP via NetworkManager (`nmcli`) with a captive-portal page: pick WiFi, paste `#music` channel key, optionally set CoreScope URL. Reboot into service.
 - **Updates:** OLED/web "Update" button = `git pull` + `pip install -e .` + restart. Nightly `yt-dlp` self-update as a systemd timer.
 - **Repo deliverables:** source, STLs (`/hardware/stl`), wiring diagram (`/hardware/wiring.svg` — everything is header/screw-terminal), BOM with live links, assembly guide with photos, channel-convention doc, image-build workflow.
+
+*As built, none of the above exists yet.* `system/provision.py` holds only `write_config_toml()`, which renders a minimal `config.toml` (profile, `#music` channel key, CoreScope URL) for a provisioned radio; the AP/captive-portal flow, the `pi-gen` image, the update button, the yt-dlp timer, `/hardware/` and the guides are all still to do. Today an appliance is set up by hand: clone, install, write `/etc/meshradio/config.toml`, and install [deploy/meshradio.service](deploy/meshradio.service) (§14).
 
 ---
 
@@ -331,9 +359,9 @@ Now Playing always tracks the latest day: the server re-cues an idle session ont
 
 ## 12. Assumptions to confirm
 
-1. Theme convention (`Theme:` prefix) is acceptable to propose to the channel.
+1. Theme convention (`Theme:` prefix) is acceptable to propose to the channel. *(Moot in practice: the channel already posts themes in its own phrasings, and the parser reads those — see §6.)*
 2. Live mode = auto-play when idle, enqueue when busy, never interrupt.
-3. AUS CoreScope exposes a pollable API for channel messages (adapter isolated regardless).
+3. AUS CoreScope exposes a pollable API for channel messages (adapter isolated regardless). *(Confirmed — §6.)*
 4. Mono 3W built-in speaker is an acceptable "decent"; stereo would double amp/driver cost and complicate the enclosure for marginal gain at this size.
 5. Data partition separate from OS partition so reflashing the image preserves the archive/cache.
 
@@ -365,7 +393,7 @@ Software impact is confined to `audio/routing.py`: on the full build, speaker/ja
 ### Ingestion & behavior tradeoffs (be honest in the docs)
 
 - **Latency:** live tracks arrive on the CoreScope poll cadence (2–5 min) instead of at RF speed. For a radio, this is nearly invisible — but it's not "watch the message land."
-- **Dependency:** the Lite relies on the AUS CoreScope poll rather than RF, so it's only as live as that feed and goes dark if CoreScope is down (the poller takes any number of CoreScope-compatible feeds, but no second public one is currently wired). The full build additionally keeps working off RF.
+- **Dependency:** the Lite relies on the CoreScope poll rather than RF, so it's only as live as its feeds. The backup analyzer feed (§6, `[comchan]`, on by default even for configs written at provisioning) covers an outage of the AUS instance, so the Lite goes dark only if both are down. The full build additionally keeps working off RF.
 - **Not a mesh client:** the Lite doesn't strengthen the mesh or work off-grid; it's a listener to the channel's reflection, not the channel. Worth a plain-language note in the kit docs so builders pick with eyes open.
 - **Upgrade path:** add a Heltec V3 later via a powered micro-USB hub (or migrate the SD card to a Pi 4) — the `hardware_profile` setting and the disabled `ingest/mesh.py` module make this a config change, not a rebuild.
 
@@ -440,7 +468,17 @@ the receiver's authenticated `POST /api/ingest` (`routes_ingest.py`). The
 receiver funnels them through the *same* ingest pipeline, so its dedupe makes
 re-pushes no-ops; the relay's cursor is an optimization, not a correctness
 requirement. Auth is a shared bearer token (`MESHRADIO_INGEST_TOKEN` on the host,
-`[relay].token` on the Pi), compared with `secrets.compare_digest`.
+`[relay].token` on the Pi), compared with `secrets.compare_digest` on bytes, so a
+non-ASCII garbage header is a 401 rather than a 500. The token rides on every
+push, so the pusher refuses a `push_url` that isn't `https://` — plain `http://`
+is allowed only to `localhost`, `127.0.0.1` or `::1` — and does so at startup: a
+misconfigured relay logs `relay disabled: …` and stays off instead of taking the
+radio down (or looping the systemd unit), and instead of leaking the token every
+two minutes. The receiver bounds what it will parse: a push is refused with a 413
+past 16 MiB (counted as the body arrives, since a chunked request carries no
+`Content-Length`) and only its first 5,000 messages are ingested. Relayed messages
+are stamped `source = 'corescope'` — they are the community channel's history,
+whichever feed first saw them.
 
 Auto-created "Untitled —" placeholder themes are *not* relayed — the receiver
 makes its own when the day's first link lands. So when the real theme message
@@ -496,7 +534,10 @@ playing is always left alone; a restored "playing" flag is treated as stale
   instance, hence the Starter plan).
 - **CI gate** ([.github/workflows/test.yml](.github/workflows/test.yml)) — Render
   deploys `main` only after the test suite is green (`autoDeployTrigger:
-  checksPass`), so a red suite never reaches production.
+  checksPass`), so a red suite never reaches production. CI installs from
+  `uv.lock` (`uv sync --locked`, which fails if the lock is stale), so what it
+  tests is the pinned set the project resolved, not whatever the index serves
+  that day.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
   session count); Render's health check hits it, and a stale age means *every*
   ingest source (relay, CoreScope) went quiet.
@@ -506,6 +547,12 @@ playing is always left alone; a restored "playing" flag is treated as stale
   `--restore-backup`, which snapshots the current DB first so it's reversible.
 - **The Pi relay** runs under systemd ([deploy/meshradio.service](deploy/meshradio.service)):
   `Restart=on-failure` rides out transient network/CoreScope hiccups.
+- **Hardening config** — a public host should also set `[web] public_url` (canonical
+  links and previews from config, not the `Host` header); a LAN appliance may set
+  `[web] allowed_hosts`. The origin guard and security headers are on by default
+  everywhere (§9). [meshradio.render.toml](meshradio.render.toml) sets neither
+  `public_url` nor `allowed_hosts`, so the hosted instance derives its URLs from the
+  request, with `x-forwarded-proto` supplying `https`.
 
 ### What this validates about the original design
 

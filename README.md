@@ -67,8 +67,11 @@ keeps the credit.
 
 ## Setup (no hardware — any PC, Mac dev box, or Linux/Pi server)
 
-Requirements: **Python 3.11+**, **ffmpeg**, and ~a few GB of disk for the
-audio cache. (Embed and demo modes need neither ffmpeg nor yt-dlp — see below.)
+Requirements: **Python 3.11+**, **ffmpeg**, a JavaScript runtime
+(**[deno](https://deno.com)**, which yt-dlp needs to solve YouTube's challenge),
+and ~a few GB of disk for the audio cache. The `mpv` backend (Pi appliance
+profiles) also needs `libmpv`. (Embed and demo modes need none of ffmpeg,
+yt-dlp or deno — see below.)
 
 ```sh
 git clone https://github.com/baldwinm/meshradio && cd meshradio
@@ -96,12 +99,15 @@ enabled = true                     # backup analyzer feed; base_url already defa
 
 [cache]
 ffmpeg_location = ""               # set to ffmpeg's folder if it's not on PATH
+# ytdlp_extra_args = ["--js-runtimes", "deno:/path/to/deno"]   # if deno isn't on PATH
 ```
 
 On first start MeshRadio backfills the channel's entire history from
 CoreScope — themes, songs, senders — then polls every 3 minutes for new
-posts. Audio downloads into `data/cache/` in the background (a fresh backfill
-takes a few minutes). Run `pytest` if you want to check the install.
+posts. Audio downloads into `data/cache/` in the background, two tracks at a
+time (`[cache] concurrency`), so a fresh backfill takes a few minutes. Run
+`pytest` if you want to check the install (CI does the same from the lockfile:
+`uv sync --locked --group dev && uv run pytest`).
 
 Verify it's working: the log shows `corescope poll: N new tracks`, and the
 Archive page fills with real days and themes.
@@ -125,12 +131,28 @@ see [meshradio.example.toml](meshradio.example.toml) for the full annotated
 set. Secrets (the relay/ingest token) belong in the environment
 (`MESHRADIO_INGEST_TOKEN`), not the committed file.
 
+**Command line.** Run `meshradio` with no flags to start the radio; the rest
+are overrides and one-shot maintenance commands that act on the archive and
+exit:
+
+| Flag | What it does |
+|---|---|
+| `--config PATH` | use this config file (precedence above) |
+| `--profile dev\|pi4\|lite` | override `hardware_profile` |
+| `--port N` | override the web port (default 8080) |
+| `--demo` | seed simulated channel traffic and playback — no yt-dlp/ffmpeg needed |
+| `-v` | debug logging |
+| `--list-backups`, `--restore-backup WHICH` | list / restore DB snapshots — see *Public hosting* |
+| `--set-theme TITLE`, `--theme-date DATE` | retitle a day — see [Fixing a theme](#fixing-a-theme) |
+| `--delete-track VIDEO`, `--track-date DATE` | drop a song from a day — see [Removing a song](#removing-a-song) |
+
 ---
 
 ## Using the web player
 
-Open **http://localhost:8080** (or `http://<pi-address>:8080` /
-`http://meshradio.local` from another device on your LAN).
+Open **http://localhost:8080** (or `http://<host-or-ip>:8080` from another
+device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname is
+`meshradio`).
 
 - **Now Playing** — art, title, artist, and which mesh member shared it, for
   the latest day. It rolls forward to a new day on its own as that day's first
@@ -160,7 +182,14 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   day. A title used on more than one day carries an `N×` badge, so it's easy to
   see what's been done before picking tomorrow's. Days that never got a theme
   aren't listed.
-- **Keyboard** — <kbd>Space</kbd> play/pause, <kbd>N</kbd> next track,
+- **Search** — find a song by title, artist, the member who shared it, or the
+  theme it was shared under. Results run newest first, are cut off at 100 (the
+  page says so when more match), and each links to its day, with a **+ queue**
+  button on any song that can be played.
+- **Skins** — the header's dropdown re-dresses the player as **Winamp** (the
+  default), **iTunes** or **Media Player**. The choice is kept in a cookie and
+  applied on the server, so a page never flashes the wrong skin while it loads.
+- **Keyboard** — <kbd>Space</kbd> (or <kbd>K</kbd>) play/pause, <kbd>N</kbd> next track,
   <kbd>←</kbd>/<kbd>→</kbd> jump back or forward 10s, <kbd>↑</kbd>/<kbd>↓</kbd>
   volume, <kbd>M</kbd> mute, <kbd>?</kbd> help. They drive the on-screen
   controls, so nothing gets out of step, and they keep out of the way while
@@ -183,7 +212,8 @@ Open **http://localhost:8080** (or `http://<pi-address>:8080` /
   page advertises it, so most readers find it from the site's address alone.
 - **Shareable links** — a day pasted into a chat unfurls with its theme, song
   count, and cover art, so a link to `/archive/2026-08-11` says something
-  before anyone clicks it.
+  before anyone clicks it. On an iPhone, **Add to Home Screen** names the app
+  *MeshRadio* and uses the logo as its icon, not the day's theme.
 - **🎲 Keep playing** — never run out: when the queue empties, this keeps the
   music going with random songs pulled from the archive. Unlike **Start radio**
   it needs no YouTube access, so it's the "don't stop at the end of the day"
@@ -245,6 +275,11 @@ token    = "…"                                 # must match its MESHRADIO_INGE
 interval_s = 120
 ```
 
+`push_url` has to be `https://`: the token rides on every push, so plain
+`http://` is accepted only for `localhost` / `127.0.0.1` / `::1` (a dev receiver
+on the same machine). Anything else is logged as `relay disabled: …` at startup
+and the relay stays off — the radio itself keeps running.
+
 The relay is self-healing: each push reports the receiver's track count, and
 when it drops below the home node's (e.g. a fresh host with an empty disk) the
 pusher resets its cursor and re-backfills the whole channel automatically. This
@@ -267,6 +302,34 @@ the current DB first, so a restore is itself reversible.
 
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
 for the unit and install/update commands.
+
+### Hardening
+
+The player has no login, so the web layer assumes no other site's page should be
+able to drive it:
+
+- **Cross-site requests are refused.** Every POST and WebSocket handshake has to
+  come from a page this server served (its `Origin` must match `Host`); a
+  different or `null` origin, or `Sec-Fetch-Site: cross-site`, gets a 403. Reads
+  stay open, so an archive link pasted into a chat still works, and non-browser
+  callers (curl, the relay) send no `Origin` and are unaffected.
+- **Security headers and a Content-Security-Policy** go on every response: no
+  inline script, YouTube's stills and player as the only third parties (plus the
+  donation button on the embed host), `nosniff`, a strict referrer policy and
+  `X-Frame-Options: SAMEORIGIN`. Set `[web] security_headers = false` if a proxy
+  in front already sets them, or `csp_report_only = true` to try a policy change
+  out — the browser console then reports what it would have blocked, without
+  blocking it.
+- **Pin the host name** with `[web] allowed_hosts` (`["meshradio.local",
+  "192.168.1.20"]`) to keep DNS-rebinding pages away from a LAN radio. Empty
+  means any host, which an appliance reached by IP, `.local` name and
+  port-forward all need.
+- **Name the site** with `[web] public_url` on a public host, so canonical links,
+  link previews and the sitemap come from config rather than the request's
+  `Host` header.
+- **Inputs are bounded.** `/api/ingest` takes at most 16 MiB / 5,000 messages per
+  push, an analyzer response past 64 MiB is abandoned, and seek or duration
+  values that are not finite (or run past a day) are rejected.
 
 ### Fixing a theme
 
@@ -336,9 +399,9 @@ IFrame player, so normal YouTube ad rules apply there.
 
 **What if yt-dlp breaks (YouTube changed something)?**
 New tracks queue as "caching…" and retry; the already-cached archive keeps
-playing. On the appliance a nightly job updates yt-dlp automatically — on a
-dev box run `pip install -U yt-dlp`. Embed mode sidesteps this entirely (no
-downloads).
+playing. Update it with `pip install -U yt-dlp` (or `uv pip install -U
+yt-dlp`) — an automatic nightly update for the appliance is planned but not
+built yet. Embed mode sidesteps this entirely (no downloads).
 
 **Does this need a mesh node plugged in?**
 No. The CoreScope path covers everything with ~3 minutes of latency. A local
@@ -371,12 +434,15 @@ integration pending.**
 | **Embed mode + per-visitor sessions (public hosting)** | ✅ working, deployed on Render |
 | **Relay (home node → hosted instance) + auto-backfill** | ✅ working, running on the Pi |
 | **Supervised runtime, CI gate, `/healthz`** | ✅ working |
+| Archive browsing: calendar, all-themes list, search, stats, member pages, Atom feed, link previews | ✅ working, tested |
+| DB snapshots + restore, `--set-theme` / `--delete-track` operator fixes | ✅ working, tested |
+| Hardening: cross-site guard, CSP + security headers, https-only relay | ✅ working, tested |
 | Mesh serial ingestion (meshcore) | 🟡 built, needs validation on a Heltec V3 |
 | OLED panel + encoder/buttons | 🟡 skeleton, needs hardware bring-up |
 | PipeWire routing (pi4/lite backends) | 🟡 built, needs hardware bring-up |
 | Bluetooth pairing (BlueZ) | ⬜ interface stubbed |
 | UPS fuel gauge / safe shutdown | ⬜ stubbed |
-| First-boot provisioning, pi-gen image, STLs, BOM docs | ⬜ not started |
+| First-boot provisioning, pi-gen image, STLs, BOM docs | ⬜ not started (only the config-writing helper in `system/provision.py` exists) |
 
 ## Layout
 
@@ -385,7 +451,8 @@ meshradio/
 ├── app.py           # asyncio entrypoint, wires modules to the bus
 ├── bus.py           # tiny pub/sub EventBus + event vocabulary
 ├── config.py        # TOML config over dataclass defaults (+ env secrets)
-├── db.py            # aiosqlite layer + migrations (themes/tracks/plays/settings)
+├── db.py            # aiosqlite layer + migrations (themes/tracks/plays/settings/…)
+├── backup.py        # rotating DB snapshots + --list-backups / --restore-backup
 ├── net.py           # shared outbound HTTP client setup (User-Agent, timeouts)
 ├── runtime.py       # supervised task/Service runtime (restart-with-backoff)
 ├── ingest/          # parse.py (pure), service.py, mesh.py, corescope.py, relay.py
@@ -394,16 +461,17 @@ meshradio/
 ├── ui/              # panel.py (OLED + controls; log panel on dev)
 ├── system/          # power.py (fuel gauge), provision.py (first boot)
 └── web/             # FastAPI app split into:
-    ├── server.py        # create_app: assembles everything, lifespan, sessions
-    ├── context.py       # WebContext shared state on app.state
+    ├── server.py        # create_app: assembly, lifespan, sessions, origin guard, CSP headers
+    ├── context.py       # WebContext shared state on app.state (+ short-TTL archive caches)
     ├── sessions.py      # per-visitor session players + speaker registry
-    ├── routes_pages.py  # HTML pages + htmx partials
+    ├── routes_pages.py  # HTML pages (now playing, archive, search, stats, members…) + htmx partials
     ├── routes_api.py    # player/queue control API
     ├── routes_ingest.py # /audio streaming, relay /api/ingest, /healthz
     ├── ws.py            # WebSocket: forwards bus events → htmx re-fetch
     ├── feed.py          # /feed.xml Atom builder (pure; safe against hostile text)
-    ├── static/         # vendored htmx + js/ (embed, eq, playbar, radio), style.css
-    └── templates/      # Jinja2 (base, index, archive, partials/)
+    ├── static/          # vendored htmx, style.css, icons, and js/ — radio (socket + audio),
+    │                    #   embed, eq, playbar, queue, keys, mediasession, nav, help, skin, fx
+    └── templates/       # Jinja2 (base, index, archive*, search, stats, member, about, partials/)
 
 deploy/meshradio.service   # systemd unit for the Pi relay
 render.yaml + *.render.toml # public embed-mode deployment
