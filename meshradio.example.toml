@@ -37,6 +37,9 @@ quiet_hours = ""                # e.g. "22:00-08:00" to suppress autoplay overni
 timezone = "America/Chicago"    # channel-local day boundary for themes
 volume = 70
 radio_batch = 10                # tracks pulled per YouTube Mix fetch in radio mode
+station_batch = 10              # archived songs queued per "Keep playing" (archive station) top-up
+live_window_s = 1800            # only songs posted within this many seconds auto-play or queue;
+                                # older ones are backfill and stay archive-only
 
 [cache]
 max_bytes = 8589934592          # 8 GB LRU cap
