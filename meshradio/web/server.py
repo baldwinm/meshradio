@@ -39,7 +39,8 @@ from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
-from .context import WebContext, absolute_url
+from .context import WebContext, absolute_url, forwarded_scheme
+from .ratelimit import RateLimiter
 from .sessions import (
     MAX_SOCKETS_COMMUNAL,
     SESSION_COOKIE,
@@ -271,6 +272,8 @@ def create_app(
     public_url: str = "",
     security_headers: bool = True,
     csp_report_only: bool = False,
+    trusted_proxies: Sequence[str] = ("127.0.0.1",),
+    rate_limit: bool = True,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
@@ -350,9 +353,7 @@ def create_app(
                 # deployments sit behind a TLS-terminating proxy); plain-HTTP
                 # LAN/appliance use keeps working without it.
                 https = (
-                    request.url.scheme == "https"
-                    or request.headers.get("x-forwarded-proto", "")
-                    .split(",")[0].strip() == "https"
+                    request.url.scheme == "https" or forwarded_scheme(request) == "https"
                 )
                 response.set_cookie(
                     SESSION_COOKIE, cookie,
@@ -382,6 +383,8 @@ def create_app(
     bus.listen(ctx.invalidate, TRACK_DISCOVERED, TRACK_READY, TRACK_FAILED, THEME_CREATED)
     # See context.absolute_url: the one place the site names itself.
     app.state.public_url = public_url.rstrip("/")
+    # See context.forwarded_scheme: whose X-Forwarded-* headers to believe.
+    app.state.trusted_proxies = frozenset(trusted_proxies)
 
     @app.exception_handler(404)
     async def not_found(request: Request, exc):
@@ -410,6 +413,11 @@ def create_app(
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
 
+    # Inside the origin guard, so a refused cross-site request never costs a
+    # client its budget; outside the session middleware, so a refused press
+    # mints no cookie and opens nothing.
+    if rate_limit:
+        app.add_middleware(RateLimiter)
     # Outermost, so a refused request never reaches the session or skin
     # middleware either (each add_middleware wraps everything before it).
     app.add_middleware(OriginGuard)

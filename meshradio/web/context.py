@@ -86,6 +86,27 @@ def calendar_month(days: list[dict[str, Any]], key: str) -> dict[str, Any]:
     return {"label": month_label(key), "key": key, "weeks": weeks}
 
 
+def proxy_trusted(request: Request) -> bool:
+    """Did this request come through a proxy whose forwarding headers we
+    believe (``[web] trusted_proxies``)? With uvicorn's own proxy handling on
+    the same list, a trusted proxy has already been replaced by the visitor
+    in ``request.client``; what's left to check here is the direct peer."""
+    trusted = getattr(request.app.state, "trusted_proxies", frozenset({"127.0.0.1"}))
+    peer = request.client.host if request.client else ""
+    return "*" in trusted or peer in trusted
+
+
+def forwarded_scheme(request: Request) -> str | None:
+    """The scheme a trusted proxy says the visitor used — ``http`` or
+    ``https`` — else None. A header from anyone else is just a header: a
+    LAN client claiming https must not get a Secure cookie it can't send
+    back, or an https canonical link for a plain-http radio."""
+    if not proxy_trusted(request):
+        return None
+    value = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return value if value in ("http", "https") else None
+
+
 def absolute_url(request: Request, path: str | None = None) -> str:
     """A full ``https://host/path`` URL for this request (or for ``path`` on the
     same host) — what link previews, canonical links and the sitemap need.
@@ -105,8 +126,8 @@ def absolute_url(request: Request, path: str | None = None) -> str:
     if public:
         base = URL(public)
         return str(url.replace(scheme=base.scheme, netloc=base.netloc))
-    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
-    if forwarded in ("http", "https"):
+    forwarded = forwarded_scheme(request)
+    if forwarded:
         url = url.replace(scheme=forwarded)
     return str(url)
 

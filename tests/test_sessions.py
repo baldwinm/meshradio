@@ -525,3 +525,40 @@ async def test_shutdown_flushes_and_stops_every_session(db, bus):
     assert snap["status"] == "playing" and snap["position"] >= 42
     assert app.state.sessions.count() == 0
     assert app.state.sessions._maintenance is None
+
+
+def embed_app_trusting(db, bus, proxies):
+    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+
+    def factory(out_bus: EventBus) -> PlayerService:
+        return PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend(), events_out=out_bus)
+
+    return create_app(bus, db, player, make_router("dev", bus), player_factory=factory,
+                      trusted_proxies=proxies)
+
+
+async def test_forwarding_headers_are_believed_only_from_a_trusted_proxy(db, bus):
+    """A LAN client claiming https must not get an https canonical link or a
+    Secure cookie it can't send back; a trusted proxy's word is taken."""
+    headers = {"x-forwarded-proto": "https"}
+
+    def peer(app, host):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, client=(host, 1)), base_url="http://test"
+        )
+
+    # The loopback peer is trusted by default: the test client, a local proxy.
+    async with peer(embed_app_trusting(db, bus, ["127.0.0.1"]), "127.0.0.1") as client:
+        resp = await client.get("/", headers=headers)
+        assert 'rel="canonical" href="https://test/"' in resp.text
+        assert "secure" in resp.headers["set-cookie"].lower()
+    # A client on the LAN saying the same is just a client saying things.
+    async with peer(embed_app_trusting(db, bus, ["127.0.0.1"]), "192.168.1.7") as client:
+        resp = await client.get("/", headers=headers)
+        assert 'rel="canonical" href="http://test/"' in resp.text
+        assert "secure" not in resp.headers["set-cookie"].lower()
+    # "*": every peer is the proxy — a host where nothing else can reach the app.
+    async with peer(embed_app_trusting(db, bus, ["*"]), "192.168.1.7") as client:
+        resp = await client.get("/", headers=headers)
+        assert 'rel="canonical" href="https://test/"' in resp.text
+        assert "secure" in resp.headers["set-cookie"].lower()
