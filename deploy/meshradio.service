@@ -7,6 +7,19 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now meshradio
 #
+# Secrets go in /etc/meshradio/env (root-owned, mode 0600), not in
+# config.toml:
+#
+#   MESHRADIO_RELAY_TOKEN=…      # the pusher's; must match the hosted receiver
+#   MESHRADIO_INGEST_TOKEN=…     # only if this node is itself a relay receiver
+#
+# The archive and audio cache live under /var/lib/meshradio, which systemd
+# creates and owns for the service (StateDirectory=): set `data_dir` there
+# in config.toml, or leave it as "./data" — the working directory is that
+# one, so a relative path lands inside it. A data_dir anywhere else needs a
+# ReadWritePaths= line of its own, because the rest of the file system is
+# read-only to the service (see the sandbox below).
+#
 # Day-to-day:
 #   journalctl -u meshradio -f            # follow logs
 #   sudo systemctl restart meshradio      # apply config or code changes
@@ -20,12 +33,58 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
+Group=pi
+EnvironmentFile=-/etc/meshradio/env
 ExecStart=/home/pi/meshradio/.venv/bin/meshradio --config /etc/meshradio/config.toml
 Restart=on-failure
 RestartSec=5
 # The radio should ride out transient failures (network blips, CoreScope
 # hiccups) rather than give up; on-failure + 5s covers crashes without
 # fighting a clean `systemctl stop`.
+
+# -- Sandbox -----------------------------------------------------------------
+# The service runs yt-dlp, ffmpeg and a JavaScript runtime (deno) against
+# whatever the channel links to, so it gets as little of the machine as it
+# needs. Writable: the state directory, the caches yt-dlp and deno keep under
+# $XDG_CACHE_HOME, and a private /tmp. Everything else is read-only,
+# including the home directory the venv lives in.
+StateDirectory=meshradio
+CacheDirectory=meshradio
+WorkingDirectory=/var/lib/meshradio
+Environment=XDG_CACHE_HOME=/var/cache/meshradio
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+UMask=0077
+# No way up: no setuid binaries, no capabilities, no kernel knobs, no other
+# users' processes, no namespaces, no realtime scheduling.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Sockets: the web UI, the analyzers, YouTube and the relay over IP; PipeWire
+# (mpv's output) and D-Bus over Unix sockets. Add AF_BLUETOOTH when pairing
+# lands.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# A runaway (a backfill, a stuck download and a decoder at once) is restarted
+# rather than allowed to take the Pi down with it. Above the RAM of a Zero 2 W,
+# where it simply never applies.
+MemoryMax=1G
+# Left out on purpose: PrivateDevices= / DevicePolicy= — the appliance
+# profiles reach the I2C OLED, the GPIO chip and the mesh node's USB serial
+# port through the pi user's groups (i2c, gpio, dialout) — and
+# MemoryDenyWriteExecute=, which would stop deno's JIT.
 
 [Install]
 WantedBy=multi-user.target

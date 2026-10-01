@@ -331,7 +331,14 @@ To restore, stop the service and run `meshradio --list-backups` then
 the current DB first, so a restore is itself reversible.
 
 The Pi runs under systemd — see [deploy/meshradio.service](deploy/meshradio.service)
-for the unit and install/update commands.
+for the unit and install/update commands. The unit sandboxes the service: it
+runs yt-dlp, ffmpeg and deno against whatever the channel links to, so the
+file system is read-only to it apart from `/var/lib/meshradio` (where
+`data_dir` belongs), its cache directory and a private `/tmp`, with no
+capabilities, no setuid, no kernel knobs and a memory ceiling. The tokens
+go in `/etc/meshradio/env` (`MESHRADIO_RELAY_TOKEN`, and
+`MESHRADIO_INGEST_TOKEN` if the node is itself a receiver), mode 0600, which
+the unit reads as an `EnvironmentFile`.
 
 ### Hardening
 
