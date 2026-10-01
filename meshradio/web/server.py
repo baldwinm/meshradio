@@ -294,6 +294,10 @@ def create_app(
         task = supervise("ingest-health-watch", watch_ingest)
         yield
         task.cancel()
+        # Visitors' snapshots flush every few seconds; on shutdown, write
+        # what is pending now rather than lose it with the process.
+        if sessions is not None:
+            await sessions.stop()
 
     app = FastAPI(title="MeshRadio", lifespan=lifespan)
     # HTML, CSS and JS are mostly repeated markup — the archive pages compress
@@ -401,6 +405,7 @@ def create_app(
 
     app.include_router(routes_pages.router)
     app.include_router(routes_api.router)
+    app.include_router(routes_api.output_router)
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
 

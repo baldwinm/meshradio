@@ -2,6 +2,7 @@
 player, so visitors can't pause, skip, or steal audio from each other."""
 
 import asyncio
+import json
 import time
 from contextlib import asynccontextmanager
 
@@ -506,3 +507,21 @@ async def test_no_session_cookie_on_assets_health_feeds_or_the_relay(db, bus):
         resp = await client.post("/api/ingest")           # 404: no token configured
         assert resp.status_code == 404 and "mr_sid" not in resp.cookies
         assert "mr_sid" in (await client.get("/archive")).cookies   # a page still does
+
+
+async def test_shutdown_flushes_and_stops_every_session(db, bus):
+    """The lifespan's shutdown writes what the periodic flush hadn't yet and
+    stops every player, so a deploy or restart loses nothing a visitor did."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with app.router.lifespan_context(app):
+        async with client_for(app) as client:
+            await client.post("/api/play-day/2026-07-06")
+            await client.post("/api/seek/42")
+            sid = sid_of(client)
+        assert app.state.sessions.count() == 1
+        assert await db.load_web_session(sid) is None        # not flushed yet
+    snap = json.loads(await db.load_web_session(sid))
+    assert snap["status"] == "playing" and snap["position"] >= 42
+    assert app.state.sessions.count() == 0
+    assert app.state.sessions._maintenance is None

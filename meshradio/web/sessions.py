@@ -148,6 +148,7 @@ class SessionManager:
         self._sessions: dict[str, Session] = {}
         self._dirty: set[str] = set()
         self._maintenance: asyncio.Task | None = None
+        self._day_watch: asyncio.Task | None = None
         self._newest_day: str | None = None   # newest-day query cache
         self._rolled_day: str | None = None   # last day the watcher rolled tabs to
         self._secret: bytes | None = None     # cookie signing key, see secret()
@@ -231,8 +232,28 @@ class SessionManager:
         if self._maintenance is None:
             self._maintenance = supervise("session-maintenance", self._maintenance_loop)
             if self._bus is not None:
-                supervise("session-day-watch", self._watch_new_days)
+                self._day_watch = supervise("session-day-watch", self._watch_new_days)
         return session
+
+    async def stop(self) -> None:
+        """Shut down cleanly: write every changed snapshot and stop every
+        player. The app's lifespan calls this on shutdown; without it a
+        deploy or restart dropped whatever the last flush interval (5 s)
+        hadn't written, for every visitor at once."""
+        for task in (self._maintenance, self._day_watch):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._maintenance = self._day_watch = None
+        await self.flush()
+        sessions, self._sessions = self._sessions, {}
+        for session in sessions.values():
+            await session.player.stop()
+        if sessions:
+            log.info("flushed and stopped %d session(s)", len(sessions))
 
     async def _refresh(self, session: Session) -> None:
         """A warm session that isn't mid-playback and is parked on an older
