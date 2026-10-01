@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from meshradio.app import _run_set_theme
+from meshradio.cli import _run_set_theme
 from meshradio.config import Config
 from meshradio.db import Database
 

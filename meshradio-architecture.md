@@ -127,15 +127,26 @@ UPS HAT with I2C fuel gauge and pass-through charging (Waveshare UPS HAT (B) or 
 A **single asyncio application** with clearly separated modules communicating over an in-process event bus, backed by SQLite. Not microservices, not MQTT-between-daemons. Rationale: this is an appliance, and the failure domain is the whole box anyway; one process means one systemd unit, one log stream, no IPC serialization bugs, and a codebase a future contributor (or an AI pair) can hold in their head. This is the single biggest maintainability decision in the project.
 
 *As-built layout (the design above held; `backup.py`, `net.py`, `runtime.py`,
-`ingest/relay.py`, `media/radio.py` were added, and `web/` grew a router split —
-see §14):*
+`ingest/relay.py`, `media/radio.py` were added, `web/` grew a router split —
+see §14 — and the three largest modules were later split by concern: `db.py`
+into a package behind the same `Database` facade, the command line out of
+`app.py` into `cli.py`, the playback engines out of `player.py`):*
 
 ```
 meshradio/
-├── app.py              # asyncio entrypoint, wires modules to the bus
-├── bus.py              # tiny pub/sub EventBus (asyncio queues)
+├── app.py              # asyncio entrypoint (run), wires modules to the bus
+├── cli.py              # the `meshradio` command: start, or one maintenance task and exit
+├── bus.py              # tiny pub/sub EventBus (asyncio queues, plus synchronous listeners)
 ├── config.py           # TOML over dataclass defaults, checked at load; secrets from env
-├── db.py               # aiosqlite layer + migrations; one connection, writers serialised
+├── db/                 # aiosqlite layer behind one Database facade
+│   ├── core.py         #   connection, the write transaction, migration runner, settings
+│   ├── migrations.py   #   the versioned schema scripts
+│   ├── fields.py       #   bounds on free text and lengths, applied where rows are written
+│   ├── themes.py       #   query mixins, one per concern: themes, tracks (+ plays),
+│   ├── tracks.py       #   the archive's read side (calendar, search, stats, members),
+│   ├── archive.py      #   the relay's cursors, visitor session snapshots
+│   ├── relay.py
+│   └── web_sessions.py
 ├── backup.py           # rotating DB snapshots; --list-backups / --restore-backup (§14)
 ├── net.py              # shared outbound HTTP client (User-Agent, timeouts)
 ├── runtime.py          # supervised task/Service runtime — restart-with-backoff
@@ -147,7 +158,8 @@ meshradio/
 │   └── relay.py        # push local channel history to a hosted instance (§14)
 ├── media/
 │   ├── cacher.py       # yt-dlp download-to-cache worker (self-healing retries)
-│   ├── player.py       # backends: mpv | web | embed | null; queue + live policy
+│   ├── backends.py     # engines behind one protocol: mpv | web | embed | null
+│   ├── player.py       # queue + live policy over a backend
 │   ├── radio.py        # YouTube-Mix "station" continuations (radio mode)
 │   └── metadata.py     # oEmbed / fallback metadata resolution
 ├── audio/
@@ -187,7 +199,7 @@ policy → `panel` and `web` subscribe to **`player.state`** and render. Themes
 announce on **`theme.created`**; routing, power, and ingest health emit
 **`output.changed`**, **`power.state`**, and **`ingest.status`** (the last also
 feeds `/healthz`). Every module is a subscriber/publisher on the bus and touches
-the DB through `db.py` only. The web WebSocket forwards bus payloads verbatim
+the DB through the `db` package only. The web WebSocket forwards bus payloads verbatim
 (they're plain dicts), and the page reacts by re-fetching htmx partials — on Now
 Playing, a single `/partials/live` request that swaps the player bar, queue and
 day nav together as out-of-band regions, rather than one request per region.
@@ -216,7 +228,7 @@ The whole archive sits behind **one aiosqlite connection** in WAL mode, shared b
 
 Three dedupe rules apply. `dedupe_hash = sha256("channel|sender|video_id|mesh_ts_bucketed_to_60s")` lets mesh and CoreScope ingestion coexist without double-entry: whichever path delivers the *same message* first wins, the other no-ops on the UNIQUE constraint (an `ON CONFLICT … DO NOTHING` insert). Separately, a **partial unique index on `(theme_id, video_id)`** enforces *one song per day's playlist* — a repost of a video already under a theme is refused, so a song never shows up twice no matter who reposts it. Radio filler (`theme_id` NULL) is exempt; the index's partial `WHERE theme_id IS NOT NULL` lets a Mix echo the same video across days. Third, a **tombstone** in `deleted_tracks` keyed on `(date, video_id)`: when the operator removes a song by hand (`--delete-track`) the link is still on the channel, so any re-backfill — the relay's self-healing one, a restore, a cursor reset — would insert it straight back. `add_track` consults the tombstone and ignores the replay, the same way a locked theme ignores a corrected repost. It is scoped to that one day, so the song can be shared again on another.
 
-Schema is applied through a **versioned migration list** in `db.py`, run in order at connect and recorded via `PRAGMA user_version`. Migrations that landed after the initial design:
+Schema is applied through a **versioned migration list** in `db/migrations.py`, run in order at connect and recorded via `PRAGMA user_version`. Migrations that landed after the initial design:
 
 - **`radio` / `letsmesh` / `comchan` track sources** — Mix continuations (§7), a since-retired backup analyzer feed, and the backup feed that replaced it (both §6). SQLite can't `ALTER` a `CHECK`, so each rebuilds the `tracks` table; `'letsmesh'` stays in the constraint because existing rows may carry it, even though nothing writes it now. A rebuild drops the table's indexes with it, so by the `comchan` migration all five `idx_tracks_*` indexes have to be recreated, not just the two the original schema had — and any future rebuild must also recreate the `sender` index added below.
 - **`web_sessions`** — per-visitor player snapshots (queue, position, day) for embed hosting (§14), so a visitor's session survives a redeploy (which restarts the process). Keyed by the session cookie.

@@ -10,8 +10,8 @@ from argparse import Namespace
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from meshradio.app import _run_delete_track
 from meshradio.bus import EventBus
+from meshradio.cli import _run_delete_track
 from meshradio.config import Config
 from meshradio.db import Database
 from meshradio.ingest.parse import untitled_theme

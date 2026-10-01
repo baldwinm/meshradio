@@ -406,13 +406,13 @@ async def test_a_failing_migration_leaves_nothing_behind(tmp_path, monkeypatch):
     await db.connect()                                  # fully migrated
     await db.close()
     bad = "CREATE TABLE extra(x); INSERT INTO extra VALUES(1); CREATE TABLE extra(x);"
-    monkeypatch.setattr(db_mod, "MIGRATIONS", MIGRATIONS + [bad])
+    monkeypatch.setattr(db_mod.migrations, "MIGRATIONS", MIGRATIONS + [bad])
     db = Database(path)
     with pytest.raises(sqlite3.OperationalError):
         await db.connect()
     assert not db.db.in_transaction                     # rolled back, not left open
     await db.close()
-    monkeypatch.setattr(db_mod, "MIGRATIONS", MIGRATIONS)   # the bad script is pulled
+    monkeypatch.setattr(db_mod.migrations, "MIGRATIONS", MIGRATIONS)   # the bad script is pulled
     db = Database(path)
     await db.connect()
     try:

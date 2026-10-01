@@ -521,15 +521,19 @@ integration pending.**
 
 ```
 meshradio/
-├── app.py           # asyncio entrypoint, wires modules to the bus
+├── app.py           # asyncio entrypoint (run): wires modules to the bus
+├── cli.py           # the `meshradio` command: start the radio, or one maintenance task
 ├── bus.py           # tiny pub/sub EventBus + event vocabulary
-├── config.py        # TOML config over dataclass defaults (+ env secrets)
-├── db.py            # aiosqlite layer + migrations (themes/tracks/plays/settings/…)
+├── config.py        # TOML config over dataclass defaults, checked at load (+ env secrets)
+├── db/              # aiosqlite layer behind one Database facade: core.py (connection,
+│                    #   transactions, the migrations.py runner), fields.py (text bounds),
+│                    #   and query mixins — themes, tracks, archive, relay, web_sessions
 ├── backup.py        # rotating DB snapshots + --list-backups / --restore-backup
 ├── net.py           # shared outbound HTTP client setup (User-Agent, timeouts)
 ├── runtime.py       # supervised task/Service runtime (restart-with-backoff)
 ├── ingest/          # parse.py (pure), service.py, mesh.py, corescope.py, relay.py
-├── media/           # cacher.py (yt-dlp), player.py, radio.py (YT Mix), metadata.py
+├── media/           # cacher.py (yt-dlp), backends.py (mpv | web | embed | null),
+│                    #   player.py (queue + live policy), radio.py (YT Mix), metadata.py
 ├── audio/           # routing.py (PipeWire/wpctl, per-profile), bluetooth.py
 ├── ui/              # panel.py (OLED + controls; log panel on dev)
 ├── system/          # power.py (fuel gauge), provision.py (first boot)

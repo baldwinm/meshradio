@@ -10,7 +10,7 @@ import logging
 
 import pytest
 
-from meshradio import app as app_mod
+from meshradio import cli as cli_mod
 from meshradio.config import Config, ConfigError, load_config, validate_config
 
 
@@ -116,7 +116,7 @@ def test_main_stops_on_a_bad_config(tmp_path, monkeypatch, capsys):
     path = write(tmp_path, "[relay]\ninterval_s = -5\n")
     monkeypatch.setattr("sys.argv", ["meshradio", "--config", str(path)])
     with pytest.raises(SystemExit) as caught:
-        app_mod.main()
+        cli_mod.main()
     assert caught.value.code == 2
     assert "[relay] interval_s must be at least 1, got -5" in capsys.readouterr().err
 
@@ -125,6 +125,6 @@ def test_main_checks_the_port_override_too(tmp_path, monkeypatch, capsys):
     path = write(tmp_path, "")
     monkeypatch.setattr("sys.argv", ["meshradio", "--config", str(path), "--port", "70000"])
     with pytest.raises(SystemExit) as caught:
-        app_mod.main()
+        cli_mod.main()
     assert caught.value.code == 2
     assert "[web] port" in capsys.readouterr().err

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from meshradio import app as app_mod
+from meshradio import cli as cli_mod
 from meshradio.config import ComchanConfig, Config, CoreScopeConfig
 from meshradio.db import Database
 from meshradio.ingest import corescope
@@ -536,11 +536,11 @@ async def test_probe_feed_cli(tmp_path, capsys, monkeypatch):
         "https://analyzer.comchan.net": FakeAnalyzer([]),
     }
     monkeypatch.setattr(
-        app_mod, "http_client",
+        cli_mod, "http_client",
         lambda **kw: outcomes[kw["base_url"]].client(kw["base_url"]),
     )
 
-    assert await app_mod._run_probe_feed(config, Namespace(probe_feed="all")) == 0
+    assert await cli_mod._run_probe_feed(config, Namespace(probe_feed="all")) == 0
     out = capsys.readouterr().out
     assert "corescope: https://scope.example  #music" in out
     assert "comchan: https://analyzer.comchan.net  #music" in out
@@ -550,19 +550,19 @@ async def test_probe_feed_cli(tmp_path, capsys, monkeypatch):
     assert not config.db_path.exists()                         # never opened the archive
 
     outcomes["https://analyzer.comchan.net"] = _Blocked()
-    assert await app_mod._run_probe_feed(config, Namespace(probe_feed="comchan")) == 1
+    assert await cli_mod._run_probe_feed(config, Namespace(probe_feed="comchan")) == 1
     out = capsys.readouterr().out
     assert "FAILED" in out and "HTTP 403" in out and "corescope:" not in out
 
     config.comchan.enabled = False
     config.corescope.base_url = ""
     outcomes["https://analyzer.comchan.net"] = FakeAnalyzer([], channels=["#general"])
-    assert await app_mod._run_probe_feed(config, Namespace(probe_feed="all")) == 0
+    assert await cli_mod._run_probe_feed(config, Namespace(probe_feed="all")) == 0
     out = capsys.readouterr().out
     assert "corescope: no base_url configured" in out
     assert "enabled = false" in out
     assert "#music is NOT among them" in out
-    assert await app_mod._run_probe_feed(config, Namespace(probe_feed="corescope")) == 1
+    assert await cli_mod._run_probe_feed(config, Namespace(probe_feed="corescope")) == 1
 
 
 class _Blocked:

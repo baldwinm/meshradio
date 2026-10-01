@@ -30,7 +30,7 @@ hw = [
 ]
 
 [project.scripts]
-meshradio = "meshradio.app:main"
+meshradio = "meshradio.cli:main"
 
 [dependency-groups]
 dev = [
