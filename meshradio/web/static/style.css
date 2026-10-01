@@ -33,14 +33,26 @@ body {
   padding: 0 1rem 3rem;
 }
 
-/* -- footer (Buy-Me-a-Coffee, public host only) --------------------------- */
+/* -- footer (the coffee link, public host only) --------------------------- */
 #site-footer {
   margin-top: 1.5rem;
   padding-top: 1rem;
   border-top: 1px solid var(--face-lo);
   text-align: center;
 }
-#site-footer .bmc-btn { vertical-align: middle; }
+/* Our own button in the donation site's colours, so the policy needs no
+   third-party script, style or font for it. */
+#site-footer .coffee {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  border: 1px solid #000;
+  border-radius: 6px;
+  background: #ffdd00;
+  color: #000;
+  font-weight: 600;
+  text-decoration: none;
+}
+#site-footer .coffee:hover { filter: brightness(1.06); }
 
 /* -- help (? button + dialog) --------------------------------------------- */
 .help-btn {

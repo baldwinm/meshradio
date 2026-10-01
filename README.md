@@ -369,12 +369,21 @@ able to drive it:
   that already has it is ignored, since each claim re-sends state to every
   open socket.
 - **Security headers and a Content-Security-Policy** go on every response: no
-  inline script, YouTube's stills and player as the only third parties (plus the
-  donation button on the embed host), `nosniff`, a strict referrer policy and
-  `X-Frame-Options: SAMEORIGIN`. Set `[web] security_headers = false` if a proxy
+  inline script or style, YouTube's stills and player as the only third party,
+  the WebSocket allowed to this host alone, `nosniff`, a strict referrer policy,
+  `X-Frame-Options: SAMEORIGIN`, a same-origin opener policy, and a permissions
+  policy that turns off the camera, microphone, location and payment APIs no
+  page here uses. A site named with an `https://` `public_url` also sends
+  `Strict-Transport-Security`. Set `[web] security_headers = false` if a proxy
   in front already sets them, or `csp_report_only = true` to try a policy change
   out — the browser console then reports what it would have blocked, without
   blocking it.
+- **Presses and searches are rate-limited per client**: thirty presses then
+  ten a second, fifteen searches then three a second; past that a 429 and the
+  page stays as it was. Reads are never limited. Behind a reverse proxy, name
+  it in `[web] trusted_proxies` (`["*"]` on a host like Render, where the proxy
+  is the only way in) so the limiter sees visitors' real addresses and an
+  `X-Forwarded-Proto` is believed; a header from any other peer is ignored.
 - **Pin the host name** with `[web] allowed_hosts` (`["meshradio.local",
   "192.168.1.20"]`) to keep DNS-rebinding pages away from a LAN radio. Empty
   means any host, which an appliance reached by IP, `.local` name and

@@ -136,10 +136,13 @@
   </main>
   <button id="audio-ctl" hidden></button>
   {% if embed_mode %}
-  <!-- Public host only: the button script self-inserts here. Kept outside
-       <main> so htmx partial swaps never destroy it. -->
+  <!-- Public host only. A plain link, not the donation site's button script:
+       that script styled itself inline and pulled a font from a third CDN,
+       which were the only reasons the Content-Security-Policy allowed either.
+       Kept outside <main> so htmx partial swaps never destroy it. -->
   <footer id="site-footer">
-    <script type="text/javascript" src="https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" data-name="bmc-button" data-slug="meshradio" data-color="#FFDD00" data-emoji="☕"  data-font="Arial" data-text="Buy me a coffee" data-outline-color="#000000" data-font-color="#000000" data-coffee-color="#ffffff" ></script>
+    <a class="coffee" href="https://www.buymeacoffee.com/meshradio" target="_blank"
+       rel="noopener">☕ Buy me a coffee</a>
   </footer>
   {% endif %}
   <!-- Classic scripts sharing top-level bindings; order matters (see radio.js).

@@ -12,6 +12,7 @@ hosting) in sessions.SessionManager.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -164,36 +165,40 @@ class OriginGuard:
         await send({"type": "websocket.close", "code": 1008})
 
 
-def content_security_policy(embed_mode: bool) -> str:
+# A Host header worth naming in the policy: a host name or address, with an
+# optional port. Anything else gets no WebSocket entry rather than a header
+# built from whatever a client sent.
+_HOST_RE = re.compile(r"\A(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?\Z")
+
+
+def content_security_policy(embed_mode: bool, host: str = "") -> str:
     """The sources our pages actually use, and nothing else.
 
     Scripts and styles are our own files (the templates carry no inline
     handlers — see eq.js/playbar.js for the delegated listeners that replaced
     them); images are ours plus YouTube stills; audio streams from ``/audio``;
     fetch and the WebSocket stay on this origin; the one frame is YouTube's
-    player. Embed hosting adds the YouTube IFrame API and the coffee button,
-    which styles itself inline and pulls its own font."""
+    player. Embed hosting adds the YouTube IFrame API, and nothing else: the
+    donation button is a link of ours, not the donation site's script.
+
+    ``host`` is the request's own, so the WebSocket can be spelled out as
+    ``ws://host wss://host`` for the browsers that don't count a same-origin
+    socket as ``'self'`` — this origin only, where it used to be any."""
     script = ["'self'"]
-    style = ["'self'"]
-    img = ["'self'", "https://i.ytimg.com"]
-    font = ["'self'"]
     if embed_mode:
-        script += ["https://www.youtube.com", "https://cdnjs.buymeacoffee.com"]
-        style += ["'unsafe-inline'", "https://cdnjs.buymeacoffee.com", "https://fonts.googleapis.com"]
-        img += ["https://cdn.buymeacoffee.com", "https://cdnjs.buymeacoffee.com",
-                "https://www.buymeacoffee.com"]
-        font += ["https://fonts.gstatic.com"]
+        script.append("https://www.youtube.com")
+    connect = ["'self'"]
+    if host and _HOST_RE.match(host):
+        connect += [f"ws://{host}", f"wss://{host}"]
     return "; ".join([
         "default-src 'self'",
         f"script-src {' '.join(script)}",
-        f"style-src {' '.join(style)}",
-        f"img-src {' '.join(img)}",
+        "style-src 'self'",
+        "img-src 'self' https://i.ytimg.com",
         "media-src 'self'",
-        # ws:/wss: spelled out: older browsers don't count a same-origin
-        # WebSocket as 'self'.
-        "connect-src 'self' ws: wss:",
+        f"connect-src {' '.join(connect)}",
         "frame-src https://www.youtube.com",
-        f"font-src {' '.join(font)}",
+        "font-src 'self'",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -208,28 +213,45 @@ class SecurityHeaders:
     allowed, markup that reaches a page through a mesh name or a title can't
     run anything even if escaping ever slipped. The rest closes the usual
     small doors — content sniffing, referrer leakage, framing by another
-    site. A handler that already set one of these keeps its own value."""
+    site, the page's window being reachable from another origin's popup,
+    and device permissions no page here asks for. ``hsts`` is for a site
+    that is only ever https (``[web] public_url`` says so): a year of
+    "never try http", which a browser applies only when it heard it over
+    https anyway. A handler that already set one of these keeps its own
+    value."""
 
-    def __init__(self, app, csp: str, report_only: bool = False) -> None:
+    def __init__(
+        self, app, embed_mode: bool, report_only: bool = False, hsts: bool = False
+    ) -> None:
         self.app = app
-        csp_header = "content-security-policy-report-only" if report_only else "content-security-policy"
+        self.embed_mode = embed_mode
+        self.csp_header = (
+            b"content-security-policy-report-only" if report_only else b"content-security-policy"
+        )
         self.headers = [
-            (csp_header.encode(), csp.encode()),
             (b"x-content-type-options", b"nosniff"),
             (b"referrer-policy", b"strict-origin-when-cross-origin"),
             (b"x-frame-options", b"SAMEORIGIN"),
+            (b"cross-origin-opener-policy", b"same-origin"),
+            (b"permissions-policy",
+             b"camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=()"),
         ]
+        if hsts:
+            self.headers.append((b"strict-transport-security", b"max-age=31536000"))
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        # The policy names this request's own host for its WebSocket.
+        csp = content_security_policy(self.embed_mode, Headers(scope=scope).get("host", ""))
+        headers = [(self.csp_header, csp.encode()), *self.headers]
 
         async def send_with_headers(message) -> None:
             if message["type"] == "http.response.start":
                 raw = list(message.get("headers", []))
                 present = {name.lower() for name, _ in raw}
-                raw += [(name, value) for name, value in self.headers if name not in present]
+                raw += [(name, value) for name, value in headers if name not in present]
                 message["headers"] = raw
             await send(message)
 
@@ -429,7 +451,8 @@ def create_app(
         # Outermost of all: the guards' own 403/400 answers get them too.
         app.add_middleware(
             SecurityHeaders,
-            csp=content_security_policy(embed_mode=player_factory is not None),
+            embed_mode=player_factory is not None,
             report_only=csp_report_only,
+            hsts=public_url.startswith("https://"),
         )
     return app

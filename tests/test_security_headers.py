@@ -33,27 +33,49 @@ async def test_every_response_carries_the_headers(db, bus):
             assert h["x-content-type-options"] == "nosniff", path
             assert h["referrer-policy"] == "strict-origin-when-cross-origin", path
             assert h["x-frame-options"] == "SAMEORIGIN", path
+            assert h["cross-origin-opener-policy"] == "same-origin", path
+            assert "camera=()" in h["permissions-policy"] and "microphone=()" in h["permissions-policy"]
             assert "frame-ancestors 'self'" in h["content-security-policy"], path
             assert "content-security-policy-report-only" not in h
+            assert "strict-transport-security" not in h       # no https site named
 
 
 async def test_policy_names_only_what_the_pages_use(db, bus):
-    appliance = content_security_policy(embed_mode=False)
+    appliance = content_security_policy(embed_mode=False, host="test")
     assert "script-src 'self';" in appliance                     # our files, nothing inline
     assert "'unsafe-inline'" not in appliance and "'unsafe-eval'" not in appliance
     assert "img-src 'self' https://i.ytimg.com" in appliance     # video stills
     assert "frame-src https://www.youtube.com" in appliance
-    assert "connect-src 'self' ws: wss:" in appliance
+    assert "connect-src 'self' ws://test wss://test;" in appliance   # this host's socket only
     assert "object-src 'none'" in appliance and "base-uri 'self'" in appliance
 
-    hosted = content_security_policy(embed_mode=True)
-    assert "script-src 'self' https://www.youtube.com https://cdnjs.buymeacoffee.com" in hosted
-    assert "https://fonts.gstatic.com" in hosted
+    hosted = content_security_policy(embed_mode=True, host="test")
+    assert "script-src 'self' https://www.youtube.com;" in hosted  # the IFrame API, no more
+    assert "style-src 'self';" in hosted                           # the coffee link is ours
+    assert "buymeacoffee" not in hosted and "fonts.g" not in hosted
+
+    # A Host header that isn't a host name gets no socket entry, not a
+    # policy built from it.
+    assert "connect-src 'self';" in content_security_policy(False, host="evil host\r\nx: y")
+    assert "ws://[::1]:8080" in content_security_policy(False, host="[::1]:8080")
 
     async with client_for(page_app(db, bus)) as client:
         assert (await client.get("/")).headers["content-security-policy"] == appliance
     async with client_for(embed_app(db, bus)) as client:
         assert (await client.get("/")).headers["content-security-policy"] == hosted
+        assert 'class="coffee"' in (await client.get("/")).text
+
+
+async def test_hsts_only_for_a_site_named_https(db, bus):
+    """A year of "never try http" is right for the hosted site and wrong for
+    a LAN radio reached over http, so it follows [web] public_url's scheme."""
+    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    secure = create_app(bus, db, player, make_router("dev", bus), public_url="https://radio.example")
+    async with client_for(secure) as client:
+        assert (await client.get("/")).headers["strict-transport-security"] == "max-age=31536000"
+    plain = create_app(bus, db, player, make_router("dev", bus), public_url="http://radio.local")
+    async with client_for(plain) as client:
+        assert "strict-transport-security" not in (await client.get("/")).headers
 
 
 async def test_report_only_and_off_switches(db, bus):

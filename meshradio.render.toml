@@ -27,6 +27,10 @@ backend = "embed"
 [web]
 host = "0.0.0.0"
 port = 8080   # Render overrides this via --port $PORT
+# Where visitors reach it: canonical links, previews and the sitemap come
+# from here rather than the request's Host header, and an https site gets
+# a Strict-Transport-Security header.
+public_url = "https://meshradio.onrender.com"
 # Nothing reaches the app except through Render's proxy, so its forwarding
 # headers are the truth: the visitor's address (what the rate limiter keys
 # on) and that they arrived over https.
