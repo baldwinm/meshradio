@@ -259,7 +259,7 @@ Original proposal: adopt a lightweight channel convention — the daily theme po
 **Fallback ladder** when a track can't be fetched:
 
 1. Cached file (normal path)
-2. Fresh yt-dlp extract retry (`max_retries` attempts, backoff growing with each, and a 5-minute timeout after which the subprocess is killed). The nightly auto-`pip install -U yt-dlp` that the design calls for — upstream fixes breakages within days — is **not built yet**; today yt-dlp is updated by hand.
+2. Fresh yt-dlp extract retry (`max_retries` attempts, backoff growing with each, and a 5-minute timeout after which the subprocess is killed). The nightly yt-dlp upgrade the design calls for — upstream fixes breakages within days — is a systemd timer ([deploy/meshradio-ytdlp-update.timer](deploy/meshradio-ytdlp-update.timer)) running `deploy/update-ytdlp.sh` against the venv; no restart is needed, since yt-dlp is a subprocess, and `/healthz` reports the version in play so the timer's work is visible.
 3. **Metadata-only mode**: resolve title/artist via YouTube's oEmbed endpoint (no API key needed), display the track on OLED/web with a "couldn't fetch audio" badge — the channel history stays intact and browsable even when playback can't happen
 4. *(Optional, config-off by default; **not built**)*: play the 30s preview from the iTunes Search API as an audible placeholder
 

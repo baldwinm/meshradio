@@ -469,8 +469,12 @@ IFrame player, so normal YouTube ad rules apply there.
 **What if yt-dlp breaks (YouTube changed something)?**
 New tracks queue as "caching…" and retry; the already-cached archive keeps
 playing. Update it with `pip install -U yt-dlp` (or `uv pip install -U
-yt-dlp`) — an automatic nightly update for the appliance is planned but not
-built yet. Embed mode sidesteps this entirely (no downloads).
+yt-dlp`), or let the appliance do it nightly: install
+[deploy/meshradio-ytdlp-update.timer](deploy/meshradio-ytdlp-update.service)
+(the comments there say how), which runs `deploy/update-ytdlp.sh` against the
+venv at 04:30. No restart is needed — yt-dlp is a subprocess, so the next
+download uses the new version — and `/healthz` reports `ytdlp_version` so you
+can see it took. Embed mode sidesteps this entirely (no downloads).
 
 **Does this need a mesh node plugged in?**
 No. The CoreScope path covers everything with ~3 minutes of latency. A local

@@ -132,4 +132,7 @@ async def healthz(request: Request):
         "tracks": await ctx.db.channel_track_count(),
         "sessions": ctx.sessions.count() if ctx.sessions else None,
         "ingest_age_s": round(time.time() - last, 1) if last else None,
+        # None on the embed host (it never runs yt-dlp) and until the
+        # startup check has run; otherwise what the update timer left.
+        "ytdlp_version": ctx.health.get("ytdlp_version"),
     })

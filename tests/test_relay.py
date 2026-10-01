@@ -394,3 +394,29 @@ def test_push_url_must_be_https_off_the_box(db):
         with pytest.raises(ValueError):
             RelayPusher(RelayConfig(push_url=bad, token="t"), db)
     RelayPusher(RelayConfig(), db)                    # unset: the pusher never runs
+
+
+async def test_a_receiver_reply_that_isnt_a_count_is_not_a_wipe(db, bus, caplog):
+    """A track count that isn't a number is a receiver to look at, not a
+    wiped archive to re-backfill; comparing it used to raise and end the push."""
+    await seed_history(db)
+    pusher = RelayPusher(RelayConfig(push_url="https://radio.example.org", token="s3cret"), db)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(len(json.loads(request.content)["messages"]))
+        return httpx.Response(200, json={"ok": True, "inserted": 0, "tracks": "lots"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await pusher.push_once(client)
+        await pusher.push_once(client)
+    assert calls == [2, 0]                         # history once, then a heartbeat
+    assert "not a number" in caplog.text
+
+    def not_even_an_object(request: httpx.Request) -> httpx.Response:
+        calls.append(len(json.loads(request.content)["messages"]))
+        return httpx.Response(200, json=[1, 2, 3])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(not_even_an_object)) as client:
+        await pusher.push_once(client)
+    assert calls == [2, 0, 0] and "not an object" in caplog.text

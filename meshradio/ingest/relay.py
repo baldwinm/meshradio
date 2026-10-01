@@ -92,6 +92,9 @@ class RelayPusher(Service):
         )
         resp.raise_for_status()
         data = resp.json()
+        if not isinstance(data, dict):
+            log.warning("relay: receiver answered with %s, not an object", type(data).__name__)
+            data = {}
         # Advance only after a confirmed 2xx so a failed push retries in full.
         if newest != cursor:
             await self.db.set_setting(CURSOR_KEY, newest)
@@ -101,6 +104,12 @@ class RelayPusher(Service):
                 len(messages), data.get("inserted", "?"),
             )
         remote_total = data.get("tracks")
+        if isinstance(remote_total, bool) or not isinstance(remote_total, int):
+            # A count that isn't one is a receiver to look at, not a wipe to
+            # re-backfill; comparing it used to raise and end the push.
+            if remote_total is not None:
+                log.warning("relay: receiver's track count is %r, not a number", remote_total)
+            remote_total = None
         local_total = await self.db.relay_track_total()
         if remote_total is not None and remote_total < local_total:
             log.warning(

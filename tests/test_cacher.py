@@ -174,3 +174,17 @@ async def test_prune_works_through_candidates_in_batches(tmp_path, db: Database,
     assert statuses == ["pending"] * 4 + ["ready"]
     assert [p.name for p in cache_dir.iterdir()] == ["00000000004.opus"]
     assert cacher._cache_bytes == 100
+
+
+async def test_ytdlp_version_reads_the_binary_or_says_none(tmp_path):
+    from meshradio.media.cacher import ytdlp_version
+
+    fake = tmp_path / "yt-dlp"
+    fake.write_text("#!/bin/sh\necho 2026.07.04\necho ignored second line\n")
+    fake.chmod(0o755)
+    assert await ytdlp_version(str(fake)) == "2026.07.04"
+    broken = tmp_path / "broken"
+    broken.write_text("#!/bin/sh\nexit 3\n")
+    broken.chmod(0o755)
+    assert await ytdlp_version(str(broken)) is None
+    assert await ytdlp_version(str(tmp_path / "missing")) is None

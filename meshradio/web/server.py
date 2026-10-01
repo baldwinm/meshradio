@@ -11,6 +11,7 @@ hosting) in sessions.SessionManager.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import time
@@ -94,10 +95,18 @@ def _mmss(value) -> str:
     return f"{value // 60}:{value % 60:02d}"
 
 
-def _asset_version() -> int:
-    """Newest mtime under static/ — cache-busts CSS/JS across app updates."""
+def _asset_version() -> str:
+    """A hash of everything under static/ — cache-busts CSS/JS across updates.
+
+    Content rather than the newest mtime: a fresh clone (which is what every
+    hosted build is) stamps every file with the build's time, so a deploy
+    used to invalidate every asset whether or not one had changed."""
     static = _HERE / "static"
-    return int(max(f.stat().st_mtime for f in static.rglob("*") if f.is_file()))
+    digest = hashlib.sha256()
+    for path in sorted(p for p in static.rglob("*") if p.is_file()):
+        digest.update(str(path.relative_to(static)).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _authority(netloc: str) -> str:

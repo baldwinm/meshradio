@@ -30,7 +30,7 @@ from .ingest.corescope import CoreScopePoller, probe
 from .ingest.mesh import MeshIngest
 from .ingest.relay import RelayPusher
 from .ingest.service import IngestService
-from .media.cacher import Cacher
+from .media.cacher import Cacher, ytdlp_version
 from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
 from .media.radio import RadioService
 from .net import http_client
@@ -202,6 +202,10 @@ async def run(config, demo: bool = False) -> None:
         )
     )
     log.info("web UI on http://%s:%d", config.web.host, config.web.port)
+    if not isinstance(player.backend, EmbedBackend):
+        # Off the request path: a slow or missing binary must not hold the
+        # server up. Embed hosting never runs yt-dlp.
+        spawn("ytdlp-version", _note_ytdlp_version(config.cache.ytdlp_bin, web_app.state.ctx.health))
     try:
         await server.serve()
     finally:
@@ -211,6 +215,17 @@ async def run(config, demo: bool = False) -> None:
             await service.stop()
         await db.close()
         log.info("meshradio stopped")
+
+
+async def _note_ytdlp_version(binary: str, health: dict) -> None:
+    """Record yt-dlp's version for /healthz and the log — the one place the
+    nightly update timer's work can be seen."""
+    version = await ytdlp_version(binary)
+    health["ytdlp_version"] = version
+    if version:
+        log.info("yt-dlp %s (%s)", version, binary)
+    else:
+        log.warning("yt-dlp not found or not runnable (%s); downloads will fail", binary)
 
 
 def main() -> None:

@@ -293,6 +293,30 @@ class Cacher(Service):
             self._cache_bytes = total
 
 
+async def ytdlp_version(binary: str, timeout: float = 15.0) -> str | None:
+    """What ``binary --version`` prints, or None if it can't be run.
+
+    Shown in /healthz and logged at startup: the nightly update timer
+    (deploy/meshradio-ytdlp-update.timer) is only known to be working if
+    the version it leaves behind can be seen somewhere."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary, "--version",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        _kill(proc)
+        return None
+    if proc.returncode != 0:
+        return None
+    first = stdout.decode(errors="replace").strip().splitlines()
+    return first[0].strip()[:64] if first else None
+
+
 def _kill(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is None:
         try:

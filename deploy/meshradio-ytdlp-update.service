@@ -1,0 +1,23 @@
+# Nightly yt-dlp upgrade for MeshRadio (the unit the timer runs).
+#
+#   sudo cp deploy/meshradio-ytdlp-update.service deploy/meshradio-ytdlp-update.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now meshradio-ytdlp-update.timer
+#   sudo systemctl start meshradio-ytdlp-update.service   # run one now
+#
+# Adjust User= and MESHRADIO_VENV if your username or clone location differ.
+# This runs as the user who owns the venv and is not sandboxed the way
+# meshradio.service is: it has to write to the venv, which the radio itself
+# sees read-only.
+
+[Unit]
+Description=Upgrade yt-dlp in MeshRadio's virtualenv
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+Environment=MESHRADIO_VENV=/home/pi/meshradio/.venv
+ExecStart=/home/pi/meshradio/deploy/update-ytdlp.sh
