@@ -146,8 +146,14 @@ fields its messages carry, and the newest few posts as the poller reads them.
 Config precedence: `--config` flag → `$MESHRADIO_CONFIG` → `./meshradio.toml`
 → `/etc/meshradio/config.toml` → built-in defaults. Every key is optional;
 see [meshradio.example.toml](meshradio.example.toml) for the full annotated
-set. Secrets (the relay/ingest token) belong in the environment
-(`MESHRADIO_INGEST_TOKEN`), not the committed file.
+set. Secrets belong in the environment, not the committed file:
+`MESHRADIO_INGEST_TOKEN` for the receiver's token (`[web] ingest_token`) and
+`MESHRADIO_RELAY_TOKEN` for the pusher's (`[relay] token`); either overrides
+the file. Values are checked at startup — a number of the wrong type or out of
+range, an unknown backend, audio format or time zone — and a bad one stops
+the radio with a message naming every offending key, instead of a loop
+crashing (or, for a negative interval, spinning) under the supervisor. A key
+that isn't one the radio knows is logged and ignored.
 
 **Command line.** Run `meshradio` with no flags to start the radio; the rest
 are overrides and one-shot maintenance commands that act on the archive and
