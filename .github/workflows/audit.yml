@@ -1,0 +1,30 @@
+# Dependency audit: pip-audit over the pinned set in uv.lock, against the
+# Python packaging advisory database.
+#
+# Runs on pull requests (a bump shows its effect), weekly (an advisory
+# published against an unchanged lock still surfaces), and by hand. Not on
+# push, on purpose: Render deploys main only once every check on the push is
+# green (render.yaml: autoDeployTrigger checksPass), and an advisory against
+# a library on a code path the radio never touches shouldn't hold a deploy.
+# A finding here is a bump to make — usually `uv lock --upgrade-package X`.
+name: audit
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"   # Mondays, 06:17 UTC
+  workflow_dispatch:
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      # The lock as plain pins — every extra (the appliance's hardware and
+      # media packages included), no dev tooling, no hashes (pip-audit only
+      # needs names and versions), and not the project itself (not on PyPI).
+      - run: uv export --locked --all-extras --no-dev --no-hashes --no-emit-project -o requirements.txt
+      - run: uvx pip-audit --no-deps --desc on -r requirements.txt

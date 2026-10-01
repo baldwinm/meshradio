@@ -1,0 +1,17 @@
+# Dependabot: a pull request when a dependency pinned in uv.lock has a new
+# version, and when an action a workflow pins does. Weekly and grouped, so it
+# is one PR to look at rather than one per package; the test workflow runs on
+# each, so a bump that breaks the suite shows as such.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      python:
+        patterns: ["*"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
