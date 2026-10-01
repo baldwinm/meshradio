@@ -98,3 +98,16 @@ async def test_radio_filler_is_not_a_members_share(db, bus):
     async with client_for(page_app(db, bus)) as client:
         body = (await client.get("/member/ana")).text
     assert "Theirs" in body and "Filler" not in body
+
+
+async def test_a_member_name_with_a_slash_has_a_page(db, bus):
+    """Mesh names can carry a slash. The day page links it encoded; uvicorn
+    decodes the path before routing, so the route has to take a path."""
+    await share(db, "2026-08-01", "aaaaaaaaaaa", "Node/K5ABC")
+    async with client_for(page_app(db, bus)) as client:
+        for path in ("/member/Node%2FK5ABC", "/member/Node/K5ABC"):
+            page = await client.get(path)
+            assert page.status_code == 200 and "Node/K5ABC" in page.text, path
+        href = re.search(r'href="(/member/[^"]+)"', (await client.get("/archive/2026-08-01")).text)
+        assert href and (await client.get(href.group(1))).status_code == 200
+        assert (await client.get("/member/nobody/here")).status_code == 404

@@ -34,6 +34,8 @@ ISO_DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 
 # How many search hits a page shows. One more is fetched to detect the cut-off.
 SEARCH_LIMIT = 100
+# The longest query searched; nobody types more, and the page echoes it.
+SEARCH_MAX_CHARS = 200
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -156,7 +158,7 @@ async def search(request: Request, q: str = ""):
     """Results are capped; ask for one more than we show so the page can say
     the list is cut off instead of reporting the cap as the total."""
     ctx = ctx_of(request)
-    q = q.strip()
+    q = q.strip()[:SEARCH_MAX_CHARS].strip()
     rows = await ctx.db.search_tracks(q, limit=SEARCH_LIMIT + 1) if q else []
     return ctx.templates.TemplateResponse(
         request,
@@ -171,13 +173,15 @@ async def stats(request: Request):
     return ctx.templates.TemplateResponse(request, "stats.html", await ctx.stats())
 
 
-@router.get("/member/{name}", response_class=HTMLResponse)
+@router.get("/member/{name:path}", response_class=HTMLResponse)
 async def member(request: Request, name: str):
     """One member's record on the channel: what they've shared, the days they
     named, who they keep coming back to.
 
     Names are as typed on the mesh, so the lookup is case-insensitive and the
-    page titles itself with the channel's own spelling."""
+    page titles itself with the channel's own spelling. ``:path`` because a
+    mesh name may contain a slash: the link encodes it, but uvicorn decodes
+    the path before routing, and a plain segment then matched nothing."""
     ctx = ctx_of(request)
     canonical = await ctx.db.member_name(name)
     if canonical is None:

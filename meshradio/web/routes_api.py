@@ -149,14 +149,21 @@ async def api_station(request: Request, kind: Literal["radio", "archive", "off"]
     return await ctx.render_now_playing(request)
 
 
-@router.post("/api/output/{name}")
+# Output selection — speaker, jack, Bluetooth — is the appliance's. Public
+# embed hosting has nothing to select (each visitor's browser is their own
+# output), so server.py mounts this router only off-embed instead of leaving
+# routes up that answer for a no-op.
+output_router = APIRouter()
+
+
+@output_router.post("/api/output/{name}")
 async def api_output(request: Request, name: str):
     ctx = ctx_of(request)
     ok = await ctx.audio_router.set_output(name)
     return JSONResponse({"ok": ok, "output": ctx.audio_router.current()})
 
 
-@router.get("/api/outputs")
+@output_router.get("/api/outputs")
 async def api_outputs(request: Request):
     ctx = ctx_of(request)
     return JSONResponse({

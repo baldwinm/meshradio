@@ -405,7 +405,8 @@ def create_app(
 
     app.include_router(routes_pages.router)
     app.include_router(routes_api.router)
-    app.include_router(routes_api.output_router)
+    if player_factory is None:
+        app.include_router(routes_api.output_router)   # the appliance's outputs
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
 
