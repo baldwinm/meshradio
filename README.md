@@ -321,7 +321,9 @@ source stopped).
 
 The DB is also snapshotted on a rotation (`[backup]` config): a copy is taken
 before migrations on each boot and every few hours after, so a bad migration or
-corruption has a clean rollback point. Snapshots default to `<data_dir>/backups`;
+corruption has a clean rollback point. Each migration also runs as a single
+transaction, so one that fails part-way leaves the archive exactly as it was
+rather than half-converted. Snapshots default to `<data_dir>/backups`;
 for whole-disk loss, pair them with host-level disk snapshots (Render takes
 automatic daily ones on paid instances) or set `[backup].dir` to separate storage.
 To restore, stop the service and run `meshradio --list-backups` then

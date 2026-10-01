@@ -458,11 +458,41 @@ class Database:
     async def _migrate(self) -> None:
         cur = await self.db.execute("PRAGMA user_version")
         (version,) = await cur.fetchone()
-        for i, script in enumerate(MIGRATIONS[version:], start=version + 1):
-            # executescript runs each migration as its own statement group;
-            # the version bump follows only once the script has finished.
-            await self.db.executescript(script)
-            await self.db.execute(f"PRAGMA user_version={i}")
+        pending = MIGRATIONS[version:]
+        if not pending:
+            return
+        # Each script runs as one transaction with its version bump inside,
+        # so a failure part-way leaves the archive exactly as it was — not
+        # the half-migrated state that executescript's statement-by-statement
+        # autocommit left behind, with the version unbumped, for the next boot
+        # to run into again from the top.
+        #
+        # Foreign keys are off for the run and checked after each script, the
+        # SQLite documentation's own procedure for schema changes: the scripts
+        # that rebuild tracks drop a table plays references, which enforcement
+        # inside a transaction refuses, and a PRAGMA foreign_keys inside a
+        # transaction is a no-op in any case (the scripts' own only ever
+        # worked because they ran in autocommit).
+        await self.db.execute("PRAGMA foreign_keys=OFF")
+        try:
+            for i, script in enumerate(pending, start=version + 1):
+                try:
+                    await self.db.executescript(
+                        f"BEGIN;\n{script}\nPRAGMA user_version={i};\nCOMMIT;"
+                    )
+                except BaseException:
+                    if self.db.in_transaction:
+                        await self.db.execute("ROLLBACK")
+                    raise
+                cur = await self.db.execute("PRAGMA foreign_key_check")
+                orphans = await cur.fetchall()
+                if orphans:
+                    log.warning(
+                        "migration v%d left %d row(s) referencing a missing parent",
+                        i, len(orphans),
+                    )
+        finally:
+            await self.db.execute("PRAGMA foreign_keys=ON")
 
     # -- settings ----------------------------------------------------------
 

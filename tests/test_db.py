@@ -1,6 +1,9 @@
+import sqlite3
+
 import aiosqlite
 import pytest
 
+from meshradio import db as db_mod
 from meshradio.db import MAX_SENDER, MAX_TITLE, MIGRATIONS, Database, dedupe_hash, utcnow
 
 VID = "dQw4w9WgXcQ"
@@ -388,6 +391,38 @@ async def test_v10_rebuild_keeps_rows_and_indexes(tmp_path):
         }
         # The widened CHECK is what the migration is for.
         assert await db.add_track(**_track_args(theme_id=theme, source="comchan"))
+    finally:
+        await db.close()
+
+
+async def test_a_failing_migration_leaves_nothing_behind(tmp_path, monkeypatch):
+    """executescript commits statement by statement, so a script that failed
+    part-way used to leave a half-migrated archive with the version unbumped,
+    which the next boot then tried to migrate again from the top. Each script
+    is one transaction now, version bump included."""
+    path = tmp_path / "atomic.db"
+    db = Database(path)
+    await db.connect()                                  # fully migrated
+    await db.close()
+    bad = "CREATE TABLE extra(x); INSERT INTO extra VALUES(1); CREATE TABLE extra(x);"
+    monkeypatch.setattr(db_mod, "MIGRATIONS", MIGRATIONS + [bad])
+    db = Database(path)
+    with pytest.raises(sqlite3.OperationalError):
+        await db.connect()
+    assert not db.db.in_transaction                     # rolled back, not left open
+    await db.close()
+    monkeypatch.setattr(db_mod, "MIGRATIONS", MIGRATIONS)   # the bad script is pulled
+    db = Database(path)
+    await db.connect()
+    try:
+        tables = {r["name"] for r in await db._fetchall(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "extra" not in tables                    # nothing of it survived
+        (row,) = await db._fetchall("PRAGMA user_version")
+        assert row["user_version"] == len(MIGRATIONS)
+        (fk,) = await db._fetchall("PRAGMA foreign_keys")
+        assert fk["foreign_keys"] == 1                  # enforcement is back on
+        assert await db.create_theme("2026-07-06", "still works")
     finally:
         await db.close()
 
