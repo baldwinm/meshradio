@@ -27,7 +27,14 @@ from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 
-from ..bus import EventBus, INGEST_STATUS
+from ..bus import (
+    EventBus,
+    INGEST_STATUS,
+    THEME_CREATED,
+    TRACK_DISCOVERED,
+    TRACK_FAILED,
+    TRACK_READY,
+)
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
@@ -363,6 +370,10 @@ def create_app(
     app.state.ctx = ctx
     app.state.sessions = sessions
     app.state.speakers = ctx.speakers
+    # The whole-archive aggregates change exactly when a song or a theme
+    # lands; drop them then, on the publisher's own stack, rather than on a
+    # clock (see WebContext.CACHE_TTL_S).
+    bus.listen(ctx.invalidate, TRACK_DISCOVERED, TRACK_READY, TRACK_FAILED, THEME_CREATED)
     # See context.absolute_url: the one place the site names itself.
     app.state.public_url = public_url.rstrip("/")
 

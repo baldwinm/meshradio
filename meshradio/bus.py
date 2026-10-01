@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 log = logging.getLogger(__name__)
+
+Listener = Callable[[str, dict[str, Any]], None]
 
 # Topic constants — the full event vocabulary lives here so it is greppable.
 TRACK_DISCOVERED = "track.discovered"  # ingest -> cacher: new link seen on the channel
@@ -53,6 +55,7 @@ class Subscription:
 class EventBus:
     def __init__(self) -> None:
         self._subs: list[Subscription] = []
+        self._listeners: list[tuple[tuple[str, ...], Listener]] = []
 
     def subscribe(self, *topics: str) -> Subscription:
         """Subscribe to one or more topics. No topics = all topics."""
@@ -64,11 +67,37 @@ class EventBus:
         if sub in self._subs:
             self._subs.remove(sub)
 
+    def listen(self, callback: Listener, *topics: str) -> Callable[[], None]:
+        """Call ``callback(topic, payload)`` on the publisher's own stack, at
+        once, for every matching event. No topics = all topics.
+
+        For a subscriber that only flips a flag or drops a cache: it needs
+        no task of its own and no queue that could fall behind, and the
+        effect is visible to the very next line after ``publish``. The
+        callback must be quick and must not block; an exception in it is
+        logged and never reaches the publisher. Returns a function that
+        stops the calls."""
+        entry = (topics, callback)
+        self._listeners.append(entry)
+
+        def stop() -> None:
+            if entry in self._listeners:
+                self._listeners.remove(entry)
+
+        return stop
+
     def publish(self, topic: str, payload: dict[str, Any] | None = None) -> None:
         """Fan a message out to every matching subscriber. Never blocks the publisher:
         if a subscriber's queue is full its oldest event is dropped (slow consumers
         lose history, they don't stall the radio)."""
         payload = payload or {}
+        for topics, callback in list(self._listeners):
+            if topics and topic not in topics:
+                continue
+            try:
+                callback(topic, payload)
+            except Exception:
+                log.exception("listener on %s failed", topic)
         for sub in self._subs:
             if sub.topics and topic not in sub.topics:
                 continue
