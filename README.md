@@ -357,7 +357,8 @@ able to drive it:
   a forged one, a bot spraying requests) acts on a throwaway preview instead
   of opening anything. A real browser always carries the cookie it got with
   the page. The signing key lives in the archive, so cookies outlive a
-  redeploy the way the sessions they name do.
+  redeploy the way the sessions they name do. Static files, audio, the health
+  check, the feed, the sitemap and the relay endpoint carry no cookie at all.
 - **Sockets are counted.** A session may hold 8 open WebSockets (a visitor's
   tabs), the communal appliance player 64, and the process 1,024 in all; past
   that a handshake is closed with "try again later" rather than accepted. A

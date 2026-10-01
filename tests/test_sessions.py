@@ -490,3 +490,19 @@ async def test_the_signing_key_outlives_a_redeploy(db, bus):
         assert "mr_sid" not in resp.cookies          # recognised, not reissued
         assert resp.json()["current"]["video_id"] == "aaaaaaaaaaa"
         assert second.state.sessions.count() == 1
+
+
+async def test_no_session_cookie_on_assets_health_feeds_or_the_relay(db, bus):
+    """A stylesheet, the health check, a feed, the sitemap and a relay push
+    carry no page a visitor could press anything on; a cookie on them was a
+    token and a header per request, handed to crawlers, the host's health
+    checker and the relay to present straight back."""
+    app = embed_app(db, bus)
+    async with client_for(app, visited=False) as client:
+        for path in ("/static/style.css", "/healthz", "/robots.txt",
+                     "/sitemap.xml", "/feed.xml"):
+            resp = await client.get(path)
+            assert resp.status_code == 200 and "mr_sid" not in resp.cookies, path
+        resp = await client.post("/api/ingest")           # 404: no token configured
+        assert resp.status_code == 404 and "mr_sid" not in resp.cookies
+        assert "mr_sid" in (await client.get("/archive")).cookies   # a page still does

@@ -53,6 +53,20 @@ _HERE = Path(__file__).parent
 ALLOWED_SKINS = {"winamp", "itunes", "wmp", "aurora"}
 DEFAULT_SKIN = "winamp"
 
+# Responses that carry no page get no session cookie. Minting one is a token
+# and a header per request for nothing, and it hands a crawler fetching the
+# stylesheet, the relay pushing to /api/ingest and the host's health checker
+# a cookie they will present straight back. The sitemap and the feed are
+# documents, but documents nobody presses anything from.
+_NO_SESSION_PREFIXES = ("/static/", "/audio/")
+_NO_SESSION_PATHS = frozenset(
+    {"/healthz", "/robots.txt", "/sitemap.xml", "/feed.xml", "/api/ingest"}
+)
+
+
+def _sessionless(path: str) -> bool:
+    return path in _NO_SESSION_PATHS or path.startswith(_NO_SESSION_PREFIXES)
+
 
 def _mmss(value) -> str:
     """Seconds → 'm:ss' (or 'h:mm:ss'); empty string for unknown durations.
@@ -304,6 +318,8 @@ def create_app(
     if sessions is not None:
         @app.middleware("http")
         async def ensure_session_cookie(request: Request, call_next):
+            if _sessionless(request.url.path):
+                return await call_next(request)
             # Only a cookie this server signed names a session; anything else
             # (none, garbage, forged, an earlier key's) is reissued, and the
             # request is marked as having presented nothing — a session may
