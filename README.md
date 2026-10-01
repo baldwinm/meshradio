@@ -184,7 +184,10 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   and **✕ Remove** in the bar up top; **Clear queue** empties it (the current
   song keeps playing; radio mode switches off so it doesn't refill what you
   just cleared). A song already on the day's playlist won't be added twice, no
-  matter how many people repost it.
+  matter how many people repost it, and a song that's already playing or
+  queued isn't queued again however many times **+ queue** is pressed. A queue
+  tops out at 200 songs (`[player] max_queue`); at that point only a fresh
+  channel post still gets in, by displacing station filler.
 - **Live jukebox** — when a new song lands on the channel it auto-plays if
   the radio is idle, or joins the queue if something's already playing. A new
   arrival never interrupts the current song.

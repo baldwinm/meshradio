@@ -85,9 +85,12 @@ async def api_queue_top(request: Request, index: int, track_id: int):
 
 @router.post("/api/queue/{track_id}")
 async def api_enqueue(request: Request, track_id: int):
+    """``queued`` is False when the press changed nothing: the song is
+    already playing or queued, the queue is at its ceiling, or there's no
+    such playable track."""
     ctx = ctx_of(request)
-    await (await ctx.get_player(request)).enqueue_track_id(track_id)
-    return JSONResponse({"ok": True})
+    queued = await (await ctx.get_player(request)).enqueue_track_id(track_id)
+    return JSONResponse({"ok": True, "queued": bool(queued)})
 
 
 @router.post("/api/play-day/{date}")

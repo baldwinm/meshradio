@@ -60,6 +60,8 @@ class PlayerConfig:
     station_batch: int = 10        # archived songs queued per archive-station top-up
     live_window_s: int = 1800      # only tracks posted within this window auto-play;
                                    # older ones are backfill and stay archive-only
+    max_queue: int = 200           # ceiling on queued tracks per player; a song already
+                                   # playing or queued is never added twice
 
 
 @dataclass
