@@ -1,0 +1,12 @@
+# Runs meshradio-ytdlp-update.service nightly; see that file to install.
+
+[Unit]
+Description=Nightly yt-dlp upgrade for MeshRadio
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

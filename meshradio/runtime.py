@@ -10,8 +10,10 @@ through ``spawn()``, which guarantees a logged traceback at minimum.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -64,10 +66,8 @@ class Service:
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
 
     async def _run(self) -> None:  # pragma: no cover — subclasses implement

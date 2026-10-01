@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ INGEST_STATUS = "ingest.status"        # mesh/corescope health for the Status sc
 class Subscription:
     """A single subscriber's view of the bus. Async-iterable; call close() when done."""
 
-    def __init__(self, bus: "EventBus", topics: tuple[str, ...], maxsize: int = 256):
+    def __init__(self, bus: EventBus, topics: tuple[str, ...], maxsize: int = 256):
         self._bus = bus
         self.topics = topics
         self.queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue(maxsize=maxsize)

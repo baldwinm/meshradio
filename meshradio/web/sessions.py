@@ -9,6 +9,7 @@ mid-song.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -16,11 +17,11 @@ import logging
 import re
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from datetime import UTC, datetime, timedelta
 
-from ..bus import EventBus, TRACK_READY
+from ..bus import TRACK_READY, EventBus
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
@@ -140,7 +141,7 @@ class SessionManager:
     MAX_SESSIONS = 512
 
     def __init__(self, factory: Callable[[EventBus], PlayerService], db: Database,
-                 bus: EventBus | None = None, tz=timezone.utc):
+                 bus: EventBus | None = None, tz=UTC):
         self._factory = factory
         self._db = db
         self._bus = bus                # shared bus: TRACK_READY announces new songs
@@ -148,6 +149,7 @@ class SessionManager:
         self._sessions: dict[str, Session] = {}
         self._dirty: set[str] = set()
         self._maintenance: asyncio.Task | None = None
+        self._day_watch: asyncio.Task | None = None
         self._newest_day: str | None = None   # newest-day query cache
         self._rolled_day: str | None = None   # last day the watcher rolled tabs to
         self._secret: bytes | None = None     # cookie signing key, see secret()
@@ -231,8 +233,26 @@ class SessionManager:
         if self._maintenance is None:
             self._maintenance = supervise("session-maintenance", self._maintenance_loop)
             if self._bus is not None:
-                supervise("session-day-watch", self._watch_new_days)
+                self._day_watch = supervise("session-day-watch", self._watch_new_days)
         return session
+
+    async def stop(self) -> None:
+        """Shut down cleanly: write every changed snapshot and stop every
+        player. The app's lifespan calls this on shutdown; without it a
+        deploy or restart dropped whatever the last flush interval (5 s)
+        hadn't written, for every visitor at once."""
+        for task in (self._maintenance, self._day_watch):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._maintenance = self._day_watch = None
+        await self.flush()
+        sessions, self._sessions = self._sessions, {}
+        for session in sessions.values():
+            await session.player.stop()
+        if sessions:
+            log.info("flushed and stopped %d session(s)", len(sessions))
 
     async def _refresh(self, session: Session) -> None:
         """A warm session that isn't mid-playback and is parked on an older
@@ -292,6 +312,7 @@ class SessionManager:
     async def _watch_new_days(self) -> None:
         """When the first song of a newer day lands, roll idle open tabs onto it
         with no reload — the re-cue publishes state to each session's sockets."""
+        assert self._bus is not None   # only started with a shared bus (see _open)
         sub = self._bus.subscribe(TRACK_READY)
         try:
             async for _topic, payload in sub:
@@ -310,7 +331,7 @@ class SessionManager:
         # rolling the other idle tabs.
         mesh_ts = track.get("mesh_ts")
         if mesh_ts and self._rolled_day is not None:
-            day = datetime.fromtimestamp(float(mesh_ts), timezone.utc).astimezone(
+            day = datetime.fromtimestamp(float(mesh_ts), UTC).astimezone(
                 self._tz).date().isoformat()
             if day <= self._rolled_day:
                 return
@@ -357,5 +378,5 @@ class SessionManager:
                 del self._sessions[sid]
                 await session.player.stop()
                 log.info("session %s… reaped (%d live)", sid[:8], len(self._sessions))
-        stale = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        stale = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         await self._db.delete_web_sessions(older_than=stale)

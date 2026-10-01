@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import sqlite3
 import sys
@@ -19,18 +20,18 @@ from zoneinfo import ZoneInfo
 import uvicorn
 
 from . import __version__
-from .audio.routing import make_router
 from . import backup as backup_mod
+from .audio.routing import make_router
 from .backup import BackupService
 from .bus import EventBus
 from .config import ConfigError, load_config, validate_config
-from .db import MAX_TITLE, Database, VIDEO_ID_RE, clean_text
+from .db import MAX_TITLE, VIDEO_ID_RE, Database, clean_text
 from .ingest import parse
 from .ingest.corescope import CoreScopePoller, probe
 from .ingest.mesh import MeshIngest
 from .ingest.relay import RelayPusher
 from .ingest.service import IngestService
-from .media.cacher import Cacher
+from .media.cacher import Cacher, ytdlp_version
 from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
 from .media.radio import RadioService
 from .net import http_client
@@ -188,13 +189,27 @@ async def run(config, demo: bool = False) -> None:
         public_url=config.web.public_url,
         security_headers=config.web.security_headers,
         csp_report_only=config.web.csp_report_only,
+        trusted_proxies=config.web.trusted_proxies,
+        rate_limit=config.web.rate_limit,
     )
     server = uvicorn.Server(
         uvicorn.Config(
-            web_app, host=config.web.host, port=config.web.port, log_level="warning"
+            web_app, host=config.web.host, port=config.web.port, log_level="warning",
+            # The same list gates uvicorn's own reading of X-Forwarded-For
+            # and -Proto, so request.client and request.url.scheme are the
+            # visitor's when the proxy is trusted and the peer's when not.
+            proxy_headers=True,
+            forwarded_allow_ips=",".join(config.web.trusted_proxies) or "127.0.0.1",
         )
     )
     log.info("web UI on http://%s:%d", config.web.host, config.web.port)
+    if not isinstance(player.backend, EmbedBackend):
+        # Off the request path: a slow or missing binary must not hold the
+        # server up. Embed hosting never runs yt-dlp.
+        spawn(
+            "ytdlp-version",
+            _note_ytdlp_version(config.cache.ytdlp_bin, web_app.state.ctx.health),
+        )
     try:
         await server.serve()
     finally:
@@ -206,10 +221,22 @@ async def run(config, demo: bool = False) -> None:
         log.info("meshradio stopped")
 
 
+async def _note_ytdlp_version(binary: str, health: dict) -> None:
+    """Record yt-dlp's version for /healthz and the log — the one place the
+    nightly update timer's work can be seen."""
+    version = await ytdlp_version(binary)
+    health["ytdlp_version"] = version
+    if version:
+        log.info("yt-dlp %s (%s)", version, binary)
+    else:
+        log.warning("yt-dlp not found or not runnable (%s); downloads will fail", binary)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="meshradio", description="MeshRadio appliance")
     parser.add_argument("--config", help="path to config.toml")
-    parser.add_argument("--profile", choices=("dev", "pi4", "lite"), help="override hardware_profile")
+    parser.add_argument("--profile", choices=("dev", "pi4", "lite"),
+                        help="override hardware_profile")
     parser.add_argument("--port", type=int, help="override web port")
     parser.add_argument("--demo", action="store_true", help="seed fake channel traffic (dev)")
     parser.add_argument("--list-backups", action="store_true",
@@ -269,7 +296,7 @@ def main() -> None:
             validate_config(config)
     except ConfigError as exc:
         print(f"meshradio: {exc}", file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(2) from None
 
     if args.list_backups or args.restore_backup is not None:
         raise SystemExit(_run_backup_cli(config, args))
@@ -285,10 +312,8 @@ def main() -> None:
     if args.probe_feed is not None:
         raise SystemExit(asyncio.run(_run_probe_feed(config, args)))
 
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run(config, demo=args.demo))
-    except KeyboardInterrupt:
-        pass
 
 
 def _run_backup_cli(config, args) -> int:
@@ -471,7 +496,9 @@ def _format_probe(report) -> list[str]:
         more = f", … ({len(report.channels)} in all)" if len(report.channels) > 12 else ""
         lines.append(f"channels listed: {listed}{more}")
         if report.channel_listed is False:
-            lines.append(f"{report.channel} is NOT among them — check [corescope]/[comchan] channel")
+            lines.append(
+                f"{report.channel} is NOT among them — check [corescope]/[comchan] channel"
+            )
     if not report.ok and not report.served:
         lines.append(f"FAILED after {report.elapsed_s:.1f}s: {report.error}")
         return lines

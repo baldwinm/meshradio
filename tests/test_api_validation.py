@@ -8,14 +8,12 @@ that queued the song. Both are refused at the route now."""
 import math
 import time
 
-import pytest
-
 from meshradio.audio.routing import make_router
 from meshradio.bus import EventBus
 from meshradio.config import PlayerConfig
 from meshradio.db import MAX_SENDER, MAX_TITLE
 from meshradio.ingest.service import IngestService
-from meshradio.media.player import EmbedBackend, PlayerService
+from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 from meshradio.web.server import _mmss, create_app
 
 from .test_sessions import client_for, embed_app, make_ready_on
@@ -144,3 +142,16 @@ async def test_a_bad_length_already_in_a_row_cannot_break_a_page(db, bus):
         assert (await client.post("/api/seek/30")).json()["position"] >= 30
     assert _mmss(math.inf) == "" and _mmss(math.nan) == "" and _mmss(-1) == ""
     assert _mmss(None) == "" and _mmss(3725) == "1:02:05"
+
+
+async def test_output_routes_exist_only_on_the_appliance(db, bus):
+    """Speaker, jack and Bluetooth are the appliance's to pick. The embed host
+    has nothing to select, so the routes aren't there to answer for a no-op."""
+    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    appliance = create_app(bus, db, player, make_router("dev", bus))
+    async with client_for(appliance) as client:
+        assert (await client.get("/api/outputs")).status_code == 200
+        assert (await client.post("/api/output/jack")).json()["output"] == "jack"
+    async with client_for(embed_app(db, bus)) as client:
+        assert (await client.get("/api/outputs")).status_code == 404
+        assert (await client.post("/api/output/jack")).status_code == 404

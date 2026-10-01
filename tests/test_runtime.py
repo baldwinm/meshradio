@@ -1,6 +1,7 @@
 """Supervised runtime: crashed service loops restart instead of dying silently."""
 
 import asyncio
+import contextlib
 import logging
 
 from meshradio.runtime import Service, spawn, supervise
@@ -22,10 +23,8 @@ async def test_supervise_restarts_after_crash(monkeypatch):
     await asyncio.wait_for(settled.wait(), 2)
     assert len(runs) == 3           # crashed twice, restarted twice
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
 
 
 async def test_supervise_clean_return_is_final():
@@ -42,10 +41,8 @@ async def test_spawn_logs_unhandled_exception(caplog):
 
     with caplog.at_level(logging.ERROR, logger="meshradio.runtime"):
         task = spawn("doomed", boom())
-        try:
+        with contextlib.suppress(ValueError):
             await task
-        except ValueError:
-            pass
         await asyncio.sleep(0)  # let the done-callback run
     assert "doomed" in caplog.text
 

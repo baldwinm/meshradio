@@ -66,9 +66,7 @@ def _delimits_title(text: str, i: int) -> bool:
         return False
     # A clock only when there are digits on both sides, so "day 3: water"
     # still delimits.
-    if 0 < i < len(text) - 1 and text[i - 1].isdigit() and text[i + 1].isdigit():
-        return False
-    return True
+    return not (0 < i < len(text) - 1 and text[i - 1].isdigit() and text[i + 1].isdigit())
 
 
 def _title_after(text: str, pos: int) -> str | None:

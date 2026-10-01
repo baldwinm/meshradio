@@ -83,7 +83,8 @@ class CacheConfig:
     ffmpeg_location: str = ""      # dir/exe passed to yt-dlp when ffmpeg isn't on PATH
     concurrency: int = 2           # downloads (yt-dlp processes) or oEmbed lookups in flight
                                    # at once; one stuck fetch no longer stalls the backlog
-    ytdlp_extra_args: list = field(default_factory=list)  # e.g. ["--js-runtimes", "deno:C:/path/deno.exe"]
+    # e.g. ["--js-runtimes", "deno:C:/path/deno.exe"] when deno isn't on PATH
+    ytdlp_extra_args: list = field(default_factory=list)
 
 
 @dataclass
@@ -107,6 +108,17 @@ class WebConfig:
     # console reports what it would have blocked — for trying a change out.
     security_headers: bool = True
     csp_report_only: bool = False
+    # Reverse proxies whose X-Forwarded-* headers are believed — for the
+    # visitor's real address (what the rate limiter keys on) and whether they
+    # arrived over https (the cookie's Secure flag, canonical links). The
+    # default is uvicorn's own: the loopback address. "*" trusts every peer,
+    # which is right for a host like Render where nothing reaches the app
+    # except through its proxy, and wrong for a LAN appliance anyone can
+    # connect to directly.
+    trusted_proxies: list = field(default_factory=lambda: ["127.0.0.1"])
+    # Per-client ceilings on presses (POSTs) and searches — see
+    # web/ratelimit.py. Off only behind a proxy that already enforces its own.
+    rate_limit: bool = True
 
 
 @dataclass
@@ -197,7 +209,7 @@ _INTS: list[tuple[str, str, int | None, int | None]] = [
 _BOOLS = [
     ("mesh", "enabled"), ("corescope", "enabled"), ("comchan", "enabled"),
     ("player", "live_autoplay"), ("web", "security_headers"),
-    ("web", "csp_report_only"), ("backup", "enabled"),
+    ("web", "csp_report_only"), ("web", "rate_limit"), ("backup", "enabled"),
 ]
 _STRINGS = [
     ("mesh", "serial_port"), ("mesh", "channel"), ("mesh", "channel_key"),
@@ -208,7 +220,9 @@ _STRINGS = [
     ("web", "host"), ("web", "ingest_token"), ("web", "public_url"),
     ("relay", "push_url"), ("relay", "token"), ("backup", "dir"),
 ]
-_STRING_LISTS = [("web", "allowed_hosts"), ("cache", "ytdlp_extra_args")]
+_STRING_LISTS = [
+    ("web", "allowed_hosts"), ("web", "trusted_proxies"), ("cache", "ytdlp_extra_args"),
+]
 
 
 def _quiet_hours_ok(spec: str) -> bool:
@@ -262,7 +276,8 @@ def validate_config(cfg: Config) -> None:
             f"{key('player', 'backend')} must be one of {VALID_BACKENDS}, "
             f"got {cfg.player.backend!r}"
         )
-    if isinstance(cfg.cache.audio_format, str) and cfg.cache.audio_format not in VALID_AUDIO_FORMATS:
+    audio_format = cfg.cache.audio_format
+    if isinstance(audio_format, str) and audio_format not in VALID_AUDIO_FORMATS:
         problems.append(
             f"{key('cache', 'audio_format')} must be one of {VALID_AUDIO_FORMATS}, "
             f"got {cfg.cache.audio_format!r}"

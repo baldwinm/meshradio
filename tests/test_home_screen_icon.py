@@ -30,7 +30,8 @@ async def test_every_page_declares_the_icon_and_a_fixed_name(db, bus):
     async with client_for(page_app(db, bus)) as client:
         for path in ("/", "/archive", "/archive/2026-08-01", "/search", "/stats", "/about"):
             body = (await client.get(path)).text
-            assert '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=' in body, path
+            icon = '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v='
+            assert icon in body, path
             assert '<meta name="apple-mobile-web-app-title" content="MeshRadio">' in body, path
 
 

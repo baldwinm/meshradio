@@ -17,6 +17,7 @@ every track behind it in the backlog.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from pathlib import Path
@@ -24,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from ..bus import EventBus, TRACK_DISCOVERED, TRACK_FAILED, TRACK_READY
+from ..bus import TRACK_DISCOVERED, TRACK_FAILED, TRACK_READY, EventBus
 from ..config import CacheConfig
 from ..db import Database
 from ..net import http_client
@@ -84,7 +85,7 @@ class Cacher(Service):
                         await self._submit(track)
                     try:
                         _topic, payload = await asyncio.wait_for(sub.get(), timeout=60)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         continue
                     await self._submit(payload["track"])
         finally:
@@ -227,7 +228,7 @@ class Cacher(Service):
             return None
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # wait_for only abandons the await; the process itself would
             # keep downloading (and holding a slot's worth of CPU) forever.
             _kill(proc)
@@ -237,10 +238,13 @@ class Cacher(Service):
             _kill(proc)               # shutdown: no orphaned yt-dlp
             raise
         if proc.returncode != 0:
-            log.warning("yt-dlp failed for %s: %s", video_id, stderr.decode(errors="replace")[-500:])
+            log.warning(
+                "yt-dlp failed for %s: %s", video_id, stderr.decode(errors="replace")[-500:]
+            )
             return None
         try:
-            info: dict[str, Any] = json.loads(stdout.decode(errors="replace").strip().splitlines()[-1])
+            last_line = stdout.decode(errors="replace").strip().splitlines()[-1]
+            info: dict[str, Any] = json.loads(last_line)
         except (json.JSONDecodeError, IndexError):
             info = {}
         if not target.exists():
@@ -293,9 +297,31 @@ class Cacher(Service):
             self._cache_bytes = total
 
 
+async def ytdlp_version(binary: str, timeout: float = 15.0) -> str | None:
+    """What ``binary --version`` prints, or None if it can't be run.
+
+    Shown in /healthz and logged at startup: the nightly update timer
+    (deploy/meshradio-ytdlp-update.timer) is only known to be working if
+    the version it leaves behind can be seen somewhere."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary, "--version",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, PermissionError, OSError):
+        return None
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        _kill(proc)
+        return None
+    if proc.returncode != 0:
+        return None
+    first = stdout.decode(errors="replace").strip().splitlines()
+    return first[0].strip()[:64] if first else None
+
+
 def _kill(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is None:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass

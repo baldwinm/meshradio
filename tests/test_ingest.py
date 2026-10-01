@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from meshradio.bus import EventBus, THEME_CREATED, TRACK_DISCOVERED
+from meshradio.bus import THEME_CREATED, TRACK_DISCOVERED, EventBus
 from meshradio.db import Database
 from meshradio.ingest.service import IngestService
 
@@ -166,5 +166,6 @@ async def test_local_date_rollover(db, bus):
     service = make_service(db, bus)
     # 22:30 in Chicago is already 2026-07-07 in UTC (CDT = UTC-5)
     late_evening = datetime(2026, 7, 6, 22, 30, tzinfo=CHICAGO).timestamp()
-    assert datetime.fromtimestamp(late_evening).astimezone(ZoneInfo("UTC")).date().isoformat() == "2026-07-07"
+    utc_day = datetime.fromtimestamp(late_evening).astimezone(ZoneInfo("UTC")).date()
+    assert utc_day.isoformat() == "2026-07-07"
     assert service.local_date(late_evening) == "2026-07-06"

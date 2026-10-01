@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -16,7 +16,7 @@ router = APIRouter()
 # clock unserialisable (every state read 500s), and a reported duration lands
 # in the shared tracks table, where it breaks every session that queues the
 # song. Reject at the edge so nothing downstream has to think about it.
-_SECONDS = dict(allow_inf_nan=False, le=24 * 3600)
+_SECONDS: dict[str, Any] = dict(allow_inf_nan=False, le=24 * 3600)
 
 
 @router.get("/api/state")
@@ -149,14 +149,21 @@ async def api_station(request: Request, kind: Literal["radio", "archive", "off"]
     return await ctx.render_now_playing(request)
 
 
-@router.post("/api/output/{name}")
+# Output selection — speaker, jack, Bluetooth — is the appliance's. Public
+# embed hosting has nothing to select (each visitor's browser is their own
+# output), so server.py mounts this router only off-embed instead of leaving
+# routes up that answer for a no-op.
+output_router = APIRouter()
+
+
+@output_router.post("/api/output/{name}")
 async def api_output(request: Request, name: str):
     ctx = ctx_of(request)
     ok = await ctx.audio_router.set_output(name)
     return JSONResponse({"ok": ok, "output": ctx.audio_router.current()})
 
 
-@router.get("/api/outputs")
+@output_router.get("/api/outputs")
 async def api_outputs(request: Request):
     ctx = ctx_of(request)
     return JSONResponse({

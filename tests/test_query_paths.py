@@ -55,7 +55,8 @@ async def test_tracks_by_ids_batches_and_keys_by_id(db):
             mesh_ts=1_783_400_000.0 + i, source="mesh", theme_id=theme["id"],
         )
         ids.append(track["id"])
-    rows = await db.tracks_by_ids(ids + [999_999] + ids[:2], chunk=3)   # 3 round trips, dupes folded
+    # Three round trips; the duplicates fold into one lookup each.
+    rows = await db.tracks_by_ids(ids + [999_999] + ids[:2], chunk=3)
     assert set(rows) == set(ids)
     assert rows[ids[4]]["video_id"] == "00000000004"
     assert await db.tracks_by_ids([]) == {}
@@ -76,7 +77,8 @@ async def test_restore_fetches_the_queue_in_one_query(db, bus):
     })
     assert per_id["n"] == 0 and batched["n"] == 1
     assert player.current["id"] == tracks[0]["id"]
-    assert [t["id"] for t in player.queue] == [t["id"] for t in tracks[1:]]   # order kept, gap skipped
+    # Order kept, the vanished id skipped.
+    assert [t["id"] for t in player.queue] == [t["id"] for t in tracks[1:]]
 
 
 async def test_stats_and_theme_pages_are_cached_briefly(db, bus):

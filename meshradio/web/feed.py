@@ -16,10 +16,12 @@ for as long as that day stays in the window — hence ``_clean``.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from html import escape as html_escape
-from typing import Any, Callable
-from xml.sax.saxutils import escape as xml_escape, quoteattr
+from typing import Any
+from xml.sax.saxutils import escape as xml_escape
+from xml.sax.saxutils import quoteattr
 
 from ..ingest.parse import untitled_theme
 
@@ -62,7 +64,7 @@ def _stamp(ts: float | None, fallback_date: str) -> str:
     midnight rather than taking the feed down: mesh clocks are not trusted."""
     try:
         if ts is not None:
-            return datetime.fromtimestamp(float(ts), tz=timezone.utc).strftime(
+            return datetime.fromtimestamp(float(ts), tz=UTC).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
     except (OverflowError, OSError, ValueError):
@@ -151,7 +153,7 @@ def build_feed(
             "</entry>"
         )
     if not newest:
-        newest = (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        newest = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<feed xmlns="http://www.w3.org/2005/Atom">'

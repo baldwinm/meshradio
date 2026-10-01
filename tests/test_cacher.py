@@ -83,10 +83,13 @@ async def _settle(predicate, tries=200):
     return predicate()
 
 
-async def test_workers_run_a_few_downloads_at_once_and_each_track_once(tmp_path, db, bus, monkeypatch):
+async def test_workers_run_a_few_downloads_at_once_and_each_track_once(
+    tmp_path, db, bus, monkeypatch
+):
     """One download yt-dlp sits on must not hold up the backlog; and a track
     the sweep and the event stream both hand over is worked exactly once."""
     import asyncio
+
     from meshradio.bus import TRACK_DISCOVERED
 
     cache_dir = tmp_path / "cache"
@@ -126,8 +129,8 @@ async def test_workers_run_a_few_downloads_at_once_and_each_track_once(tmp_path,
 
 
 async def test_embed_lookups_share_one_http_client(tmp_path, db, bus, monkeypatch):
-    import asyncio
     import httpx
+
     from meshradio.media import cacher as cacher_mod
 
     seen = []
@@ -138,7 +141,8 @@ async def test_embed_lookups_share_one_http_client(tmp_path, db, bus, monkeypatc
 
     monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", fake_oembed)
     cacher = Cacher(CacheConfig(), tmp_path, db, bus, embed=True)
-    tracks = [await _pending(db, f"{i:011d}") for i in range(3)]
+    for i in range(3):
+        await _pending(db, f"{i:011d}")
     cacher.start()
     try:
         assert await _settle(lambda: len(seen) == 3)
@@ -174,3 +178,17 @@ async def test_prune_works_through_candidates_in_batches(tmp_path, db: Database,
     assert statuses == ["pending"] * 4 + ["ready"]
     assert [p.name for p in cache_dir.iterdir()] == ["00000000004.opus"]
     assert cacher._cache_bytes == 100
+
+
+async def test_ytdlp_version_reads_the_binary_or_says_none(tmp_path):
+    from meshradio.media.cacher import ytdlp_version
+
+    fake = tmp_path / "yt-dlp"
+    fake.write_text("#!/bin/sh\necho 2026.07.04\necho ignored second line\n")
+    fake.chmod(0o755)
+    assert await ytdlp_version(str(fake)) == "2026.07.04"
+    broken = tmp_path / "broken"
+    broken.write_text("#!/bin/sh\nexit 3\n")
+    broken.chmod(0o755)
+    assert await ytdlp_version(str(broken)) is None
+    assert await ytdlp_version(str(tmp_path / "missing")) is None

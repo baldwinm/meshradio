@@ -16,7 +16,7 @@ import logging
 import time
 from typing import Any
 
-from ..bus import EventBus, TRACK_DISCOVERED
+from ..bus import TRACK_DISCOVERED, EventBus
 from ..config import CacheConfig
 from ..db import Database
 
@@ -91,11 +91,13 @@ class RadioService:
         except FileNotFoundError:
             log.error("yt-dlp binary not found (%s); radio mode unavailable", self.config.ytdlp_bin)
             return []
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.error("yt-dlp mix extraction timed out for %s", video_id)
             return []
         if proc.returncode != 0:
-            log.warning("mix extraction failed for %s: %s", video_id, stderr.decode(errors="replace")[-300:])
+            log.warning(
+                "mix extraction failed for %s: %s", video_id, stderr.decode(errors="replace")[-300:]
+            )
             return []
         try:
             data = json.loads(stdout.decode(errors="replace"))

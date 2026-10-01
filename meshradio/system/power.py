@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ..bus import EventBus, POWER_STATE
+from ..bus import POWER_STATE, EventBus
 from ..runtime import Service
 
 log = logging.getLogger(__name__)

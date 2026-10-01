@@ -17,7 +17,7 @@ import asyncio
 import logging
 import re
 
-from ..bus import EventBus, OUTPUT_CHANGED
+from ..bus import OUTPUT_CHANGED, EventBus
 
 log = logging.getLogger(__name__)
 

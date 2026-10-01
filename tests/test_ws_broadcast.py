@@ -33,7 +33,8 @@ async def test_broadcast_sends_in_parallel_and_survives_a_dead_socket(db, bus):
     assert quick.got and slow.got                              # both got the state
     assert quick.got[0]["topic"] == "player.state"
     assert slow.got[0]["data"]["speaker"] is False and quick.got[0]["data"]["speaker"] is False
-    assert dead.got == [] and reg.is_speaker(dead)             # newest joined; broadcast is unaffected
+    # The newest joiner is the speaker; its dead socket doesn't affect the broadcast.
+    assert dead.got == [] and reg.is_speaker(dead)
 
 
 async def test_broadcast_abandons_a_socket_that_never_reads(db, bus, monkeypatch):

@@ -2,13 +2,14 @@
 player, so visitors can't pause, skip, or steal audio from each other."""
 
 import asyncio
+import json
 import time
 from contextlib import asynccontextmanager
 
 import httpx
 
 from meshradio.audio.routing import make_router
-from meshradio.bus import EventBus, PLAYER_STATE
+from meshradio.bus import PLAYER_STATE, EventBus
 from meshradio.config import PlayerConfig
 from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 from meshradio.web.server import create_app
@@ -214,7 +215,7 @@ async def test_playing_session_not_moved_by_new_day_song(db, bus):
 
 
 def test_yt_export_url_dedupes_and_caps():
-    from meshradio.web.context import yt_export_url, YT_EXPORT_CAP
+    from meshradio.web.context import YT_EXPORT_CAP, yt_export_url
     assert yt_export_url([]) == ""
     url = yt_export_url([{"video_id": "a"}, {"video_id": "b"}, {"video_id": "a"}])
     assert url.endswith("video_ids=a,b")                       # order kept, deduped
@@ -506,3 +507,58 @@ async def test_no_session_cookie_on_assets_health_feeds_or_the_relay(db, bus):
         resp = await client.post("/api/ingest")           # 404: no token configured
         assert resp.status_code == 404 and "mr_sid" not in resp.cookies
         assert "mr_sid" in (await client.get("/archive")).cookies   # a page still does
+
+
+async def test_shutdown_flushes_and_stops_every_session(db, bus):
+    """The lifespan's shutdown writes what the periodic flush hadn't yet and
+    stops every player, so a deploy or restart loses nothing a visitor did."""
+    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
+    app = embed_app(db, bus)
+    async with app.router.lifespan_context(app):
+        async with client_for(app) as client:
+            await client.post("/api/play-day/2026-07-06")
+            await client.post("/api/seek/42")
+            sid = sid_of(client)
+        assert app.state.sessions.count() == 1
+        assert await db.load_web_session(sid) is None        # not flushed yet
+    snap = json.loads(await db.load_web_session(sid))
+    assert snap["status"] == "playing" and snap["position"] >= 42
+    assert app.state.sessions.count() == 0
+    assert app.state.sessions._maintenance is None
+
+
+def embed_app_trusting(db, bus, proxies):
+    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+
+    def factory(out_bus: EventBus) -> PlayerService:
+        return PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend(), events_out=out_bus)
+
+    return create_app(bus, db, player, make_router("dev", bus), player_factory=factory,
+                      trusted_proxies=proxies)
+
+
+async def test_forwarding_headers_are_believed_only_from_a_trusted_proxy(db, bus):
+    """A LAN client claiming https must not get an https canonical link or a
+    Secure cookie it can't send back; a trusted proxy's word is taken."""
+    headers = {"x-forwarded-proto": "https"}
+
+    def peer(app, host):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, client=(host, 1)), base_url="http://test"
+        )
+
+    # The loopback peer is trusted by default: the test client, a local proxy.
+    async with peer(embed_app_trusting(db, bus, ["127.0.0.1"]), "127.0.0.1") as client:
+        resp = await client.get("/", headers=headers)
+        assert 'rel="canonical" href="https://test/"' in resp.text
+        assert "secure" in resp.headers["set-cookie"].lower()
+    # A client on the LAN saying the same is just a client saying things.
+    async with peer(embed_app_trusting(db, bus, ["127.0.0.1"]), "192.168.1.7") as client:
+        resp = await client.get("/", headers=headers)
+        assert 'rel="canonical" href="http://test/"' in resp.text
+        assert "secure" not in resp.headers["set-cookie"].lower()
+    # "*": every peer is the proxy — a host where nothing else can reach the app.
+    async with peer(embed_app_trusting(db, bus, ["*"]), "192.168.1.7") as client:
+        resp = await client.get("/", headers=headers)
+        assert 'rel="canonical" href="https://test/"' in resp.text
+        assert "secure" in resp.headers["set-cookie"].lower()

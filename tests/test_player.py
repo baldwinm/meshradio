@@ -3,7 +3,7 @@ import random
 import time
 from datetime import datetime
 
-from meshradio.bus import EventBus, PLAYER_STATE
+from meshradio.bus import PLAYER_STATE
 from meshradio.config import PlayerConfig
 from meshradio.db import Database
 from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
@@ -154,7 +154,7 @@ async def test_cue_day_embed_skips_failed(db, bus):
 
 async def test_shuffle_queue_reorders_but_keeps_tracks(db, bus):
     player = make_player(db, bus)
-    tracks = [await make_ready_track(db, "vid%08d" % i) for i in range(8)]
+    tracks = [await make_ready_track(db, f"vid{i:08d}") for i in range(8)]
     player.current = tracks[0]
     player.queue = tracks[1:]
     original = [t["id"] for t in player.queue]

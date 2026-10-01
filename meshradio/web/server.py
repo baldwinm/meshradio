@@ -11,11 +11,13 @@ hosting) in sessions.SessionManager.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import time
+from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Callable, Sequence
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
@@ -28,18 +30,19 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 
 from ..bus import (
-    EventBus,
     INGEST_STATUS,
     THEME_CREATED,
     TRACK_DISCOVERED,
     TRACK_FAILED,
     TRACK_READY,
+    EventBus,
 )
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
-from .context import WebContext, absolute_url
+from .context import WebContext, absolute_url, forwarded_scheme
+from .ratelimit import RateLimiter
 from .sessions import (
     MAX_SOCKETS_COMMUNAL,
     SESSION_COOKIE,
@@ -92,10 +95,18 @@ def _mmss(value) -> str:
     return f"{value // 60}:{value % 60:02d}"
 
 
-def _asset_version() -> int:
-    """Newest mtime under static/ — cache-busts CSS/JS across app updates."""
+def _asset_version() -> str:
+    """A hash of everything under static/ — cache-busts CSS/JS across updates.
+
+    Content rather than the newest mtime: a fresh clone (which is what every
+    hosted build is) stamps every file with the build's time, so a deploy
+    used to invalidate every asset whether or not one had changed."""
     static = _HERE / "static"
-    return int(max(f.stat().st_mtime for f in static.rglob("*") if f.is_file()))
+    digest = hashlib.sha256()
+    for path in sorted(p for p in static.rglob("*") if p.is_file()):
+        digest.update(str(path.relative_to(static)).encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _authority(netloc: str) -> str:
@@ -163,36 +174,40 @@ class OriginGuard:
         await send({"type": "websocket.close", "code": 1008})
 
 
-def content_security_policy(embed_mode: bool) -> str:
+# A Host header worth naming in the policy: a host name or address, with an
+# optional port. Anything else gets no WebSocket entry rather than a header
+# built from whatever a client sent.
+_HOST_RE = re.compile(r"\A(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?\Z")
+
+
+def content_security_policy(embed_mode: bool, host: str = "") -> str:
     """The sources our pages actually use, and nothing else.
 
     Scripts and styles are our own files (the templates carry no inline
     handlers — see eq.js/playbar.js for the delegated listeners that replaced
     them); images are ours plus YouTube stills; audio streams from ``/audio``;
     fetch and the WebSocket stay on this origin; the one frame is YouTube's
-    player. Embed hosting adds the YouTube IFrame API and the coffee button,
-    which styles itself inline and pulls its own font."""
+    player. Embed hosting adds the YouTube IFrame API, and nothing else: the
+    donation button is a link of ours, not the donation site's script.
+
+    ``host`` is the request's own, so the WebSocket can be spelled out as
+    ``ws://host wss://host`` for the browsers that don't count a same-origin
+    socket as ``'self'`` — this origin only, where it used to be any."""
     script = ["'self'"]
-    style = ["'self'"]
-    img = ["'self'", "https://i.ytimg.com"]
-    font = ["'self'"]
     if embed_mode:
-        script += ["https://www.youtube.com", "https://cdnjs.buymeacoffee.com"]
-        style += ["'unsafe-inline'", "https://cdnjs.buymeacoffee.com", "https://fonts.googleapis.com"]
-        img += ["https://cdn.buymeacoffee.com", "https://cdnjs.buymeacoffee.com",
-                "https://www.buymeacoffee.com"]
-        font += ["https://fonts.gstatic.com"]
+        script.append("https://www.youtube.com")
+    connect = ["'self'"]
+    if host and _HOST_RE.match(host):
+        connect += [f"ws://{host}", f"wss://{host}"]
     return "; ".join([
         "default-src 'self'",
         f"script-src {' '.join(script)}",
-        f"style-src {' '.join(style)}",
-        f"img-src {' '.join(img)}",
+        "style-src 'self'",
+        "img-src 'self' https://i.ytimg.com",
         "media-src 'self'",
-        # ws:/wss: spelled out: older browsers don't count a same-origin
-        # WebSocket as 'self'.
-        "connect-src 'self' ws: wss:",
+        f"connect-src {' '.join(connect)}",
         "frame-src https://www.youtube.com",
-        f"font-src {' '.join(font)}",
+        "font-src 'self'",
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
@@ -207,28 +222,45 @@ class SecurityHeaders:
     allowed, markup that reaches a page through a mesh name or a title can't
     run anything even if escaping ever slipped. The rest closes the usual
     small doors — content sniffing, referrer leakage, framing by another
-    site. A handler that already set one of these keeps its own value."""
+    site, the page's window being reachable from another origin's popup,
+    and device permissions no page here asks for. ``hsts`` is for a site
+    that is only ever https (``[web] public_url`` says so): a year of
+    "never try http", which a browser applies only when it heard it over
+    https anyway. A handler that already set one of these keeps its own
+    value."""
 
-    def __init__(self, app, csp: str, report_only: bool = False) -> None:
+    def __init__(
+        self, app, embed_mode: bool, report_only: bool = False, hsts: bool = False
+    ) -> None:
         self.app = app
-        csp_header = "content-security-policy-report-only" if report_only else "content-security-policy"
+        self.embed_mode = embed_mode
+        self.csp_header = (
+            b"content-security-policy-report-only" if report_only else b"content-security-policy"
+        )
         self.headers = [
-            (csp_header.encode(), csp.encode()),
             (b"x-content-type-options", b"nosniff"),
             (b"referrer-policy", b"strict-origin-when-cross-origin"),
             (b"x-frame-options", b"SAMEORIGIN"),
+            (b"cross-origin-opener-policy", b"same-origin"),
+            (b"permissions-policy",
+             b"camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=()"),
         ]
+        if hsts:
+            self.headers.append((b"strict-transport-security", b"max-age=31536000"))
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        # The policy names this request's own host for its WebSocket.
+        csp = content_security_policy(self.embed_mode, Headers(scope=scope).get("host", ""))
+        headers = [(self.csp_header, csp.encode()), *self.headers]
 
         async def send_with_headers(message) -> None:
             if message["type"] == "http.response.start":
                 raw = list(message.get("headers", []))
                 present = {name.lower() for name, _ in raw}
-                raw += [(name, value) for name, value in self.headers if name not in present]
+                raw += [(name, value) for name, value in headers if name not in present]
                 message["headers"] = raw
             await send(message)
 
@@ -271,6 +303,8 @@ def create_app(
     public_url: str = "",
     security_headers: bool = True,
     csp_report_only: bool = False,
+    trusted_proxies: Sequence[str] = ("127.0.0.1",),
+    rate_limit: bool = True,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
@@ -294,6 +328,10 @@ def create_app(
         task = supervise("ingest-health-watch", watch_ingest)
         yield
         task.cancel()
+        # Visitors' snapshots flush every few seconds; on shutdown, write
+        # what is pending now rather than lose it with the process.
+        if sessions is not None:
+            await sessions.stop()
 
     app = FastAPI(title="MeshRadio", lifespan=lifespan)
     # HTML, CSS and JS are mostly repeated markup — the archive pages compress
@@ -346,9 +384,7 @@ def create_app(
                 # deployments sit behind a TLS-terminating proxy); plain-HTTP
                 # LAN/appliance use keeps working without it.
                 https = (
-                    request.url.scheme == "https"
-                    or request.headers.get("x-forwarded-proto", "")
-                    .split(",")[0].strip() == "https"
+                    request.url.scheme == "https" or forwarded_scheme(request) == "https"
                 )
                 response.set_cookie(
                     SESSION_COOKIE, cookie,
@@ -378,6 +414,8 @@ def create_app(
     bus.listen(ctx.invalidate, TRACK_DISCOVERED, TRACK_READY, TRACK_FAILED, THEME_CREATED)
     # See context.absolute_url: the one place the site names itself.
     app.state.public_url = public_url.rstrip("/")
+    # See context.forwarded_scheme: whose X-Forwarded-* headers to believe.
+    app.state.trusted_proxies = frozenset(trusted_proxies)
 
     @app.exception_handler(404)
     async def not_found(request: Request, exc):
@@ -401,9 +439,16 @@ def create_app(
 
     app.include_router(routes_pages.router)
     app.include_router(routes_api.router)
+    if player_factory is None:
+        app.include_router(routes_api.output_router)   # the appliance's outputs
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
 
+    # Inside the origin guard, so a refused cross-site request never costs a
+    # client its budget; outside the session middleware, so a refused press
+    # mints no cookie and opens nothing.
+    if rate_limit:
+        app.add_middleware(RateLimiter)
     # Outermost, so a refused request never reaches the session or skin
     # middleware either (each add_middleware wraps everything before it).
     app.add_middleware(OriginGuard)
@@ -415,7 +460,8 @@ def create_app(
         # Outermost of all: the guards' own 403/400 answers get them too.
         app.add_middleware(
             SecurityHeaders,
-            csp=content_security_policy(embed_mode=player_factory is not None),
+            embed_mode=player_factory is not None,
             report_only=csp_report_only,
+            hsts=public_url.startswith("https://"),
         )
     return app

@@ -46,13 +46,13 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
-from ..bus import EventBus, INGEST_STATUS
+from ..bus import INGEST_STATUS, EventBus
 from ..config import CoreScopeConfig
 from ..db import Database
 from ..net import http_client
@@ -128,7 +128,7 @@ class CoreScopePoller(Service):
                 await asyncio.sleep(self.config.poll_interval_s)
 
     async def poll_once(self, client: httpx.AsyncClient) -> int:
-        cursor = await self.db.get_setting(self.cursor_key, "")
+        cursor = await self.db.get_setting(self.cursor_key, "") or ""
         messages = await fetch_history(client, self.config.channel, since=cursor)
         # Skip what previous polls handled; include cursor ties (dedupe
         # no-ops them) so nothing sharing a first_seen second is lost.
@@ -276,7 +276,7 @@ def _iso_epoch(value: str) -> float | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed.timestamp()
 
 

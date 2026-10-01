@@ -14,10 +14,11 @@ snapshots (Render takes automatic daily ones on paid instances) or point
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .config import BackupConfig
@@ -30,7 +31,7 @@ _REQUIRED_TABLES = ("tracks", "themes")
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def snapshot(db_path: str | Path, dest_dir: str | Path, label: str = "auto") -> Path | None:
@@ -139,10 +140,8 @@ def restore(db_path: str | Path, snapshot_path: str | Path,
     shutil.copy2(snapshot_path, tmp)
     tmp.replace(db_path)
     for suffix in ("-wal", "-shm"):
-        try:
+        with contextlib.suppress(FileNotFoundError):
             db_path.with_name(db_path.name + suffix).unlink()
-        except FileNotFoundError:
-            pass
     return safety
 
 

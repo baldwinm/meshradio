@@ -266,3 +266,53 @@ async def test_a_landing_song_drops_the_cached_aggregates(db, bus):
         assert len(await ctx.archive_days()) == 2 and calls == 2
     finally:
         db.archive_days = original
+
+
+async def test_search_queries_are_cut_to_a_sane_length(db, bus):
+    """Nobody types more than the cap; what arrives past it is a script's,
+    and it never reaches the index."""
+    from meshradio.web.routes_pages import SEARCH_MAX_CHARS
+
+    app = page_app(db, bus)
+    seen = []
+    original = db.search_tracks
+
+    async def spy(query, limit=100):
+        seen.append(query)
+        return await original(query, limit=limit)
+
+    db.search_tracks = spy
+    try:
+        async with client_for(app) as client:
+            assert (await client.get("/search", params={"q": "x" * 5000})).status_code == 200
+        assert seen == ["x" * SEARCH_MAX_CHARS]
+    finally:
+        db.search_tracks = original
+
+
+def test_asset_version_follows_content_not_mtime(tmp_path, monkeypatch):
+    """A fresh clone stamps every file with the build's time, so a version
+    from mtimes invalidated every asset on every deploy. The hash moves only
+    when a file's bytes do."""
+    from meshradio.web import server as server_mod
+
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "style.css").write_text("body{}")
+    (static / "js").mkdir()
+    (static / "js" / "radio.js").write_text("// radio")
+    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
+    first = server_mod._asset_version()
+    assert re.fullmatch(r"[0-9a-f]{12}", first)
+    (static / "style.css").touch()                                  # a new mtime, same bytes
+    assert server_mod._asset_version() == first
+    (static / "style.css").write_text("body{margin:0}")
+    assert server_mod._asset_version() != first
+
+
+async def test_healthz_reports_the_ytdlp_version_slot(db, bus):
+    """None until the startup probe has run (and always on the embed host);
+    the slot is there so the nightly update's work can be seen."""
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/healthz")).json()
+        assert body["ok"] is True and "ytdlp_version" in body and body["ytdlp_version"] is None

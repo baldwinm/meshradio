@@ -68,6 +68,11 @@ public_url = ""                 # how visitors reach it, e.g. "https://meshradio
 security_headers = true         # Content-Security-Policy, nosniff, referrer and framing
                                 # headers on every response; false if a proxy sets them
 csp_report_only = false         # true = the policy only reports (browser console), never blocks
+trusted_proxies = ["127.0.0.1"] # reverse proxies whose X-Forwarded-For/-Proto to believe (the
+                                # visitor's address and https); ["*"] on a host like Render where
+                                # the proxy is the only way in; leave as is on a LAN appliance
+rate_limit = true               # per-client ceilings on presses and searches (30 then 10/s;
+                                # 15 then 3/s); false only behind a proxy that enforces its own
 
 [relay]
 # Mirror this node's channel history to a hosted instance that can't poll

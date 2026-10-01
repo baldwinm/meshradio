@@ -262,36 +262,34 @@ async def test_healthz_fresh_from_backup_feed_alone(db, bus):
     counted, a CoreScope outage the backup feed was covering still read as
     "every ingest source stopped" and failed the host's health check."""
     app = make_app(db, bus, token="s3cret")
-    async with app.router.lifespan_context(app):
-        async with api_client(app) as client:
-            assert (await client.get("/healthz")).json()["ingest_age_s"] is None
-            await _settle(lambda: bool(bus._subs))
-            bus.publish(INGEST_STATUS, {"corescope": "error", "comchan": "ok"})
-            body = {}
+    async with app.router.lifespan_context(app), api_client(app) as client:
+        assert (await client.get("/healthz")).json()["ingest_age_s"] is None
+        await _settle(lambda: bool(bus._subs))
+        bus.publish(INGEST_STATUS, {"corescope": "error", "comchan": "ok"})
+        body = {}
 
-            async def fresh():
-                nonlocal body
-                body = (await client.get("/healthz")).json()
-                return body["ingest_age_s"] is not None
+        async def fresh():
+            nonlocal body
+            body = (await client.get("/healthz")).json()
+            return body["ingest_age_s"] is not None
 
-            for _ in range(50):
-                await asyncio.sleep(0)
-                if await fresh():
-                    break
-            assert body["ingest_age_s"] is not None and body["ingest_age_s"] < 5
+        for _ in range(50):
+            await asyncio.sleep(0)
+            if await fresh():
+                break
+        assert body["ingest_age_s"] is not None and body["ingest_age_s"] < 5
 
 
 async def test_healthz_ignores_mesh_link_state(db, bus):
     """Mesh reports link state, not a completed ingest — a connected radio
     that has heard nothing must not pass for fresh ingestion."""
     app = make_app(db, bus, token="s3cret")
-    async with app.router.lifespan_context(app):
-        async with api_client(app) as client:
-            await _settle(lambda: bool(bus._subs))
-            bus.publish(INGEST_STATUS, {"mesh": "connected"})
-            for _ in range(20):
-                await asyncio.sleep(0)
-            assert (await client.get("/healthz")).json()["ingest_age_s"] is None
+    async with app.router.lifespan_context(app), api_client(app) as client:
+        await _settle(lambda: bool(bus._subs))
+        bus.publish(INGEST_STATUS, {"mesh": "connected"})
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert (await client.get("/healthz")).json()["ingest_age_s"] is None
 
 
 async def test_ingest_endpoint_inserts_and_dedupes(db, bus):
@@ -317,7 +315,8 @@ async def test_ingest_endpoint_rejects_the_wrong_shape_cleanly(db, bus):
     """Bad input is a 400 or a skipped row, never a 500 mid-batch."""
     async with api_client(make_app(db, bus, token="s3cret")) as client:
         headers = {"Authorization": "Bearer s3cret", "content-type": "application/json"}
-        assert (await client.post("/api/ingest", headers=headers, content=b"[1, 2]")).status_code == 400
+        not_an_object = await client.post("/api/ingest", headers=headers, content=b"[1, 2]")
+        assert not_an_object.status_code == 400
         assert (await client.post("/api/ingest", headers=headers, content=b"{{")).status_code == 400
         resp = await client.post(
             "/api/ingest", headers=headers,
@@ -381,6 +380,7 @@ async def test_ingest_batch_is_one_transaction_per_chunk(db, bus):
 def test_push_url_must_be_https_off_the_box(db):
     """The token rides on every push; plain http may only stay on localhost."""
     import pytest
+
     from meshradio.ingest.relay import validate_push_url
 
     for ok in ("https://meshradio.example.org", "https://r.example.org:8443/base",
@@ -394,3 +394,29 @@ def test_push_url_must_be_https_off_the_box(db):
         with pytest.raises(ValueError):
             RelayPusher(RelayConfig(push_url=bad, token="t"), db)
     RelayPusher(RelayConfig(), db)                    # unset: the pusher never runs
+
+
+async def test_a_receiver_reply_that_isnt_a_count_is_not_a_wipe(db, bus, caplog):
+    """A track count that isn't a number is a receiver to look at, not a
+    wiped archive to re-backfill; comparing it used to raise and end the push."""
+    await seed_history(db)
+    pusher = RelayPusher(RelayConfig(push_url="https://radio.example.org", token="s3cret"), db)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(len(json.loads(request.content)["messages"]))
+        return httpx.Response(200, json={"ok": True, "inserted": 0, "tracks": "lots"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await pusher.push_once(client)
+        await pusher.push_once(client)
+    assert calls == [2, 0]                         # history once, then a heartbeat
+    assert "not a number" in caplog.text
+
+    def not_even_an_object(request: httpx.Request) -> httpx.Response:
+        calls.append(len(json.loads(request.content)["messages"]))
+        return httpx.Response(200, json=[1, 2, 3])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(not_even_an_object)) as client:
+        await pusher.push_once(client)
+    assert calls == [2, 0, 0] and "not an object" in caplog.text
