@@ -67,9 +67,10 @@ keeps the credit.
 
 ## Setup (no hardware — any PC, Mac dev box, or Linux/Pi server)
 
-Requirements: **Python 3.11+**, **ffmpeg**, a JavaScript runtime
-(**[deno](https://deno.com)**, which yt-dlp needs to solve YouTube's challenge),
-and ~a few GB of disk for the audio cache. The `mpv` backend (Pi appliance
+Requirements: **Python 3.11+** (with SQLite 3.34 or newer, which every
+2021+ OS ships — the search index uses its trigram tokenizer), **ffmpeg**, a
+JavaScript runtime (**[deno](https://deno.com)**, which yt-dlp needs to solve
+YouTube's challenge), and ~a few GB of disk for the audio cache. The `mpv` backend (Pi appliance
 profiles) also needs `libmpv`. (Embed and demo modes need none of ffmpeg,
 yt-dlp or deno — see below.)
 
@@ -211,9 +212,11 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   see what's been done before picking tomorrow's. Days that never got a theme
   aren't listed.
 - **Search** — find a song by title, artist, the member who shared it, or the
-  theme it was shared under. Results run newest first, are cut off at 100 (the
-  page says so when more match), and each links to its day, with a **+ queue**
-  button on any song that can be played.
+  theme it was shared under: any part of a word, in any case (`café` finds
+  `CAFÉ`). Results run newest first, are cut off at 100 (the page says so when
+  more match), and each links to its day, with a **+ queue** button on any
+  song that can be played. It's answered from an index, so it stays quick
+  however large the archive grows.
 - **Skins** — the header's dropdown re-dresses the player as **Winamp** (the
   default), **iTunes** or **Media Player**. The choice is kept in a cookie and
   applied on the server, so a page never flashes the wrong skin while it loads.
