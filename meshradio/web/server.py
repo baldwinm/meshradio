@@ -299,8 +299,10 @@ def create_app(
     # HTML, CSS and JS are mostly repeated markup — the archive pages compress
     # better than 10:1. Audio is already compressed, and gzipping it would just
     # burn CPU on the Pi, but it's over the 500-byte floor either way, so the
-    # /audio route sets its own no-op encoding (see routes_ingest).
-    app.add_middleware(GZipMiddleware, minimum_size=500)
+    # /audio route sets its own no-op encoding (see routes_ingest). Level 6
+    # rather than Starlette's default 9: the same size within a percent at
+    # about half the CPU, and every partial re-render goes through here.
+    app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
     # base.html builds every page's link-preview tags from the live request.
