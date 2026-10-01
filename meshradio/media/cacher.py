@@ -273,16 +273,23 @@ class Cacher(Service):
             if self._cache_bytes <= self.config.max_bytes:
                 return
             total = await asyncio.to_thread(self._dir_size)  # authoritative before evicting
-            for track in await self.db.cached_tracks_lru():
-                if total <= self.config.max_bytes:
+            # A batch of candidates at a time: being over the cap is usually
+            # a matter of a file or two, and marking a track pending takes it
+            # out of the next batch, so the loop always makes progress.
+            while total > self.config.max_bytes:
+                batch = await self.db.cached_tracks_lru(limit=50)
+                if not batch:
                     break
-                path = Path(track["cache_path"])
-                if path.exists():
-                    size = path.stat().st_size
-                    path.unlink()
-                    total -= size
-                await self.db.set_cache_status(track["id"], "pending")
-                log.info("pruned %s from cache", track["video_id"])
+                for track in batch:
+                    if total <= self.config.max_bytes:
+                        break
+                    path = Path(track["cache_path"])
+                    if path.exists():
+                        size = path.stat().st_size
+                        path.unlink()
+                        total -= size
+                    await self.db.set_cache_status(track["id"], "pending")
+                    log.info("pruned %s from cache", track["video_id"])
             self._cache_bytes = total
 
 

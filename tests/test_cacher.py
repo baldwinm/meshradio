@@ -150,3 +150,27 @@ async def test_embed_lookups_share_one_http_client(tmp_path, db, bus, monkeypatc
     # Outside the running service (a direct call) the lookup still works.
     await cacher.process_track(await _pending(db, "zzzzzzzzzzz"))
     assert seen[-1] is None
+
+
+async def test_prune_works_through_candidates_in_batches(tmp_path, db: Database, bus):
+    """Far over the cap, the pruner asks for a few candidates at a time and
+    keeps going until it is under; marking a track pending takes it out of
+    the next batch, so it always makes progress."""
+    cacher, cache_dir = _make_cacher(tmp_path, db, bus, max_bytes=150)
+    tracks = []
+    for i in range(5):
+        f = cache_dir / f"{i:011d}.opus"
+        f.write_bytes(b"x" * 100)
+        tracks.append(await _ready_track(db, f"{i:011d}", f))
+    await db.record_play(tracks[4]["id"], "speaker")           # the keeper
+    original = db.cached_tracks_lru
+
+    async def two_at_a_time(limit=100):
+        return await original(limit=2)
+
+    db.cached_tracks_lru = two_at_a_time
+    await cacher.prune()                                         # 500 on disk > 150
+    statuses = [(await db.track_by_id(t["id"]))["cache_status"] for t in tracks]
+    assert statuses == ["pending"] * 4 + ["ready"]
+    assert [p.name for p in cache_dir.iterdir()] == ["00000000004.opus"]
+    assert cacher._cache_bytes == 100

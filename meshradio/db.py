@@ -358,7 +358,70 @@ MIGRATIONS: list[str] = [
     """
     CREATE INDEX idx_tracks_sender ON tracks(sender COLLATE NOCASE);
     """,
+    # v13 — two things the request path was paying for on every call.
+    #
+    # tracks.last_played_at: the cache pruner orders cached tracks least-
+    # recently-played first, which was a GROUP BY over tracks×plays returning
+    # every cached row (416 ms at 50k tracks) each time a download finished
+    # over the cap. record_play now stamps the track and the pruner walks an
+    # index a few rows at a time. Backfilled from plays.
+    #
+    # tracks_fts / themes_fts: search was four LIKE scans over the join. An
+    # FTS5 external-content index with the trigram tokenizer keeps LIKE's
+    # substring, case-insensitive match (and adds the Unicode case folding
+    # LIKE never had) but answers from an index. Triggers keep it in step
+    # with the rows. Any future rebuild of tracks (v2/v5/v10 style) must
+    # recreate the three tracks_fts triggers along with the seven indexes
+    # before them, and a rebuild of themes its three. The trigram tokenizer
+    # needs SQLite 3.34 (December 2020) or later.
+    """
+    ALTER TABLE tracks ADD COLUMN last_played_at TEXT;
+    UPDATE tracks SET last_played_at = (
+        SELECT MAX(p.played_at) FROM plays p WHERE p.track_id = tracks.id
+    );
+    CREATE INDEX idx_tracks_lru ON tracks(cache_status, last_played_at, ingested_at);
+
+    CREATE VIRTUAL TABLE tracks_fts USING fts5(
+        title, artist, sender,
+        content='tracks', content_rowid='id', tokenize='trigram'
+    );
+    INSERT INTO tracks_fts(rowid, title, artist, sender)
+        SELECT id, title, artist, sender FROM tracks;
+    CREATE TRIGGER tracks_fts_ai AFTER INSERT ON tracks BEGIN
+        INSERT INTO tracks_fts(rowid, title, artist, sender)
+            VALUES (new.id, new.title, new.artist, new.sender);
+    END;
+    CREATE TRIGGER tracks_fts_ad AFTER DELETE ON tracks BEGIN
+        INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, sender)
+            VALUES ('delete', old.id, old.title, old.artist, old.sender);
+    END;
+    CREATE TRIGGER tracks_fts_au AFTER UPDATE OF title, artist, sender ON tracks BEGIN
+        INSERT INTO tracks_fts(tracks_fts, rowid, title, artist, sender)
+            VALUES ('delete', old.id, old.title, old.artist, old.sender);
+        INSERT INTO tracks_fts(rowid, title, artist, sender)
+            VALUES (new.id, new.title, new.artist, new.sender);
+    END;
+
+    CREATE VIRTUAL TABLE themes_fts USING fts5(
+        title, content='themes', content_rowid='id', tokenize='trigram'
+    );
+    INSERT INTO themes_fts(rowid, title) SELECT id, title FROM themes;
+    CREATE TRIGGER themes_fts_ai AFTER INSERT ON themes BEGIN
+        INSERT INTO themes_fts(rowid, title) VALUES (new.id, new.title);
+    END;
+    CREATE TRIGGER themes_fts_ad AFTER DELETE ON themes BEGIN
+        INSERT INTO themes_fts(themes_fts, rowid, title) VALUES ('delete', old.id, old.title);
+    END;
+    CREATE TRIGGER themes_fts_au AFTER UPDATE OF title ON themes BEGIN
+        INSERT INTO themes_fts(themes_fts, rowid, title) VALUES ('delete', old.id, old.title);
+        INSERT INTO themes_fts(rowid, title) VALUES (new.id, new.title);
+    END;
+    """,
 ]
+
+# Below this many characters a search goes to LIKE: the trigram index can't
+# see a shorter query at all.
+FTS_MIN_CHARS = 3
 
 
 def utcnow() -> str:
@@ -412,10 +475,23 @@ class Database:
         # surfacing SQLITE_BUSY, and let WAL fsync lazily.
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute("PRAGMA synchronous=NORMAL")
+        # Sized for an archive of tens of thousands of rows on a Pi: 32 MiB
+        # of page cache (there is one connection), memory-mapped reads up to
+        # 256 MiB of address space (a page read skips the copy into the
+        # cache), and temp tables for sorts and GROUP BYs in memory.
+        await self._db.execute("PRAGMA cache_size=-32000")
+        await self._db.execute("PRAGMA mmap_size=268435456")
+        await self._db.execute("PRAGMA temp_store=MEMORY")
         await self._migrate()
 
     async def close(self) -> None:
         if self._db:
+            try:
+                # Refresh the planner's statistics where the session's queries
+                # showed they'd help — the recommended last act before close.
+                await self._db.execute("PRAGMA optimize")
+            except Exception:
+                log.debug("PRAGMA optimize failed on close", exc_info=True)
             await self._db.close()
             self._db = None
 
@@ -967,11 +1043,28 @@ class Database:
 
     async def search_tracks(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
         """Channel tracks whose title, artist, sharer, or theme matches
-        ``query`` (case-insensitive substring), newest first. LIKE wildcards
-        in the query are escaped so "100%" searches for the literal text."""
-        escaped = (
-            query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        )
+        ``query`` (case-insensitive substring), newest first.
+
+        Three characters and up are answered by the trigram FTS index
+        (migration v13): the same substring match LIKE made, with the
+        Unicode case folding LIKE never had, from an index instead of four
+        scans of the join. The index can't see a shorter query, so one or
+        two characters still take the LIKE path, with its wildcards escaped
+        so "100%" searches for the literal text either way."""
+        query = query.strip()
+        if len(query) >= FTS_MIN_CHARS:
+            # One quoted phrase: every character in it is literal to FTS5.
+            match = '"' + query.replace('"', '""') + '"'
+            return await self._fetchall(
+                "SELECT tr.*, t.date AS date, t.title AS theme_title "
+                "FROM tracks tr JOIN themes t ON tr.theme_id=t.id "
+                "WHERE tr.source != 'radio' AND ("
+                "  tr.id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?) "
+                "  OR tr.theme_id IN (SELECT rowid FROM themes_fts WHERE themes_fts MATCH ?)) "
+                "ORDER BY tr.mesh_ts DESC LIMIT ?",
+                (match, match, limit),
+            )
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like = f"%{escaped}%"
         return await self._fetchall(
             "SELECT tr.*, t.date AS date, t.title AS theme_title "
@@ -1178,10 +1271,17 @@ class Database:
     # -- plays / LRU ---------------------------------------------------------
 
     async def record_play(self, track_id: int, output: str | None) -> int:
+        """Log a play, and stamp the track with it: ``last_played_at`` is what
+        the cache pruner orders by, so the pruner never has to aggregate
+        ``plays`` to find the least-recently-played file."""
+        now = utcnow()
         async with self.transaction():
             cur = await self.db.execute(
                 "INSERT INTO plays(track_id,played_at,output) VALUES(?,?,?)",
-                (track_id, utcnow(), output),
+                (track_id, now, output),
+            )
+            await self.db.execute(
+                "UPDATE tracks SET last_played_at=? WHERE id=?", (now, track_id)
             )
         assert cur.lastrowid is not None
         return cur.lastrowid
@@ -1190,14 +1290,16 @@ class Database:
         async with self.transaction():
             await self.db.execute("UPDATE plays SET completed=1 WHERE id=?", (play_id,))
 
-    async def cached_tracks_lru(self) -> list[dict[str, Any]]:
-        """Cached tracks, least-recently-played (then oldest-ingested) first."""
+    async def cached_tracks_lru(self, limit: int = 100) -> list[dict[str, Any]]:
+        """The ``limit`` cached tracks the pruner should drop first: never
+        played (NULL sorts first), then least recently, then oldest-ingested.
+        One walk down ``idx_tracks_lru`` — it used to be a GROUP BY over
+        tracks×plays returning every cached row."""
         return await self._fetchall(
-            "SELECT tr.*, MAX(p.played_at) AS last_played FROM tracks tr "
-            "LEFT JOIN plays p ON p.track_id=tr.id "
-            "WHERE tr.cache_status='ready' AND tr.cache_path IS NOT NULL "
-            "GROUP BY tr.id "
-            "ORDER BY (last_played IS NOT NULL), last_played, tr.ingested_at"
+            "SELECT *, last_played_at AS last_played FROM tracks "
+            "WHERE cache_status='ready' AND cache_path IS NOT NULL "
+            "ORDER BY last_played_at, ingested_at LIMIT ?",
+            (limit,),
         )
 
     # -- helpers -------------------------------------------------------------

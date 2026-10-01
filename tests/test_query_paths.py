@@ -100,3 +100,21 @@ async def test_stats_and_theme_pages_are_cached_briefly(db, bus):
         await client.get("/stats")
         await client.get("/archive/themes")
     assert stats["n"] == 2 and themes["n"] == 2
+
+
+async def test_prune_candidates_and_search_come_from_indexes(db):
+    """The pruner's candidate list walks idx_tracks_lru in order (no sort
+    step, no scan), and a search of three characters or more is answered by
+    the FTS index rather than a scan of tracks."""
+    plan = await db._fetchall(
+        "EXPLAIN QUERY PLAN SELECT * FROM tracks "
+        "WHERE cache_status='ready' AND cache_path IS NOT NULL "
+        "ORDER BY last_played_at, ingested_at LIMIT 50"
+    )
+    details = [r["detail"] for r in plan]
+    assert any("idx_tracks_lru" in d for d in details), details
+    assert not any("TEMP B-TREE" in d or d.startswith("SCAN tracks") for d in details), details
+    plan = await db._fetchall(
+        "EXPLAIN QUERY PLAN SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?", ('"rain"',)
+    )
+    assert any("VIRTUAL TABLE INDEX" in r["detail"] for r in plan), plan
