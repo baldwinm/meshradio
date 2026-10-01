@@ -343,6 +343,12 @@ able to drive it:
   of opening anything. A real browser always carries the cookie it got with
   the page. The signing key lives in the archive, so cookies outlive a
   redeploy the way the sessions they name do.
+- **Sockets are counted.** A session may hold 8 open WebSockets (a visitor's
+  tabs), the communal appliance player 64, and the process 1,024 in all; past
+  that a handshake is closed with "try again later" rather than accepted. A
+  page may claim the speaker role once a second, and a claim from the page
+  that already has it is ignored, since each claim re-sends state to every
+  open socket.
 - **Security headers and a Content-Security-Policy** go on every response: no
   inline script, YouTube's stills and player as the only third parties (plus the
   donation button on the embed host), `nosniff`, a strict referrer policy and

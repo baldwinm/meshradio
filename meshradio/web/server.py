@@ -33,7 +33,14 @@ from ..media.player import PlayerService
 from ..runtime import supervise
 from . import routes_api, routes_ingest, routes_pages, ws
 from .context import WebContext, absolute_url
-from .sessions import SESSION_COOKIE, SessionManager, SpeakerRegistry, issue_cookie, verify_cookie
+from .sessions import (
+    MAX_SOCKETS_COMMUNAL,
+    SESSION_COOKIE,
+    SessionManager,
+    SpeakerRegistry,
+    issue_cookie,
+    verify_cookie,
+)
 
 log = logging.getLogger(__name__)
 
@@ -334,7 +341,7 @@ def create_app(
         ingest_token=ingest_token,
         sessions=sessions,
         templates=templates,
-        speakers=SpeakerRegistry(),
+        speakers=SpeakerRegistry(MAX_SOCKETS_COMMUNAL),
         health=health,
     )
     app.state.ctx = ctx

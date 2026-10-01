@@ -170,6 +170,7 @@ class WebContext:
     templates: Jinja2Templates
     speakers: SpeakerRegistry      # communal speaker election
     health: dict
+    open_sockets: int = 0          # WebSockets live right now, across every session
     _cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
 
     # Whole-archive aggregates behind a short TTL. Every player-state push

@@ -62,16 +62,33 @@ def verify_cookie(value: str | None, secret: bytes) -> str | None:
     return sid if hmac.compare_digest(signature, _sign(sid, secret)) else None
 
 
+# Ceilings on open WebSockets. A visitor's own tabs are a handful; a bot with
+# one cookie could otherwise open sockets without end, each a pair of tasks
+# and one more target for every state fan-out. The communal (appliance)
+# registry is shared by everyone on the LAN, so it gets more room; the
+# process-wide cap (web/ws.py) is the backstop across all sessions.
+MAX_SOCKETS_PER_SESSION = 8
+MAX_SOCKETS_COMMUNAL = 64
+
+
 class SpeakerRegistry:
     """Exactly one connected page is the 'speaker' — the tab that actually
     plays audio. Everyone else is a silent remote. Newest connection wins;
     any tab can claim the role explicitly."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_clients: int = MAX_SOCKETS_COMMUNAL) -> None:
         self._conns: list = []
+        self.max_clients = max_clients
 
-    def join(self, conn) -> None:
+    def full(self) -> bool:
+        return len(self._conns) >= self.max_clients
+
+    def join(self, conn) -> bool:
+        """Add a page; False (and nothing changes) once the registry is full."""
+        if self.full():
+            return False
         self._conns.append(conn)
+        return True
 
     def leave(self, conn) -> None:
         if conn in self._conns:
@@ -95,7 +112,9 @@ class Session:
     and their own speaker election among their tabs."""
     player: PlayerService
     bus: EventBus
-    speakers: SpeakerRegistry = field(default_factory=SpeakerRegistry)
+    speakers: SpeakerRegistry = field(
+        default_factory=lambda: SpeakerRegistry(MAX_SOCKETS_PER_SESSION)
+    )
     last_seen: float = field(default_factory=time.monotonic)
 
 
