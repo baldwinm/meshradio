@@ -3,64 +3,19 @@ player, so visitors can't pause, skip, or steal audio from each other."""
 
 import asyncio
 import json
-import time
-from contextlib import asynccontextmanager
 
-import httpx
+from meshradio.bus import PLAYER_STATE
 
-from meshradio.audio.routing import make_router
-from meshradio.bus import PLAYER_STATE, EventBus
-from meshradio.config import PlayerConfig
-from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
-from meshradio.web.server import create_app
-
-from .test_player import make_ready_track
-
-
-async def make_ready_on(db, video_id, date, duration=60):
-    """A ready track filed under a specific archive day."""
-    theme = await db.create_theme(date, f"theme {date}")
-    track = await db.add_track(
-        video_id=video_id,
-        url=f"https://www.youtube.com/watch?v={video_id}",
-        channel="#music", sender="alice", mesh_ts=time.time(),
-        source="mesh", theme_id=theme["id"],
-    )
-    await db.update_track_metadata(track["id"], title=video_id, duration=duration)
-    await db.set_cache_status(track["id"], "ready", f"/cache/{video_id}.opus")
-    return await db.track_by_id(track["id"])
-
-
-def embed_app(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
-
-    def factory(out_bus: EventBus) -> PlayerService:
-        return PlayerService(
-            PlayerConfig(), db, bus, backend=EmbedBackend(), events_out=out_bus
-        )
-
-    return create_app(
-        bus, db, player, make_router("dev", bus), player_factory=factory
-    )
-
-
-@asynccontextmanager
-async def client_for(app, visited=True):
-    """A browser. By default it has loaded a page before the test starts
-    pressing things — that is where a real one gets its session cookie, and
-    a press that arrives without one opens nothing (see
-    ``WebContext.get_player``). ``visited=False`` is the first visit itself."""
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as client:
-        if visited:
-            await client.get("/")
-        yield client
-
-
-def sid_of(client) -> str:
-    """The session key a client's cookie names: the id without its signature."""
-    return client.cookies["mr_sid"].split(".")[0]
+from .helpers import (
+    Socket,
+    client_for,
+    embed_app,
+    make_ready_on,
+    make_ready_track,
+    page_app,
+    peer,
+    sid_of,
+)
 
 
 async def test_visitors_get_independent_players(db, bus):
@@ -254,19 +209,6 @@ async def test_session_cookie_issued_once(db, bus):
         assert client.cookies["mr_sid"] == sid
 
 
-async def test_forged_session_cookie_is_reissued(db, bus):
-    """An attacker-chosen sid (wrong shape/length) must never become a session
-    key or a DB row — the server ignores it and issues its own."""
-    app = embed_app(db, bus)
-    async with client_for(app) as client:
-        client.cookies.set("mr_sid", "x" * 4096)
-        resp = await client.get("/api/state")
-        assert "mr_sid" in resp.cookies                # reissued
-        new_sid = resp.cookies["mr_sid"]
-        assert new_sid != "x" * 4096
-        assert "x" * 4096 not in app.state.sessions._sessions
-
-
 async def test_session_cap_evicts_stalest(db, bus):
     """Cookie-spraying bots can't grow the process without bound: at the cap,
     the stalest session is flushed to disk and evicted to make room."""
@@ -342,8 +284,7 @@ async def test_restore_skips_vanished_tracks(db, bus):
 async def test_appliance_mode_still_shares_one_player(db, bus):
     """No factory (web/mpv appliance): the communal player handles everyone."""
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    app = create_app(bus, db, player, make_router("dev", bus))
+    app = page_app(db, bus)
     async with client_for(app) as alice, client_for(app) as bob:
         await alice.post("/api/play-day/2026-07-06")
         assert (await bob.get("/api/state")).json()["status"] == "playing"
@@ -382,43 +323,20 @@ async def test_a_press_opens_the_session(db, bus):
         assert (await client.get("/api/state")).json()["status"] == "playing"
 
 
-async def test_well_formed_but_unknown_cookie_opens_no_session_on_get(db, bus):
-    """The cap's worst case: a bot presenting random valid-looking sids."""
+async def test_unknown_or_forged_cookie_opens_no_session_on_get(db, bus):
+    """The cap's worst case: a bot presenting random valid-looking sids. One
+    of the wrong shape is ignored and replaced; it never becomes a key."""
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)
     app = embed_app(db, bus)
     async with client_for(app) as client:
         for i in range(5):
             client.cookies.set("mr_sid", f"{i:032x}")
             assert (await client.get("/api/state")).status_code == 200
+        client.cookies.set("mr_sid", "x" * 4096)
+        resp = await client.get("/api/state")
+        assert "mr_sid" in resp.cookies and resp.cookies["mr_sid"] != "x" * 4096
         assert app.state.sessions.count() == 0
-
-
-async def _websocket(app, cookie=None):
-    """Drive the ASGI app through one WebSocket handshake by hand (the test
-    client would run the app on another thread and loop, away from the
-    fixture's database). Returns the messages the app sent."""
-    headers = [(b"host", b"test")]
-    if cookie is not None:
-        headers.append((b"cookie", f"mr_sid={cookie}".encode()))
-    scope = {
-        "type": "websocket", "asgi": {"version": "3.0"}, "http_version": "1.1",
-        "scheme": "ws", "path": "/ws", "raw_path": b"/ws", "root_path": "",
-        "query_string": b"", "headers": headers, "client": ("1.2.3.4", 5),
-        "server": ("test", 80), "subprotocols": [],
-        "extensions": {"websocket.http.response": {}},
-    }
-    inbox: asyncio.Queue = asyncio.Queue()
-    sent: list[dict] = []
-    await inbox.put({"type": "websocket.connect"})
-
-    async def send(message):
-        sent.append(message)
-        # One state push is all we wanted; hang up.
-        if message["type"] in ("websocket.send", "websocket.http.response.body"):
-            await inbox.put({"type": "websocket.disconnect", "code": 1000})
-
-    await asyncio.wait_for(app(scope, inbox.get, send), 2)
-    return sent
+        assert "x" * 4096 not in app.state.sessions._sessions
 
 
 async def test_websocket_opens_the_session(db, bus):
@@ -428,10 +346,10 @@ async def test_websocket_opens_the_session(db, bus):
     async with client_for(app, visited=False) as client:
         sid = (await client.get("/")).cookies["mr_sid"]
     assert app.state.sessions.count() == 0
-    sent = await _websocket(app, cookie=sid)
-    assert sent[0]["type"] == "websocket.accept"
-    assert '"player.state"' in sent[1]["text"]
+    sock = await Socket(app, cookie=sid).open()
+    assert sock.accepted and sock.states()[0]["topic"] == "player.state"
     assert app.state.sessions.count() == 1
+    await sock.close()
 
 
 async def test_websocket_without_a_cookie_is_refused(db, bus):
@@ -441,9 +359,10 @@ async def test_websocket_without_a_cookie_is_refused(db, bus):
     # ...nor a well-formed value this server didn't sign.
     unsigned = f"{'a' * 32}.{'b' * 32}"
     for cookie in (None, "forged", "x" * 32, "a" * 32, unsigned):
-        sent = await _websocket(app, cookie=cookie)
+        sock = await Socket(app, cookie=cookie).open()
         # Closed before accept, which the server reports as a 403 handshake.
-        assert sent == [{"type": "websocket.close", "code": 1008, "reason": ""}]
+        assert sock.refused_with == 1008 and len(sock.sent) == 1, cookie
+        await sock.close()
     assert app.state.sessions.count() == 0
 
 
@@ -527,38 +446,26 @@ async def test_shutdown_flushes_and_stops_every_session(db, bus):
     assert app.state.sessions._maintenance is None
 
 
-def embed_app_trusting(db, bus, proxies):
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
-
-    def factory(out_bus: EventBus) -> PlayerService:
-        return PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend(), events_out=out_bus)
-
-    return create_app(bus, db, player, make_router("dev", bus), player_factory=factory,
-                      trusted_proxies=proxies)
-
-
 async def test_forwarding_headers_are_believed_only_from_a_trusted_proxy(db, bus):
     """A LAN client claiming https must not get an https canonical link or a
     Secure cookie it can't send back; a trusted proxy's word is taken."""
     headers = {"x-forwarded-proto": "https"}
 
-    def peer(app, host):
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app, client=(host, 1)), base_url="http://test"
-        )
+    def trusting(proxies):
+        return embed_app(db, bus, trusted_proxies=proxies)
 
     # The loopback peer is trusted by default: the test client, a local proxy.
-    async with peer(embed_app_trusting(db, bus, ["127.0.0.1"]), "127.0.0.1") as client:
+    async with peer(trusting(["127.0.0.1"]), "127.0.0.1") as client:
         resp = await client.get("/", headers=headers)
         assert 'rel="canonical" href="https://test/"' in resp.text
         assert "secure" in resp.headers["set-cookie"].lower()
     # A client on the LAN saying the same is just a client saying things.
-    async with peer(embed_app_trusting(db, bus, ["127.0.0.1"]), "192.168.1.7") as client:
+    async with peer(trusting(["127.0.0.1"]), "192.168.1.7") as client:
         resp = await client.get("/", headers=headers)
         assert 'rel="canonical" href="http://test/"' in resp.text
         assert "secure" not in resp.headers["set-cookie"].lower()
     # "*": every peer is the proxy — a host where nothing else can reach the app.
-    async with peer(embed_app_trusting(db, bus, ["*"]), "192.168.1.7") as client:
+    async with peer(trusting(["*"]), "192.168.1.7") as client:
         resp = await client.get("/", headers=headers)
         assert 'rel="canonical" href="https://test/"' in resp.text
         assert "secure" in resp.headers["set-cookie"].lower()

@@ -1,16 +1,10 @@
-"""Queue priority, backfill freshness, and speaker election."""
+"""Queue priority, backfill freshness, and the queue's bounds."""
 
 import time
 
-from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService, _is_filler
-from meshradio.web.server import SpeakerRegistry
+from meshradio.media.player import _is_filler
 
-from .test_player import make_ready_track
-
-
-def make_player(db, bus, **overrides) -> PlayerService:
-    return PlayerService(PlayerConfig(**overrides), db, bus, backend=NullBackend())
+from .helpers import make_player, make_ready_track
 
 
 async def test_stale_backfill_track_does_not_autoplay(db, bus):
@@ -54,7 +48,7 @@ async def test_radio_tracks_append_at_end(db, bus):
     assert [t["video_id"] for t in player.queue] == ["bbbbbbbbbbb", "ccccccccccc"]
 
 
-async def test_remove_from_queue(db, bus):
+async def test_remove_from_queue_needs_a_current_index(db, bus):
     player = make_player(db, bus)
     player.queue = [
         {"id": 1, "video_id": "a", "source": "corescope"},
@@ -62,15 +56,10 @@ async def test_remove_from_queue(db, bus):
     ]
     assert await player.remove_from_queue(0, 1) is True
     assert [t["id"] for t in player.queue] == [2]
-
-
-async def test_remove_with_stale_index_noops(db, bus):
-    player = make_player(db, bus)
-    player.queue = [{"id": 1, "video_id": "a", "source": "corescope"}]
     # Client rendered an older queue: index 0 now holds a different track.
     assert await player.remove_from_queue(0, 999) is False
-    assert await player.remove_from_queue(5, 1) is False
-    assert len(player.queue) == 1
+    assert await player.remove_from_queue(5, 2) is False
+    assert [t["id"] for t in player.queue] == [2]
 
 
 async def test_move_to_front(db, bus):
@@ -91,42 +80,6 @@ async def test_clear_queue_also_stops_station(db, bus):
     await player.clear_queue()
     assert player.queue == []
     assert player.station is None
-
-
-def test_speaker_registry_newest_wins():
-    reg = SpeakerRegistry()
-    reg.join("a")
-    assert reg.is_speaker("a")
-    reg.join("b")
-    assert reg.is_speaker("b")
-    assert not reg.is_speaker("a")
-
-
-def test_speaker_registry_claim():
-    reg = SpeakerRegistry()
-    reg.join("a")
-    reg.join("b")
-    reg.claim("a")
-    assert reg.is_speaker("a")
-    assert not reg.is_speaker("b")
-
-
-def test_speaker_registry_leave_promotes_previous():
-    reg = SpeakerRegistry()
-    reg.join("a")
-    reg.join("b")
-    reg.leave("b")
-    assert reg.is_speaker("a")
-    reg.leave("a")
-    assert not reg.is_speaker("a")
-    assert reg.clients() == []
-
-
-def test_speaker_registry_leave_unknown_is_noop():
-    reg = SpeakerRegistry()
-    reg.join("a")
-    reg.leave("ghost")
-    assert reg.is_speaker("a")
 
 
 # -- queue bounds ---------------------------------------------------------------

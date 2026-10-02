@@ -7,11 +7,9 @@ into silence when a day's playlist ends.
 
 import time
 
-from meshradio.config import PlayerConfig
 from meshradio.db import Database
-from meshradio.media.player import NullBackend, PlayerService
 
-from .test_player import make_embed_player, make_ready_track
+from .helpers import make_embed_player, make_player, make_ready_track
 
 
 async def _channel_day(db: Database, date: str, video_ids: list[str]) -> None:
@@ -30,41 +28,34 @@ async def _channel_day(db: Database, date: str, video_ids: list[str]) -> None:
         await db.set_cache_status(track["id"], "ready", f"/cache/{vid}.opus")
 
 
-async def test_random_channel_tracks_excludes_radio_and_themeless(db):
+async def test_random_channel_tracks_offers_channel_posts_only(db):
+    """Never a radio row (themeless), never an excluded id; and the appliance
+    rule (``ready_only``) skips a track with no file where the embed rule
+    keeps it."""
     await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa", "bbbbbbbbbbb"])
-    # A radio row (themeless) must never be offered as archive filler.
     await db.add_track(
         video_id="ccccccccccc", url="u", channel="radio", sender="radio",
         mesh_ts=time.time(), source="radio", theme_id=None,
     )
-    got = await db.random_channel_tracks(limit=10)
-    vids = {t["video_id"] for t in got}
-    assert vids == {"aaaaaaaaaaa", "bbbbbbbbbbb"}
-
-
-async def test_random_channel_tracks_honors_exclude(db):
-    await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa", "bbbbbbbbbbb"])
-    got = await db.random_channel_tracks(limit=10, exclude_video_ids=["aaaaaaaaaaa"])
-    assert [t["video_id"] for t in got] == ["bbbbbbbbbbb"]
-
-
-async def test_ready_only_filters_unfetched(db):
-    theme = await db.create_theme("2026-07-06", "t")
-    pend = await db.add_track(
-        video_id="aaaaaaaaaaa", url="u", channel="#music", sender="a",
+    theme = await db.create_theme("2026-07-07", "t")
+    await db.add_track(                                   # stays 'pending': no file
+        video_id="ddddddddddd", url="u", channel="#music", sender="a",
         mesh_ts=time.time(), source="mesh", theme_id=theme["id"],
-    )  # stays 'pending' — no file
-    # ready_only (appliance rule) skips it; the embed rule (default) keeps it.
-    assert await db.random_channel_tracks(ready_only=True) == []
-    assert len(await db.random_channel_tracks(ready_only=False)) == 1
-    assert pend is not None
+    )
+    got = await db.random_channel_tracks(limit=10, ready_only=True)
+    assert {t["video_id"] for t in got} == {"aaaaaaaaaaa", "bbbbbbbbbbb"}
+    got = await db.random_channel_tracks(
+        limit=10, ready_only=True, exclude_video_ids=["aaaaaaaaaaa"])
+    assert [t["video_id"] for t in got] == ["bbbbbbbbbbb"]
+    got = await db.random_channel_tracks(limit=10)        # the embed rule: pending too
+    assert {t["video_id"] for t in got} == {"aaaaaaaaaaa", "bbbbbbbbbbb", "ddddddddddd"}
 
 
 async def test_archive_station_refills_at_end_of_queue(db, bus):
     """The last song of a day rolls straight into archive filler — no silence."""
     await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa"])
     await _channel_day(db, "2026-07-05", ["bbbbbbbbbbb", "ccccccccccc"])
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     await player.play_day("2026-07-06")            # one-song day
     assert player.status == "playing"
     assert player.queue == []
@@ -79,7 +70,7 @@ async def test_archive_station_refills_at_end_of_queue(db, bus):
 
 async def test_archive_station_from_idle_plays_now(db, bus):
     await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa"])
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     assert player.status == "idle"
     assert await player.start_station("archive") is True
     assert player.status == "playing"
@@ -88,7 +79,7 @@ async def test_archive_station_from_idle_plays_now(db, bus):
 
 async def test_archive_station_never_repeats_current_or_queued(db, bus):
     await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"])
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     rows = await db.random_channel_tracks(limit=1)
     player.current = rows[0]                       # some real archived song
     player.status = "playing"
@@ -114,7 +105,7 @@ async def test_archive_station_works_in_embed_mode(db, bus):
 async def test_archive_filler_yields_to_fresh_channel_post(db, bus):
     """A song posted live still jumps ahead of archive filler already queued."""
     await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"])
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     player.current = await make_ready_track(db, "ddddddddddd", duration=60)
     player.status = "playing"
     player.station = "archive"
@@ -129,7 +120,7 @@ async def test_archive_filler_yields_to_fresh_channel_post(db, bus):
 
 async def test_station_switch_is_exclusive(db, bus):
     """Turning on the archive station clears a radio station and vice versa."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     await make_ready_track(db, "aaaaaaaaaaa")
     player.station = "radio"
     await player.start_station("archive")

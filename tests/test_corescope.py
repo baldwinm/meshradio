@@ -135,21 +135,15 @@ def poller_factory(db: Database, bus):
     return make
 
 
-async def test_channel_hash_url_encoded(poller_factory):
-    poller, client = poller_factory([])
-    await poller.poll_once(client)
-    request = poller.analyzer.message_requests[0]
-    assert request.url.raw_path.decode().split("?")[0] == "/api/channels/%23music/messages"
-
-
-async def test_asks_for_a_full_page_from_the_newest_end(poller_factory):
+async def test_asks_for_a_full_page_of_the_encoded_channel_from_the_newest_end(poller_factory):
     """Sending no ``limit`` gets the newest 100 only — the poller asks for the
     instance's whole default page, starting at the end of the channel."""
     poller, client = poller_factory([])
     await poller.poll_once(client)
-    params = poller.analyzer.message_requests[0].url.params
+    request = poller.analyzer.message_requests[0]
+    assert request.url.raw_path.decode().split("?")[0] == "/api/channels/%23music/messages"
     assert PAGE_LIMIT == 500
-    assert (params["limit"], params["offset"]) == ("500", "0")
+    assert (request.url.params["limit"], request.url.params["offset"]) == ("500", "0")
 
 
 async def test_backfill_orders_theme_before_links(db, poller_factory):
@@ -296,17 +290,6 @@ async def test_server_that_ignores_offset_is_read_once(db, poller_factory):
     assert poller.analyzer.offsets() == [0, 100]
 
 
-async def test_poll_tolerates_a_response_without_a_total(db, bus):
-    """Whatever the server says about the rest, one page without a count is
-    the end of the walk."""
-    def handler(request):
-        return httpx.Response(200, json={"messages": [
-            corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")]})
-
-    async with _client(handler) as client:
-        assert await _poller(db, bus).poll_once(client) == 1
-
-
 # -- feeds ---------------------------------------------------------------------
 
 
@@ -319,16 +302,6 @@ def _secondary_poller(db, bus, messages):
     service = IngestService(db, bus, channel="#music")
     poller = CoreScopePoller(config, service, db, bus, name="backup", source="corescope")
     return poller, client
-
-
-async def test_secondary_feed_keeps_its_own_cursor(db, bus):
-    """A second feed keeps a separate cursor so it never clobbers the primary
-    CoreScope cursor."""
-    msg = corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")
-    poller, client = _secondary_poller(db, bus, [msg])
-    assert await poller.poll_once(client) == 1
-    assert await db.get_setting("backup.cursor") == "2026-07-06T17:00:05Z"
-    assert await db.get_setting(CURSOR_KEY) is None  # primary cursor untouched
 
 
 async def test_secondary_feed_dedupes_against_primary(db, bus, poller_factory):
@@ -462,7 +435,12 @@ async def test_poll_error_keeps_the_body_snippet(db, bus):
     assert len(message) < 400                                      # a snippet, not the page
 
 
-async def test_poll_tolerates_a_malformed_history(db, bus):
+async def test_poll_tolerates_a_malformed_or_countless_history(db, bus):
+    """Whatever the server says about the rest, one page without a count is
+    the end of the walk; a body that isn't a history at all ingests nothing."""
+    one = corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")
+    async with _client(lambda request: httpx.Response(200, json={"messages": [one]})) as client:
+        assert await _poller(db, bus).poll_once(client) == 1
     for body in (b"[]", b'{"messages": [1, null, {"text": "hi"}]}', b'{"messages": null}',
                  b'{"messages": {"a": 1}, "total": "many"}'):
         async with _client(lambda request, body=body: httpx.Response(200, content=body)) as client:

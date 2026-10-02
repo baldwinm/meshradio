@@ -8,8 +8,7 @@ per-member pages the stats board now links to.
 import re
 import time
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 
 async def share(db, date, video_id, sender, title="Song", artist=None, theme=None,
@@ -25,6 +24,7 @@ async def share(db, date, video_id, sender, title="Song", artist=None, theme=Non
 
 
 async def test_play_totals_count_what_was_played(db):
+    assert await db.play_totals() == {"plays": 0, "tracks": 0, "finished": 0}
     once = await share(db, "2026-08-01", "aaaaaaaaaaa", "ana", title="Rarely")
     often = await share(db, "2026-08-01", "bbbbbbbbbbb", "bob", title="Often")
     await db.record_play(once["id"], None)
@@ -32,10 +32,6 @@ async def test_play_totals_count_what_was_played(db):
         play_id = await db.record_play(often["id"], None)
         await db.mark_play_completed(play_id)
     assert await db.play_totals() == {"plays": 4, "tracks": 2, "finished": 3}
-
-
-async def test_play_totals_survive_an_empty_history(db):
-    assert await db.play_totals() == {"plays": 0, "tracks": 0, "finished": 0}
 
 
 async def test_stats_page_counts_plays_and_links_members(db, bus):

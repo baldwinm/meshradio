@@ -182,7 +182,7 @@ meshradio/
 ├── system/
 │   ├── power.py        # fuel gauge polling, safe shutdown
 │   └── provision.py    # first-boot AP-mode WiFi setup (nmcli)
-tests/                  # top-level; 390+ tests, pytest-asyncio
+tests/                  # top-level; pytest-asyncio, shared builders in tests/helpers.py
 ```
 
 **Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `httpx`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node. Only the web/ingest core is a hard dependency: yt-dlp and python-mpv sit behind the `media` extra and the Pi hardware libraries (`meshcore`, `luma.oled`, `gpiozero`) behind `hw`, so a public embed host or a dev box installs neither. yt-dlp's YouTube extractor also needs a JavaScript runtime (deno) on the machine to solve YouTube's challenge.

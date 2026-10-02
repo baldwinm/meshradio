@@ -4,9 +4,7 @@ rebuilt the day context; it is one request that swaps all three out-of-band."""
 
 import re
 
-from .test_archive_calendar import page_app
-from .test_query_paths import counting
-from .test_sessions import client_for, make_ready_on
+from .helpers import client_for, counting, make_ready_on, page_app
 
 
 async def test_index_fetches_one_live_partial_per_state_event(db, bus):

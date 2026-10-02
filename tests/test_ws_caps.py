@@ -6,72 +6,10 @@ holding one cookie used to be able to open sockets without end, or send
 "claim" in a loop and have the server fan state out to everyone on each one.
 """
 
-import asyncio
-import json
-
 from meshradio.web import ws as ws_mod
 from meshradio.web.sessions import MAX_SOCKETS_PER_SESSION, SpeakerRegistry
 
-from .test_sessions import client_for, embed_app
-
-
-class Socket:
-    """One hand-driven WebSocket client over the ASGI app, kept open until
-    ``close()`` (the test client would run the app on another thread and
-    loop, away from the fixture's database)."""
-
-    def __init__(self, app, cookie=None):
-        self.app = app
-        headers = [(b"host", b"test")]
-        if cookie is not None:
-            headers.append((b"cookie", f"mr_sid={cookie}".encode()))
-        self.scope = {
-            "type": "websocket", "asgi": {"version": "3.0"}, "http_version": "1.1",
-            "scheme": "ws", "path": "/ws", "raw_path": b"/ws", "root_path": "",
-            "query_string": b"", "headers": headers, "client": ("1.2.3.4", 5),
-            "server": ("test", 80), "subprotocols": [],
-            "extensions": {"websocket.http.response": {}},
-        }
-        self.inbox: asyncio.Queue = asyncio.Queue()
-        self.sent: list[dict] = []
-        self.task: asyncio.Task | None = None
-
-    async def open(self):
-        await self.inbox.put({"type": "websocket.connect"})
-        self.task = asyncio.create_task(self.app(self.scope, self.inbox.get, self._send))
-        await asyncio.sleep(0.05)              # let the handshake and first push run
-        return self
-
-    async def _send(self, message):
-        self.sent.append(message)
-
-    @property
-    def accepted(self) -> bool:
-        return bool(self.sent) and self.sent[0]["type"] == "websocket.accept"
-
-    @property
-    def refused_with(self):
-        """The close code if the handshake was refused before accept."""
-        if self.sent and self.sent[0]["type"] == "websocket.close":
-            return self.sent[0]["code"]
-        return None
-
-    def states(self) -> list[dict]:
-        return [json.loads(m["text"]) for m in self.sent if m["type"] == "websocket.send"]
-
-    async def say(self, text: str):
-        await self.inbox.put({"type": "websocket.receive", "text": text})
-        await asyncio.sleep(0.05)
-
-    async def close(self):
-        await self.inbox.put({"type": "websocket.disconnect", "code": 1000})
-        await asyncio.wait_for(self.task, 2)
-        await asyncio.sleep(0.02)              # the leave broadcast to the others
-
-
-async def cookie_for(app) -> str:
-    async with client_for(app, visited=False) as client:
-        return (await client.get("/")).cookies["mr_sid"]
+from .helpers import Socket, cookie_for, embed_app
 
 
 async def test_a_session_has_a_ceiling_on_open_sockets(db, bus):
@@ -133,11 +71,21 @@ async def test_claims_from_the_speaker_or_too_fast_change_nothing(db, bus):
     await b.close()
 
 
-def test_registry_refuses_joins_past_its_ceiling():
-    reg = SpeakerRegistry(max_clients=2)
-    a, b, c = object(), object(), object()
-    assert reg.join(a) and reg.join(b)
-    assert not reg.join(c) and reg.full()
-    assert reg.is_speaker(b) and c not in reg.clients()
-    reg.leave(a)
-    assert reg.join(c) and reg.is_speaker(c)
+def test_speaker_registry_election_and_ceiling():
+    """The newest page is the speaker; a claim takes the role; leaving hands
+    it back down the line; past the ceiling a join is refused."""
+    reg = SpeakerRegistry(max_clients=3)
+    assert reg.join("a") and reg.is_speaker("a")
+    assert reg.join("b") and reg.is_speaker("b") and not reg.is_speaker("a")
+    reg.claim("a")
+    assert reg.is_speaker("a") and not reg.is_speaker("b")
+    reg.leave("ghost")                                      # unknown: a no-op
+    assert reg.is_speaker("a")
+    assert reg.join("c") and reg.is_speaker("c")
+    assert not reg.join("d") and reg.full() and "d" not in reg.clients()
+    reg.leave("c")
+    assert reg.is_speaker("a")                              # back to the last claimant
+    assert reg.join("d") and reg.is_speaker("d")
+    for client in ("d", "a", "b"):
+        reg.leave(client)
+    assert reg.clients() == [] and not reg.is_speaker("a")

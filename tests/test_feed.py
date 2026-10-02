@@ -6,8 +6,7 @@ from datetime import UTC, datetime
 from meshradio.ingest.parse import untitled_theme
 from meshradio.web.feed import FEED_DAYS, SONGS_PER_ENTRY, _stamp, build_feed
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 NS = {"a": "http://www.w3.org/2005/Atom"}
 T0 = 1_785_000_000.0      # a fixed mesh time, so `updated` is checkable
@@ -197,16 +196,6 @@ async def test_feed_reads_go_through_the_ttl_cache(db, bus, monkeypatch):
         for _ in range(3):
             assert (await client.get("/feed.xml")).status_code == 200
     assert calls["n"] == 1
-
-
-async def test_every_page_advertises_the_feed(db, bus):
-    """Readers and browsers autodiscover from whatever page the visitor is on."""
-    await add_day(db, "2026-08-01", "rain songs", [("aaaaaaaaaaa", "Rain", "")])
-    async with client_for(page_app(db, bus)) as client:
-        for path in ("/", "/archive", "/archive/2026-08-01", "/stats", "/about"):
-            body = (await client.get(path)).text
-            assert ('<link rel="alternate" type="application/atom+xml"' in body
-                    and 'href="http://test/feed.xml"' in body), path
 
 
 # -- the query ---------------------------------------------------------------

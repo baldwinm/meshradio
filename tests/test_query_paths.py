@@ -1,22 +1,19 @@
 """The queries on the request path do the least work that answers them."""
 
+import re
 import time
 
-from .test_archive_calendar import page_app, seed_day
-from .test_sessions import client_for, embed_app, make_ready_on
+import pytest
 
-
-def counting(db, name):
-    """Count calls to one Database method (and keep it working)."""
-    calls = {"n": 0}
-    original = getattr(db, name)
-
-    async def wrapped(*args, **kwargs):
-        calls["n"] += 1
-        return await original(*args, **kwargs)
-
-    setattr(db, name, wrapped)
-    return calls
+from .helpers import (
+    client_for,
+    counting,
+    embed_app,
+    make_embed_player,
+    make_ready_on,
+    page_app,
+    seed_day,
+)
 
 
 async def test_newest_day_with_tracks(db):
@@ -63,11 +60,8 @@ async def test_tracks_by_ids_batches_and_keys_by_id(db):
 
 
 async def test_restore_fetches_the_queue_in_one_query(db, bus):
-    from meshradio.config import PlayerConfig
-    from meshradio.media.player import EmbedBackend, PlayerService
-
     tracks = [await make_ready_on(db, f"{i:011d}", "2026-07-06") for i in range(6)]
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+    player = make_embed_player(db, bus)
     per_id = counting(db, "track_by_id")
     batched = counting(db, "tracks_by_ids")
     await player.restore({
@@ -104,19 +98,22 @@ async def test_stats_and_theme_pages_are_cached_briefly(db, bus):
     assert stats["n"] == 2 and themes["n"] == 2
 
 
-async def test_prune_candidates_and_search_come_from_indexes(db):
-    """The pruner's candidate list walks idx_tracks_lru in order (no sort
-    step, no scan), and a search of three characters or more is answered by
-    the FTS index rather than a scan of tracks."""
-    plan = await db._fetchall(
-        "EXPLAIN QUERY PLAN SELECT * FROM tracks "
-        "WHERE cache_status='ready' AND cache_path IS NOT NULL "
-        "ORDER BY last_played_at, ingested_at LIMIT 50"
-    )
-    details = [r["detail"] for r in plan]
-    assert any("idx_tracks_lru" in d for d in details), details
-    assert not any("TEMP B-TREE" in d or d.startswith("SCAN tracks") for d in details), details
-    plan = await db._fetchall(
-        "EXPLAIN QUERY PLAN SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?", ('"rain"',)
-    )
-    assert any("VIRTUAL TABLE INDEX" in r["detail"] for r in plan), plan
+@pytest.mark.parametrize("sql, params, index", [
+    pytest.param(
+        "SELECT * FROM tracks WHERE cache_status='ready' AND cache_path IS NOT NULL "
+        "ORDER BY last_played_at, ingested_at LIMIT 50", (), "idx_tracks_lru",
+        id="prune candidates walk the LRU index in order"),
+    pytest.param(
+        "SELECT COUNT(*) FROM tracks WHERE sender = ? COLLATE NOCASE AND source != 'radio'",
+        ("Ana",), "idx_tracks_sender", id="member lookup finds the NOCASE index"),
+    pytest.param(
+        "SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?", ('"rain"',),
+        "VIRTUAL TABLE INDEX", id="search of three chars or more is the FTS index"),
+])
+async def test_hot_queries_come_from_indexes(db, sql, params, index):
+    """No scan of tracks and no sort step on the request path: the pruner,
+    the member pages (four lookups per visit) and search each have an
+    index (migrations v12 and v13) and the planner must pick it."""
+    details = [r["detail"] for r in await db._fetchall("EXPLAIN QUERY PLAN " + sql, params)]
+    assert any(index in d for d in details), details
+    assert not any("TEMP B-TREE" in d or re.match(r"SCAN tracks\b", d) for d in details), details

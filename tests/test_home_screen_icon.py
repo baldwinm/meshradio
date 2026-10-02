@@ -11,8 +11,7 @@ from zoneinfo import ZoneInfo
 
 import meshradio.web as web
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 STATIC = Path(web.__file__).parent / "static"
 
@@ -23,16 +22,6 @@ async def seed_themed_day(db, date, title):
         video_id="aaaaaaaaaaa", url="u", channel="#music", sender="alice",
         mesh_ts=1_785_000_000.0, source="mesh", theme_id=theme["id"],
     )
-
-
-async def test_every_page_declares_the_icon_and_a_fixed_name(db, bus):
-    await seed_themed_day(db, "2026-08-01", "States & cities")
-    async with client_for(page_app(db, bus)) as client:
-        for path in ("/", "/archive", "/archive/2026-08-01", "/search", "/stats", "/about"):
-            body = (await client.get(path)).text
-            icon = '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v='
-            assert icon in body, path
-            assert '<meta name="apple-mobile-web-app-title" content="MeshRadio">' in body, path
 
 
 async def test_the_fixed_name_does_not_follow_the_theme(db, bus):

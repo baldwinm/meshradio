@@ -2,10 +2,10 @@ import asyncio
 
 from meshradio.bus import TRACK_DISCOVERED
 from meshradio.config import CacheConfig, PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService, WebBackend
+from meshradio.media.player import PlayerService, WebBackend
 from meshradio.media.radio import RadioService
 
-from .test_player import make_ready_track
+from .helpers import make_player, make_ready_track
 
 SEED = "aaaaaaaaaaa"
 
@@ -59,7 +59,7 @@ async def test_radio_same_day_restart_dedupes(db, bus):
 
 
 async def test_start_radio_seeds_from_current(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     seed = await make_ready_track(db, SEED, duration=60)
     player.radio = FakeRadio(db, bus, [{"id": "bbbbbbbbbbb", "title": "Song B"}])
     await player.on_track_ready(seed)
@@ -69,7 +69,7 @@ async def test_start_radio_seeds_from_current(db, bus):
 
 
 async def test_start_radio_seeds_from_last_played_when_idle(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     seed = await make_ready_track(db, SEED, duration=0.01)
     player.radio = FakeRadio(db, bus, [])
     await player.on_track_ready(seed)
@@ -80,14 +80,14 @@ async def test_start_radio_seeds_from_last_played_when_idle(db, bus):
 
 
 async def test_start_radio_without_history_fails(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     player.radio = FakeRadio(db, bus, [])
     assert await player.start_station("radio") is False
 
 
 async def test_stop_radio_keeps_queued_tracks(db, bus):
     """Radio off only stops NEW mix fetches; already-queued radio tracks stay."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     seed = await make_ready_track(db, SEED, duration=60)
     await player.on_track_ready(seed)
     player.queue.append({"id": 99, "video_id": "x", "source": "radio"})
@@ -102,7 +102,7 @@ async def test_stop_radio_keeps_queued_tracks(db, bus):
 async def test_late_radio_track_still_enqueued_after_stop(db, bus):
     """A radio track still downloading when the user hits stop was already
     requested — it joins the queue when it finishes; only NEW fetches stop."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     seed = await make_ready_track(db, SEED, duration=60)
     await player.on_track_ready(seed)
 
@@ -116,7 +116,7 @@ async def test_late_radio_track_still_enqueued_after_stop(db, bus):
 
 async def test_stopped_radio_never_extends(db, bus):
     """With radio off, draining the queue must not trigger new mix fetches."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     player.radio = FakeRadio(db, bus, [{"id": "bbbbbbbbbbb", "title": "Song B"}])
     seed = await make_ready_track(db, SEED, duration=0.02)
     await player.on_track_ready(seed)
@@ -142,8 +142,7 @@ async def test_web_backend_waits_for_browser_signal(db, bus):
     assert await player.notify_ended(track["id"]) is False
 
 
-async def test_state_flags(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=WebBackend())
-    state = player.state()
-    assert state["web_audio"] is True
+async def test_web_backend_state_flags(db, bus):
+    state = PlayerService(PlayerConfig(), db, bus, backend=WebBackend()).state()
+    assert state["web_audio"] is True and state["embed"] is False
     assert state["station"] is None

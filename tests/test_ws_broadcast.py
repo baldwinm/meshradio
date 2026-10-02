@@ -4,10 +4,10 @@ hold the others up."""
 import asyncio
 import time
 
-from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService
 from meshradio.web import ws as ws_mod
 from meshradio.web.sessions import SpeakerRegistry
+
+from .helpers import make_player
 
 
 class Conn:
@@ -22,7 +22,7 @@ class Conn:
 
 
 async def test_broadcast_sends_in_parallel_and_survives_a_dead_socket(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     reg = SpeakerRegistry()
     slow, quick, dead = Conn(delay=0.2), Conn(), Conn(fail=True)
     for c in (slow, quick, dead):
@@ -39,7 +39,7 @@ async def test_broadcast_sends_in_parallel_and_survives_a_dead_socket(db, bus):
 
 async def test_broadcast_abandons_a_socket_that_never_reads(db, bus, monkeypatch):
     monkeypatch.setattr(ws_mod, "SEND_TIMEOUT_S", 0.05)
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
+    player = make_player(db, bus)
     reg = SpeakerRegistry()
     stuck, fine = Conn(delay=10), Conn()
     reg.join(stuck)
