@@ -71,11 +71,21 @@ async def test_claims_from_the_speaker_or_too_fast_change_nothing(db, bus):
     await b.close()
 
 
-def test_registry_refuses_joins_past_its_ceiling():
-    reg = SpeakerRegistry(max_clients=2)
-    a, b, c = object(), object(), object()
-    assert reg.join(a) and reg.join(b)
-    assert not reg.join(c) and reg.full()
-    assert reg.is_speaker(b) and c not in reg.clients()
-    reg.leave(a)
-    assert reg.join(c) and reg.is_speaker(c)
+def test_speaker_registry_election_and_ceiling():
+    """The newest page is the speaker; a claim takes the role; leaving hands
+    it back down the line; past the ceiling a join is refused."""
+    reg = SpeakerRegistry(max_clients=3)
+    assert reg.join("a") and reg.is_speaker("a")
+    assert reg.join("b") and reg.is_speaker("b") and not reg.is_speaker("a")
+    reg.claim("a")
+    assert reg.is_speaker("a") and not reg.is_speaker("b")
+    reg.leave("ghost")                                      # unknown: a no-op
+    assert reg.is_speaker("a")
+    assert reg.join("c") and reg.is_speaker("c")
+    assert not reg.join("d") and reg.full() and "d" not in reg.clients()
+    reg.leave("c")
+    assert reg.is_speaker("a")                              # back to the last claimant
+    assert reg.join("d") and reg.is_speaker("d")
+    for client in ("d", "a", "b"):
+        reg.leave(client)
+    assert reg.clients() == [] and not reg.is_speaker("a")

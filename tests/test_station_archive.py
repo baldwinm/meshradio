@@ -28,34 +28,27 @@ async def _channel_day(db: Database, date: str, video_ids: list[str]) -> None:
         await db.set_cache_status(track["id"], "ready", f"/cache/{vid}.opus")
 
 
-async def test_random_channel_tracks_excludes_radio_and_themeless(db):
+async def test_random_channel_tracks_offers_channel_posts_only(db):
+    """Never a radio row (themeless), never an excluded id; and the appliance
+    rule (``ready_only``) skips a track with no file where the embed rule
+    keeps it."""
     await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa", "bbbbbbbbbbb"])
-    # A radio row (themeless) must never be offered as archive filler.
     await db.add_track(
         video_id="ccccccccccc", url="u", channel="radio", sender="radio",
         mesh_ts=time.time(), source="radio", theme_id=None,
     )
-    got = await db.random_channel_tracks(limit=10)
-    vids = {t["video_id"] for t in got}
-    assert vids == {"aaaaaaaaaaa", "bbbbbbbbbbb"}
-
-
-async def test_random_channel_tracks_honors_exclude(db):
-    await _channel_day(db, "2026-07-06", ["aaaaaaaaaaa", "bbbbbbbbbbb"])
-    got = await db.random_channel_tracks(limit=10, exclude_video_ids=["aaaaaaaaaaa"])
-    assert [t["video_id"] for t in got] == ["bbbbbbbbbbb"]
-
-
-async def test_ready_only_filters_unfetched(db):
-    theme = await db.create_theme("2026-07-06", "t")
-    pend = await db.add_track(
-        video_id="aaaaaaaaaaa", url="u", channel="#music", sender="a",
+    theme = await db.create_theme("2026-07-07", "t")
+    await db.add_track(                                   # stays 'pending': no file
+        video_id="ddddddddddd", url="u", channel="#music", sender="a",
         mesh_ts=time.time(), source="mesh", theme_id=theme["id"],
-    )  # stays 'pending' — no file
-    # ready_only (appliance rule) skips it; the embed rule (default) keeps it.
-    assert await db.random_channel_tracks(ready_only=True) == []
-    assert len(await db.random_channel_tracks(ready_only=False)) == 1
-    assert pend is not None
+    )
+    got = await db.random_channel_tracks(limit=10, ready_only=True)
+    assert {t["video_id"] for t in got} == {"aaaaaaaaaaa", "bbbbbbbbbbb"}
+    got = await db.random_channel_tracks(
+        limit=10, ready_only=True, exclude_video_ids=["aaaaaaaaaaa"])
+    assert [t["video_id"] for t in got] == ["bbbbbbbbbbb"]
+    got = await db.random_channel_tracks(limit=10)        # the embed rule: pending too
+    assert {t["video_id"] for t in got} == {"aaaaaaaaaaa", "bbbbbbbbbbb", "ddddddddddd"}
 
 
 async def test_archive_station_refills_at_end_of_queue(db, bus):

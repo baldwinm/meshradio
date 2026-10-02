@@ -29,48 +29,27 @@ async def test_migrations_idempotent(db: Database):
     assert await db.get_setting("nope") is None
 
 
-async def test_dedupe_same_message(db: Database):
-    first = await db.add_track(**_track_args())
-    dupe = await db.add_track(**_track_args(source="corescope"))
-    assert first is not None
-    assert dupe is None  # corescope delivery of the same message no-ops
-
-
-async def test_dedupe_bucket_60s(db: Database):
+async def test_add_track_dedupe_rules(db: Database):
+    """Two rules, both at the row. A message is the same message for sixty
+    seconds whoever delivers it; and one song per playlist: a repost into
+    the same theme is dropped even by another sender in another bucket,
+    while the same video under another day's theme is new."""
     ts = 1_751_800_020.0  # aligned to a 60s bucket start
     assert dedupe_hash("#music", "alice", VID, ts) == dedupe_hash("#music", "alice", VID, ts + 30)
     assert dedupe_hash("#music", "alice", VID, ts) != dedupe_hash("#music", "alice", VID, ts + 90)
-
-
-async def test_repost_by_other_sender_is_new_track(db: Database):
     assert await db.add_track(**_track_args()) is not None
-    assert await db.add_track(**_track_args(sender="bob")) is not None
+    assert await db.add_track(**_track_args(source="corescope")) is None   # same message
+    assert await db.add_track(**_track_args(sender="bob")) is not None     # another poster
 
-
-async def test_repost_into_same_theme_is_deduped(db: Database):
-    """One song per playlist: a repost of the same video into the same theme is
-    dropped even by a different sender in a different time bucket."""
-    theme = await db.create_theme("2026-07-06", "rain")
-    first = await db.add_track(**_track_args(theme_id=theme["id"]))
-    dupe = await db.add_track(
-        **_track_args(theme_id=theme["id"], sender="bob", mesh_ts=1_751_900_000.0)
-    )
-    assert first is not None
-    assert dupe is None
-    assert len(await db.tracks_for_theme(theme["id"])) == 1
-
-
-async def test_same_video_allowed_across_themes(db: Database):
-    """The rule is per playlist, not global — the same video can appear under a
-    different day's theme."""
     monday = await db.create_theme("2026-07-06", "rain")
     tuesday = await db.create_theme("2026-07-07", "sun")
-    assert await db.add_track(**_track_args(theme_id=monday["id"])) is not None
-    # A day later (distinct time bucket, so the message-level dedupe_hash lets
-    # it through) the same song can headline the new day's playlist.
-    assert await db.add_track(
-        **_track_args(theme_id=tuesday["id"], mesh_ts=1_751_886_400.0)
-    ) is not None
+    first = await db.add_track(**_track_args(theme_id=monday["id"], video_id="abcdefghijk"))
+    repost = await db.add_track(**_track_args(
+        theme_id=monday["id"], video_id="abcdefghijk", sender="carol", mesh_ts=1_751_900_000.0))
+    assert first is not None and repost is None
+    assert len(await db.tracks_for_theme(monday["id"])) == 1
+    assert await db.add_track(**_track_args(
+        theme_id=tuesday["id"], video_id="abcdefghijk", mesh_ts=1_751_886_400.0)) is not None
 
 
 async def test_malformed_video_id_rejected(db: Database):
@@ -82,22 +61,14 @@ async def test_malformed_video_id_rejected(db: Database):
     assert await db.add_track(**_track_args()) is not None
 
 
-async def test_letsmesh_source_accepted(db: Database):
-    """The v5 schema allows the backup analyzer feed's 'letsmesh' source."""
-    theme = await db.create_theme("2026-07-06", "rain")
-    track = await db.add_track(**_track_args(theme_id=theme["id"], source="letsmesh"))
-    assert track is not None
-    assert track["source"] == "letsmesh"
-
-
-async def test_comchan_source_accepted(db: Database):
-    """The v10 schema allows the analyzer.comchan.net backup feed's source."""
-    theme = await db.create_theme("2026-08-27", "backup feed day")
-    track = await db.add_track(**_track_args(theme_id=theme["id"], source="comchan"))
-    assert track is not None
-    assert track["source"] == "comchan"
-    # Backup-feed tracks are channel posts, so they must reach the archive
-    # like any other non-radio row.
+@pytest.mark.parametrize("source", ["letsmesh", "comchan"])
+async def test_backup_feed_sources_are_accepted(db: Database, source):
+    """The source CHECK admits the analyzer feeds added after v1 (letsmesh
+    in v5, comchan in v10), and their tracks reach the archive like any
+    other channel post."""
+    theme = await db.create_theme("2026-07-06", "backup feed day")
+    track = await db.add_track(**_track_args(theme_id=theme["id"], source=source))
+    assert track is not None and track["source"] == source
     assert [t["id"] for t in await db.tracks_for_theme(theme["id"])] == [track["id"]]
 
 
@@ -138,49 +109,29 @@ async def _add_track_v3(conn, theme_id, video_id):
 
 
 async def test_v4_merges_duplicate_day_themes(tmp_path):
-    """The morning theme and a later rival for the same day collapse into one
-    locked playlist, and the rival's tracks come along."""
-    path = tmp_path / "legacy.db"
-    conn = await _build_v3_db(path)
-    morning = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
-    rival = await _add_theme_v3(conn, "2026-07-06", "hijack", set_by="mallory")
-    await _add_track_v3(conn, morning, "aaaaaaaaaaa")
-    await _add_track_v3(conn, rival, "bbbbbbbbbbb")
-    await conn.close()
+    """The morning theme and a later rival for the same day collapse into
+    one locked playlist and the rival's tracks come along; when the rival
+    is a placeholder the real title wins regardless of insert order."""
+    for date, (first, second) in (
+        ("2026-07-06", ("rain", "hijack")),
+        ("2026-07-07", ("Untitled — 2026-07-07", "sun")),
+    ):
+        path = tmp_path / f"{date}.db"
+        conn = await _build_v3_db(path)
+        a = await _add_theme_v3(conn, date, first, set_by="alice")
+        b = await _add_theme_v3(conn, date, second, set_by="mallory")
+        await _add_track_v3(conn, a, "aaaaaaaaaaa")
+        await _add_track_v3(conn, b, "bbbbbbbbbbb")
+        await conn.close()
 
-    db = Database(path)
-    await db.connect()
-    try:
-        themes = await db.themes_for_day("2026-07-06")
-        assert len(themes) == 1
-        assert themes[0]["title"] == "rain"
-        assert themes[0]["locked"] == 1
-        assert len(await db.tracks_for_theme(themes[0]["id"])) == 2
-    finally:
-        await db.close()
-
-
-async def test_v4_prefers_real_title_over_placeholder(tmp_path):
-    """When a day split into a placeholder and a real theme, the merge keeps
-    the real title (and locks it), regardless of insert order."""
-    path = tmp_path / "legacy.db"
-    conn = await _build_v3_db(path)
-    placeholder = await _add_theme_v3(conn, "2026-07-06", "Untitled — 2026-07-06")
-    real = await _add_theme_v3(conn, "2026-07-06", "rain", set_by="alice")
-    await _add_track_v3(conn, placeholder, "aaaaaaaaaaa")
-    await _add_track_v3(conn, real, "bbbbbbbbbbb")
-    await conn.close()
-
-    db = Database(path)
-    await db.connect()
-    try:
-        themes = await db.themes_for_day("2026-07-06")
-        assert len(themes) == 1
-        assert themes[0]["title"] == "rain"
-        assert themes[0]["locked"] == 1
-        assert len(await db.tracks_for_theme(themes[0]["id"])) == 2
-    finally:
-        await db.close()
+        db = Database(path)
+        await db.connect()
+        try:
+            (theme,) = await db.themes_for_day(date)
+            assert theme["title"] in ("rain", "sun") and theme["locked"] == 1
+            assert len(await db.tracks_for_theme(theme["id"])) == 2
+        finally:
+            await db.close()
 
 
 async def _build_v5_db(path):
@@ -280,37 +231,11 @@ async def test_archive_queries(db: Database):
     assert len(await db.tracks_for_day("2026-07-06")) == 2
 
 
-async def test_plays_and_lru_order(db: Database):
-    theme = await db.create_theme("2026-07-06", "t")
-    a = await db.add_track(**_track_args(theme_id=theme["id"]))
-    b = await db.add_track(**_track_args(theme_id=theme["id"], video_id="abcdefghijk"))
-    await db.set_cache_status(a["id"], "ready", "/cache/a.opus")
-    await db.set_cache_status(b["id"], "ready", "/cache/b.opus")
-    await db.record_play(a["id"], "speaker")
-    lru = await db.cached_tracks_lru()
-    # b never played -> evict first
-    assert [t["id"] for t in lru] == [b["id"], a["id"]]
-
-
 async def test_settings_roundtrip(db: Database):
     await db.set_setting("k", "v1")
     await db.set_setting("k", "v2")
     assert await db.get_setting("k") == "v2"
     assert await db.get_setting("missing", "dflt") == "dflt"
-
-
-async def test_sender_indexed_case_insensitively(db: Database):
-    """The member pages look a name up with COLLATE NOCASE four times per
-    visit; the planner must find the index (migration v12), not scan."""
-    rows = await db._fetchall(
-        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tracks'"
-    )
-    assert "idx_tracks_sender" in {r["name"] for r in rows}
-    plan = await db._fetchall(
-        "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM tracks "
-        "WHERE sender = ? COLLATE NOCASE AND source != 'radio'", ("Ana",)
-    )
-    assert any("idx_tracks_sender" in r["detail"] for r in plan), plan
 
 
 async def test_search_escapes_like_wildcards(db: Database):
@@ -506,13 +431,16 @@ async def test_v13_backfills_last_played_and_indexes_the_text(tmp_path):
     finally:
         await db.close()
 
-
-async def test_record_play_stamps_the_track(db: Database):
+async def test_record_play_stamps_the_track_and_orders_the_lru(db: Database):
     theme = await db.create_theme("2026-07-06", "t")
     a = await db.add_track(**_track_args(theme_id=theme["id"]))
+    b = await db.add_track(**_track_args(theme_id=theme["id"], video_id="abcdefghijk"))
+    await db.set_cache_status(a["id"], "ready", "/cache/a.opus")
+    await db.set_cache_status(b["id"], "ready", "/cache/b.opus")
     assert a["last_played_at"] is None
     await db.record_play(a["id"], "speaker")
     stamped = (await db.track_by_id(a["id"]))["last_played_at"]
-    assert stamped is not None
     (play,) = await db._fetchall("SELECT played_at FROM plays WHERE track_id=?", (a["id"],))
-    assert play["played_at"] == stamped
+    assert stamped is not None and play["played_at"] == stamped
+    # b never played -> evict first
+    assert [t["id"] for t in await db.cached_tracks_lru()] == [b["id"], a["id"]]

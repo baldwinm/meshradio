@@ -4,12 +4,11 @@ import asyncio
 from pathlib import Path
 
 from meshradio.bus import TRACK_FAILED, TRACK_READY
-from meshradio.config import CacheConfig, PlayerConfig
+from meshradio.config import CacheConfig
 from meshradio.media import cacher as cacher_mod
 from meshradio.media.cacher import Cacher
-from meshradio.media.player import PlayerService
 
-from .helpers import make_embed_player, make_pending_track, make_ready_track
+from .helpers import make_embed_player, make_pending_track
 
 
 async def test_embed_plays_without_cache_path(db, bus):
@@ -130,11 +129,3 @@ async def test_process_track_skips_already_ready(db, bus, monkeypatch, tmp_path)
     await db.set_cache_status(track["id"], "ready")
     stale = dict(track, cache_status="pending")   # snapshot from before
     await c.process_track(stale)                  # no exception, no calls
-
-
-async def test_web_backend_state_not_embed(db, bus):
-    from meshradio.media.player import WebBackend
-
-    player = PlayerService(PlayerConfig(), db, bus, backend=WebBackend())
-    await make_ready_track(db, "aaaaaaaaaaa", duration=60)
-    assert player.state()["embed"] is False

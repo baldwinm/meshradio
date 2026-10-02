@@ -142,8 +142,7 @@ async def test_web_backend_waits_for_browser_signal(db, bus):
     assert await player.notify_ended(track["id"]) is False
 
 
-async def test_state_flags(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=WebBackend())
-    state = player.state()
-    assert state["web_audio"] is True
+async def test_web_backend_state_flags(db, bus):
+    state = PlayerService(PlayerConfig(), db, bus, backend=WebBackend()).state()
+    assert state["web_audio"] is True and state["embed"] is False
     assert state["station"] is None
