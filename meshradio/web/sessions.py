@@ -306,7 +306,9 @@ class SessionManager:
         if newest is None:
             return
         if player.day == newest and player.current is not None:
-            return  # already on the newest day — keep their position
+            # Already on the newest day — keep their position. (A restored
+            # session has caught up with the day's new songs in restore().)
+            return
         await player.cue_day(newest)
 
     async def _watch_new_days(self) -> None:

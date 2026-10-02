@@ -10,6 +10,7 @@ from .helpers import (
     Socket,
     client_for,
     embed_app,
+    make_embed_player,
     make_ready_on,
     make_ready_track,
     page_app,
@@ -260,6 +261,73 @@ async def test_session_survives_process_restart(db, bus):
         assert state["current"]["video_id"] == "aaaaaaaaaaa"
         assert state["day"] == "2026-07-06"
         assert 30 <= state["position"] < 40
+
+
+async def test_returning_session_picks_up_songs_posted_while_it_was_away(db, bus):
+    """The morning case: a visitor loads the day with one song up and leaves,
+    and the rest of the day's posts land while no player of theirs is running
+    (the idle session was reaped, or the process restarted). Coming back they
+    stay on the song they were on and find the others queued behind it —
+    not just the one they saw, with the rest in the archive and nowhere else."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/volume/70")                 # a press: the session is live
+        sid = client.cookies["mr_sid"]
+        await app.state.sessions.flush()
+
+    for video_id in ("bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"):
+        await make_ready_on(db, video_id, "2026-07-06")
+
+    app2 = embed_app(db, bus)
+    async with client_for(app2, visited=False) as client:   # the returning visitor's first request
+        client.cookies.set("mr_sid", sid)
+        state = (await client.get("/api/state")).json()
+        assert state["current"]["video_id"] == "aaaaaaaaaaa"
+        queued = [t["video_id"] for t in state["queue"]]
+        assert queued == ["bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"]
+
+
+async def test_returning_session_does_not_requeue_what_it_already_played(db, bus):
+    """Catching up adds only what the day gained since the visitor last had
+    it open; a song they played through, or took off the queue, stays gone."""
+    for video_id in ("aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"):
+        await make_ready_on(db, video_id, "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")
+        await client.post("/api/skip")                      # past aaaaaaaaaaa
+        sid = client.cookies["mr_sid"]
+        await app.state.sessions.flush()
+
+    await make_ready_on(db, "ddddddddddd", "2026-07-06")
+    app2 = embed_app(db, bus)
+    async with client_for(app2, visited=False) as client:
+        client.cookies.set("mr_sid", sid)
+        state = (await client.get("/api/state")).json()
+        assert state["current"]["video_id"] == "bbbbbbbbbbb"
+        assert [t["video_id"] for t in state["queue"]] == ["ccccccccccc", "ddddddddddd"]
+
+
+async def test_snapshot_from_before_catch_up_still_restores(db, bus):
+    """Sessions already on disk when this shipped carry no high-water mark.
+    They are caught up from the furthest song they hold, so the deploy that
+    adds the mark doesn't re-queue a visitor's whole day."""
+    first = await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    second = await make_ready_on(db, "bbbbbbbbbbb", "2026-07-06")
+    await make_ready_on(db, "ccccccccccc", "2026-07-06")
+
+    old = make_embed_player(db, bus)
+    await old.cue_day("2026-07-06")
+    await old.skip()                                        # a played, b current
+    snap = old.snapshot()
+    assert snap["current_track_id"] == second["id"] != first["id"]
+    del snap["seen_track_id"]                               # the shape saved before the mark
+
+    fresh = make_embed_player(db, bus)
+    await fresh.restore(snap)
+    assert fresh.current["video_id"] == "bbbbbbbbbbb"
+    assert [t["video_id"] for t in fresh.queue] == ["ccccccccccc"]
 
 
 async def test_restore_skips_vanished_tracks(db, bus):

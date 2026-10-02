@@ -547,6 +547,15 @@ state to open tabs so they update with no reload. A session that's *actually*
 playing is always left alone; a restored "playing" flag is treated as stale
 (a page load has no audio going yet in embed mode), so it advances too.
 
+A session with no live player hears no `track.ready`, so a restored one would
+miss every song posted while it was away — one saved with a single song up would
+come back showing that song while the archive held the rest of the day. Each
+player therefore keeps `seen_track_id`, the highest track id of its parked day it
+has accounted for, in the snapshot; `restore()` queues the day's playable songs
+above it behind what the session already holds. Songs the visitor played or
+removed sit below the mark and stay gone. Snapshots saved before the mark existed
+are caught up from the furthest song they still hold.
+
 ### Deployment & operations
 
 - **Render blueprint** ([render.yaml](render.yaml)) — embed mode via

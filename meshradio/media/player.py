@@ -96,6 +96,11 @@ class PlayerService(Service):
         # queued song", so only one can be on.
         self.station: str | None = None    # None | "radio" | "archive"
         self.radio: Any = None             # RadioService, injected by app.py
+        # The highest channel track id this player has accounted for — loaded
+        # with a day, or announced live. Ids rise with ingestion, so anything on
+        # the day above it is a song the player never saw; a restored session
+        # (it had no live player while the channel went on posting) queues those.
+        self.seen_track_id: int = 0
         self.on_state: Callable[[], None] | None = None  # session persistence hook
         self._play_id: int | None = None
         # Playback position clock: base seconds + wall time since epoch while
@@ -171,6 +176,8 @@ class PlayerService(Service):
         # archive backfill).
         if track.get("source") != "radio" and not self._is_fresh(track):
             return
+        if track.get("source") != "radio":
+            self.seen_track_id = max(self.seen_track_id, track["id"])
         if (
             self.status == "idle"
             and self.mode == "live"
@@ -281,14 +288,26 @@ class PlayerService(Service):
         self.publish_state()
         return True
 
+    async def _read_day(self, date: str) -> tuple[list[dict[str, Any]], int]:
+        """The day's songs this player can start, in posted order, and the
+        highest track id the day holds — playable or not, since a failed row
+        is as read as any other. That id is how far a player that loads the
+        day has read it (``seen_track_id``)."""
+        rows = await self.db.tracks_for_day(date)
+        return (
+            [t for t in rows if self._is_playable(t)],
+            max((t["id"] for t in rows), default=0),
+        )
+
     async def play_day(self, date: str) -> None:
         """Archive mode: replay a whole day's tracks in posted order."""
-        tracks = [t for t in await self.db.tracks_for_day(date) if self._is_playable(t)]
+        tracks, seen = await self._read_day(date)
         if not tracks:
             return
         await self.backend.stop()
         self.mode = "archive"
         self.day = date
+        self.seen_track_id = seen
         self.queue = tracks[1:]
         await self.play_track(tracks[0])
 
@@ -296,11 +315,12 @@ class PlayerService(Service):
         """Load a day like play_day but parked at 0:00 in 'paused' — a new
         visitor lands with music ready instead of an empty player. No play
         row is recorded until something actually plays."""
-        tracks = [t for t in await self.db.tracks_for_day(date) if self._is_playable(t)]
+        tracks, seen = await self._read_day(date)
         if not tracks:
             return False
         self.mode = "archive"
         self.day = date
+        self.seen_track_id = seen
         self.current = tracks[0]
         self.queue = tracks[1:]
         self.status = "paused"
@@ -530,6 +550,7 @@ class PlayerService(Service):
             "volume": self.volume,
             "station": self.station,
             "current_track_id": self.current["id"] if self.current else None,
+            "seen_track_id": self.seen_track_id,
             "position": round(self.position(), 1),
             "saved_at": time.time(),
             "queue_track_ids": [t["id"] for t in self.queue],
@@ -566,6 +587,22 @@ class PlayerService(Service):
         for i in queue_ids:
             if i in rows and self._is_playable(rows[i]):
                 self._enqueue(dict(rows[i]))
+        # Nothing was listening for new songs between the save and now (the
+        # idle session was reaped, or the process restarted), so the day may
+        # hold posts this player never saw. Queue them behind what it has.
+        # A snapshot saved before the mark existed is caught up from the
+        # furthest song it still holds, which keeps a deploy from re-queueing
+        # a whole day the visitor has already played through.
+        seen = snap.get("seen_track_id")
+        if isinstance(seen, bool) or not isinstance(seen, int):
+            seen = max(wanted, default=0)
+        self.seen_track_id = seen
+        if self.day is not None:
+            tracks, high = await self._read_day(self.day)
+            for track in tracks:
+                if track["id"] > seen:
+                    self._enqueue(dict(track))
+            self.seen_track_id = max(seen, high)
         if current and status in ("playing", "paused"):
             position = max(float(snap.get("position") or 0.0), 0.0)
             if status == "playing" and snap.get("saved_at"):
