@@ -6,10 +6,17 @@ import time
 
 import pytest
 
-from .helpers import client_for, make_ready_on, page_app, seed_day
+from .helpers import client_for, counting, make_ready_on, page_app, seed_day
 
 GZIP = {"accept-encoding": "gzip"}
 HTML = {"accept": "text/html,application/xhtml+xml"}
+
+
+def meta_of(body: str) -> dict[str, str]:
+    """The page's link-preview tags, by property/name."""
+    return dict(
+        re.findall(r'<meta (?:property|name)="([^"]+)" content="([^"]*)"', body)
+    )
 
 
 async def seed_month(db, month="2026-08", days=20):
@@ -42,12 +49,23 @@ async def test_versioned_assets_are_immutable(db, bus):
     assert bare.headers["cache-control"] == "public, max-age=300"
 
 
-async def test_pages_link_versioned_assets(db, bus):
-    """The immutable promise is only safe because every asset URL is versioned."""
+async def test_every_page_carries_the_shared_head(db, bus):
+    """hx-boost swaps <main> and never re-runs scripts, so whatever page a
+    visitor lands on directly has to carry the whole head: versioned assets
+    (the immutable promise is only safe because every asset URL is
+    versioned), the lock-screen script, the feed for readers and browsers
+    to autodiscover, and the touch icon with a fixed app name."""
+    await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
     async with client_for(page_app(db, bus)) as client:
-        body = (await client.get("/")).text
-    assert "/static/style.css?v=" in body
-    assert "/static/htmx.min.js" in body and "defer" in body
+        for path in ("/", "/archive", "/archive/2026-08-01", "/search", "/stats", "/about"):
+            body = (await client.get(path)).text
+            assert "/static/style.css?v=" in body, path
+            assert "/static/htmx.min.js" in body and "defer" in body, path
+            assert "/static/js/mediasession.js?v=" in body, path
+            assert ('<link rel="alternate" type="application/atom+xml"' in body
+                    and 'href="http://test/feed.xml"' in body), path
+            assert '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=' in body
+            assert '<meta name="apple-mobile-web-app-title" content="MeshRadio">' in body, path
 
 
 async def test_audio_opts_out_of_gzip(db, bus, tmp_path):
@@ -98,7 +116,7 @@ async def test_pages_have_their_own_titles(db, bus):
     assert all(t.endswith("MeshRadio") for t in titles.values())
 
 
-async def test_bad_archive_date_is_a_404_page(db, bus):
+async def test_bad_archive_date_is_a_404_page_that_claims_nothing(db, bus):
     await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
     async with client_for(page_app(db, bus)) as client:
         resp = await client.get("/archive/not-a-date", headers=HTML)
@@ -106,6 +124,9 @@ async def test_bad_archive_date_is_a_404_page(db, bus):
     assert "not-a-date" not in resp.text        # never echo the path back
     assert "Not found" in resp.text
     assert "/archive/themes" in resp.text        # offers a way onwards
+    meta = meta_of(resp.text)
+    assert meta["robots"] == "noindex"
+    assert meta["og:url"].endswith("/")          # the site, not the bad path
 
 
 async def test_quiet_day_is_a_404_not_an_empty_page(db, bus):
@@ -120,41 +141,6 @@ async def test_api_404s_stay_json(db, bus):
         resp = await client.get("/audio/9999", headers={"accept": "*/*"})
     assert resp.status_code == 404
     assert resp.json()["detail"] == "track not cached"
-
-
-async def test_archive_days_are_cached_between_calls(db, bus):
-    """Two partial renders in the same instant must not re-run the aggregate."""
-    from meshradio.web.context import ctx_of  # noqa: F401  (documents the path)
-
-    app = page_app(db, bus)
-    ctx = app.state.ctx
-    await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
-    calls = 0
-    original = db.archive_days
-
-    async def counted():
-        nonlocal calls
-        calls += 1
-        return await original()
-
-    db.archive_days = counted
-    try:
-        first = await ctx.archive_days()
-        again = await ctx.archive_days()
-        assert calls == 1 and first == again
-        at, value = ctx._cache["days"]
-        ctx._cache["days"] = (at - ctx.CACHE_TTL_S - 1, value)   # age it out
-        await ctx.archive_days()
-        assert calls == 2
-    finally:
-        db.archive_days = original
-
-
-def meta_of(body: str) -> dict[str, str]:
-    """The page's link-preview tags, by property/name."""
-    return dict(
-        re.findall(r'<meta (?:property|name)="([^"]+)" content="([^"]*)"', body)
-    )
 
 
 async def test_a_day_previews_with_its_theme_and_art(db, bus):
@@ -180,15 +166,6 @@ async def test_pages_without_art_still_carry_a_card(db, bus):
     assert meta["twitter:card"] == "summary"        # no image to show
     assert "og:image" not in meta
     assert meta["description"].startswith("Songs shared each day")
-
-
-async def test_the_404_declares_nothing_canonical(db, bus):
-    async with client_for(page_app(db, bus)) as client:
-        body = (await client.get("/archive/nope", headers=HTML)).text
-    meta = meta_of(body)
-    assert meta["robots"] == "noindex"
-    assert meta["og:url"].endswith("/")             # the site, not the bad path
-    assert "nope" not in body
 
 
 async def test_crawlers_get_the_pages_and_not_the_machinery(db, bus):
@@ -235,34 +212,29 @@ async def test_search_says_when_the_list_is_cut_off(db, bus):
     assert body.count("+ queue") <= 100
 
 
-async def test_a_landing_song_drops_the_cached_aggregates(db, bus):
+async def test_archive_days_are_cached_until_a_song_lands_or_the_ttl_passes(db, bus):
     """The caches go on the event that changes the archive, not on a clock:
     the render after a song lands sees it, and nothing is recomputed between
-    songs however hard a crawler or a feed reader polls."""
+    songs however hard a crawler or a feed reader polls. The TTL is the
+    safety net for a write that raised no event."""
     from meshradio.bus import TRACK_DISCOVERED
 
     app = page_app(db, bus)
     ctx = app.state.ctx
     await seed_day(db, "2026-08-01", "aaaaaaaaaaa")
-    calls = 0
-    original = db.archive_days
-
-    async def counted():
-        nonlocal calls
-        calls += 1
-        return await original()
-
-    db.archive_days = counted
-    try:
-        for _ in range(3):
-            await ctx.archive_days()
-        assert calls == 1
-        await seed_day(db, "2026-08-02", "bbbbbbbbbbb")        # no event: a direct write
-        assert len(await ctx.archive_days()) == 1 and calls == 1   # still served from memory
-        bus.publish(TRACK_DISCOVERED, {"track": {"id": 2}})
-        assert len(await ctx.archive_days()) == 2 and calls == 2
-    finally:
-        db.archive_days = original
+    calls = counting(db, "archive_days")
+    first = await ctx.archive_days()
+    for _ in range(3):
+        assert await ctx.archive_days() == first
+    assert calls["n"] == 1
+    await seed_day(db, "2026-08-02", "bbbbbbbbbbb")        # no event: a direct write
+    assert len(await ctx.archive_days()) == 1 and calls["n"] == 1   # still served from memory
+    bus.publish(TRACK_DISCOVERED, {"track": {"id": 2}})
+    assert len(await ctx.archive_days()) == 2 and calls["n"] == 2
+    at, value = ctx._cache["days"]
+    ctx._cache["days"] = (at - ctx.CACHE_TTL_S - 1, value)   # age it out
+    await ctx.archive_days()
+    assert calls["n"] == 3
 
 
 async def test_search_queries_are_cut_to_a_sane_length(db, bus):

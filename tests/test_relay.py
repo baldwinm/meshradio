@@ -214,19 +214,13 @@ def api_client(app):
 MSG = {"sender": "carol", "text": "https://youtu.be/ccccccccccc", "ts": 1_783_400_200.0}
 
 
-async def test_ingest_endpoint_disabled_without_token(db, bus):
+async def test_ingest_endpoint_needs_a_configured_and_matching_token(db, bus):
     async with api_client(make_app(db, bus, token="")) as client:
         resp = await client.post("/api/ingest", json={"messages": [MSG]})
-        assert resp.status_code == 404
-
-
-async def test_ingest_endpoint_rejects_bad_token(db, bus):
+        assert resp.status_code == 404                     # not configured: not there
     async with api_client(make_app(db, bus, token="s3cret")) as client:
-        resp = await client.post(
-            "/api/ingest",
-            json={"messages": [MSG]},
-            headers={"Authorization": "Bearer wrong"},
-        )
+        resp = await client.post("/api/ingest", json={"messages": [MSG]},
+                                 headers={"Authorization": "Bearer wrong"})
         assert resp.status_code == 401
 
 
@@ -255,14 +249,20 @@ async def _settle(predicate, tries: int = 50):
     return False
 
 
-async def test_healthz_fresh_from_backup_feed_alone(db, bus):
+async def test_healthz_is_fresh_on_any_feed_poll_but_not_on_mesh_link_state(db, bus):
     """A poll from any analyzer feed marks ingest fresh. With only the primary
     counted, a CoreScope outage the backup feed was covering still read as
-    "every ingest source stopped" and failed the host's health check."""
+    "every ingest source stopped" and failed the host's health check. Mesh
+    reports link state, not a completed ingest: a connected radio that has
+    heard nothing must not pass for fresh ingestion."""
     app = make_app(db, bus, token="s3cret")
     async with app.router.lifespan_context(app), api_client(app) as client:
         assert (await client.get("/healthz")).json()["ingest_age_s"] is None
         await _settle(lambda: bool(bus._subs))
+        bus.publish(INGEST_STATUS, {"mesh": "connected"})
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert (await client.get("/healthz")).json()["ingest_age_s"] is None
         bus.publish(INGEST_STATUS, {"corescope": "error", "comchan": "ok"})
         body = {}
 
@@ -276,18 +276,6 @@ async def test_healthz_fresh_from_backup_feed_alone(db, bus):
             if await fresh():
                 break
         assert body["ingest_age_s"] is not None and body["ingest_age_s"] < 5
-
-
-async def test_healthz_ignores_mesh_link_state(db, bus):
-    """Mesh reports link state, not a completed ingest — a connected radio
-    that has heard nothing must not pass for fresh ingestion."""
-    app = make_app(db, bus, token="s3cret")
-    async with app.router.lifespan_context(app), api_client(app) as client:
-        await _settle(lambda: bool(bus._subs))
-        bus.publish(INGEST_STATUS, {"mesh": "connected"})
-        for _ in range(20):
-            await asyncio.sleep(0)
-        assert (await client.get("/healthz")).json()["ingest_age_s"] is None
 
 
 async def test_ingest_endpoint_inserts_and_dedupes(db, bus):

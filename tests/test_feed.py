@@ -198,16 +198,6 @@ async def test_feed_reads_go_through_the_ttl_cache(db, bus, monkeypatch):
     assert calls["n"] == 1
 
 
-async def test_every_page_advertises_the_feed(db, bus):
-    """Readers and browsers autodiscover from whatever page the visitor is on."""
-    await add_day(db, "2026-08-01", "rain songs", [("aaaaaaaaaaa", "Rain", "")])
-    async with client_for(page_app(db, bus)) as client:
-        for path in ("/", "/archive", "/archive/2026-08-01", "/stats", "/about"):
-            body = (await client.get(path)).text
-            assert ('<link rel="alternate" type="application/atom+xml"' in body
-                    and 'href="http://test/feed.xml"' in body), path
-
-
 # -- the query ---------------------------------------------------------------
 
 async def test_recent_days_tracks_limits_days_and_keeps_posted_order(db):

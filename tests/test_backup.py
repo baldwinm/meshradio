@@ -51,24 +51,18 @@ async def test_snapshot_noop_when_no_db(tmp_path):
     assert not (tmp_path / "backups").exists() or list((tmp_path / "backups").iterdir()) == []
 
 
-def test_rotate_keeps_newest(tmp_path):
+def test_rotate_keeps_the_newest_and_zero_means_all(tmp_path):
     dest = tmp_path / "backups"
     dest.mkdir()
     # Names carry a sortable timestamp; fabricate a chronological set.
     for stamp in ("20260101T000000Z", "20260102T000000Z", "20260103T000000Z",
                   "20260104T000000Z", "20260105T000000Z"):
         (dest / f"meshradio-{stamp}-auto.db").write_text("x")
+    backup.rotate(dest, keep=0)                        # zero: keep everything
+    assert len(list(dest.glob("meshradio-*.db"))) == 5
     backup.rotate(dest, keep=2)
     left = sorted(p.name for p in dest.glob("meshradio-*.db"))
     assert left == ["meshradio-20260104T000000Z-auto.db", "meshradio-20260105T000000Z-auto.db"]
-
-
-def test_rotate_keep_zero_is_noop(tmp_path):
-    dest = tmp_path / "backups"
-    dest.mkdir()
-    (dest / "meshradio-20260101T000000Z-auto.db").write_text("x")
-    backup.rotate(dest, keep=0)
-    assert len(list(dest.glob("meshradio-*.db"))) == 1
 
 
 async def test_resolve_snapshot(tmp_path):

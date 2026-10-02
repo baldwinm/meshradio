@@ -24,16 +24,6 @@ async def seed_themed_day(db, date, title):
     )
 
 
-async def test_every_page_declares_the_icon_and_a_fixed_name(db, bus):
-    await seed_themed_day(db, "2026-08-01", "States & cities")
-    async with client_for(page_app(db, bus)) as client:
-        for path in ("/", "/archive", "/archive/2026-08-01", "/search", "/stats", "/about"):
-            body = (await client.get(path)).text
-            icon = '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v='
-            assert icon in body, path
-            assert '<meta name="apple-mobile-web-app-title" content="MeshRadio">' in body, path
-
-
 async def test_the_fixed_name_does_not_follow_the_theme(db, bus):
     """The page <title> is what iOS would otherwise name the app. Now Playing
     shows today (channel time) until it's cued elsewhere, so seed today."""

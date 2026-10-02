@@ -31,20 +31,15 @@ def test_theme_history_groups_months_and_counts_repeats():
     assert [t["runs"] for t in months[1]["themes"]] == [1, 2]
 
 
-async def test_all_themes_newest_first_with_song_counts(db):
+async def test_all_themes_newest_first_with_song_counts_and_no_placeholders(db):
     await seed_theme(db, "2026-07-04", "One hit wonders", ["aaaaaaaaaaa", "bbbbbbbbbbb"])
+    await seed_theme(db, "2026-07-05", untitled_theme("2026-07-05"), ["ddddddddddd"])
     await seed_theme(db, "2026-08-02", "Rain songs", ["ccccccccccc"])
     themes = await db.all_themes()
     assert [(t["title"], t["tracks"]) for t in themes] == [
         ("Rain songs", 1),
         ("One hit wonders", 2),
     ]
-
-
-async def test_all_themes_skips_untitled_placeholders(db):
-    await seed_theme(db, "2026-07-05", untitled_theme("2026-07-05"), ["aaaaaaaaaaa"])
-    await seed_theme(db, "2026-07-06", "Rain songs")
-    assert [t["title"] for t in await db.all_themes()] == ["Rain songs"]
 
 
 async def test_themes_page_lists_every_theme(db, bus):

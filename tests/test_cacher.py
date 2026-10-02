@@ -23,17 +23,18 @@ async def _ready_track(db, video_id, path):
     return track
 
 
-async def test_prune_under_cap_is_noop(tmp_path, db: Database, bus):
+async def test_prune_seeds_its_estimate_from_disk_and_stops_under_the_cap(tmp_path, db, bus):
     cacher, cache_dir = _make_cacher(tmp_path, db, bus, max_bytes=1000)
     f = cache_dir / "dQw4w9WgXcQ.opus"
     f.write_bytes(b"x" * 100)
     track = await _ready_track(db, "dQw4w9WgXcQ", f)
 
-    await cacher.prune(added_bytes=100)
+    await cacher.prune()                      # first prune: the estimate comes from disk
+    assert cacher._cache_bytes == 100
+    await cacher.prune(added_bytes=100)       # 200 < 1000: nothing to do
 
     assert f.exists()
     assert (await db.track_by_id(track["id"]))["cache_status"] == "ready"
-    assert cacher._cache_bytes == 100  # seeded from disk, still under cap
 
 
 async def test_prune_evicts_lru_over_cap(tmp_path, db: Database, bus):
@@ -56,15 +57,6 @@ async def test_prune_evicts_lru_over_cap(tmp_path, db: Database, bus):
     assert (await db.track_by_id(new_track["id"]))["cache_status"] == "pending"
     assert (await db.track_by_id(old_track["id"]))["cache_status"] == "ready"
     assert cacher._cache_bytes <= cacher.config.max_bytes
-
-
-async def test_prune_seeds_estimate_from_disk_once(tmp_path, db: Database, bus):
-    cacher, cache_dir = _make_cacher(tmp_path, db, bus, max_bytes=10_000)
-    (cache_dir / "dQw4w9WgXcQ.opus").write_bytes(b"x" * 500)
-
-    # First prune seeds the estimate from disk (500) even with added_bytes=0.
-    await cacher.prune()
-    assert cacher._cache_bytes == 500
 
 
 async def _pending(db, video_id):

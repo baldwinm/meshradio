@@ -152,35 +152,25 @@ async def test_deleting_a_missing_track_is_a_no_op(db: Database):
     assert await db.delete_track(999) is None
 
 
-async def test_empty_untitled_placeholder_is_cleaned_up(db: Database):
+async def test_delete_empty_placeholder_removes_only_an_untitled_day_left_bare(db: Database):
     """The day the song arrived before the theme: nobody named that playlist,
-    and with the song gone it would light up a calendar tile for nothing."""
-    theme = await db.create_theme(DAY, untitled_theme(DAY))
-    track = await _add_track(db, theme["id"])
-    await db.delete_track(track["id"])
+    and with the song gone it would light up a calendar tile for nothing. A
+    named theme, or a placeholder with songs left, stays."""
+    bare = await db.create_theme(DAY, untitled_theme(DAY))
+    named = await db.create_theme("2026-07-07", "water", set_by="alice", locked=True)
+    busy = await db.create_theme("2026-07-08", untitled_theme("2026-07-08"))
+    for theme in (bare, named, busy):
+        track = await _add_track(db, theme["id"])
+        await db.delete_track(track["id"])
+    await _add_track(db, busy["id"], video_id=OTHER, sender="bob")
 
-    assert await db.delete_empty_placeholder(theme["id"]) is True
-    assert await db.theme_by_id(theme["id"]) is None
-    assert await db.archive_days() == []
-
-
-async def test_a_real_theme_survives_losing_its_last_song(db: Database):
-    theme = await db.create_theme(DAY, "water", set_by="alice", locked=True)
-    track = await _add_track(db, theme["id"])
-    await db.delete_track(track["id"])
-
-    assert await db.delete_empty_placeholder(theme["id"]) is False
-    assert (await db.theme_by_id(theme["id"]))["title"] == "water"
-
-
-async def test_placeholder_with_songs_left_is_kept(db: Database):
-    theme = await db.create_theme(DAY, untitled_theme(DAY))
-    track = await _add_track(db, theme["id"])
-    await _add_track(db, theme["id"], video_id=OTHER, sender="bob")
-    await db.delete_track(track["id"])
-
-    assert await db.delete_empty_placeholder(theme["id"]) is False
-    assert len(await db.tracks_for_theme(theme["id"])) == 1
+    assert await db.delete_empty_placeholder(bare["id"]) is True
+    assert await db.theme_by_id(bare["id"]) is None
+    assert await db.delete_empty_placeholder(named["id"]) is False
+    assert (await db.theme_by_id(named["id"]))["title"] == "water"
+    assert await db.delete_empty_placeholder(busy["id"]) is False
+    assert len(await db.tracks_for_theme(busy["id"])) == 1
+    assert DAY not in {d["date"] for d in await db.archive_days()}   # no tile for nothing
 
 
 # -- CLI ---------------------------------------------------------------------

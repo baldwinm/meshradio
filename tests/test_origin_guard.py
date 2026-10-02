@@ -80,9 +80,9 @@ def _communal_app(tmp_path):
     return create_app(bus, db, player, make_router("dev", bus))
 
 
-def test_cross_site_websocket_is_refused(tmp_path):
-    """Closed before it is accepted — which uvicorn reports to the browser
-    as a 403 on the handshake."""
+def test_websocket_handshake_follows_the_same_site_rule(tmp_path):
+    """Cross-site: closed before it is accepted, which uvicorn reports to
+    the browser as a 403 on the handshake. Same-site: the state push."""
     client = TestClient(_communal_app(tmp_path))
     with (
         pytest.raises(WebSocketDisconnect) as refused,
@@ -90,10 +90,6 @@ def test_cross_site_websocket_is_refused(tmp_path):
     ):
         pass
     assert refused.value.code == 1008                          # policy violation
-
-
-def test_same_site_websocket_still_connects(tmp_path):
-    client = TestClient(_communal_app(tmp_path))
     with client.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
         msg = ws.receive_json()
     assert msg["topic"] == "player.state"
