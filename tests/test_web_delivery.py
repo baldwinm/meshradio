@@ -6,8 +6,7 @@ import time
 
 import pytest
 
-from .test_archive_calendar import page_app, seed_day
-from .test_sessions import client_for
+from .helpers import client_for, make_ready_on, page_app, seed_day
 
 GZIP = {"accept-encoding": "gzip"}
 HTML = {"accept": "text/html,application/xhtml+xml"}
@@ -53,8 +52,6 @@ async def test_pages_link_versioned_assets(db, bus):
 
 async def test_audio_opts_out_of_gzip(db, bus, tmp_path):
     """Re-compressing opus wastes CPU and would break ranged requests."""
-    from .test_sessions import make_ready_on
-
     track = await make_ready_on(db, "aaaaaaaaaaa", "2026-08-01")
     path = tmp_path / "song.opus"
     path.write_bytes(b"OggS" + b"\0" * 4096)

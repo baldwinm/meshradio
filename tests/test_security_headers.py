@@ -11,13 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from meshradio.audio.routing import make_router
-from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService
-from meshradio.web.server import content_security_policy, create_app
+from meshradio.web.server import content_security_policy
 
-from .test_archive_calendar import page_app, seed_day
-from .test_sessions import client_for, embed_app, make_ready_on
+from .helpers import client_for, embed_app, make_ready_on, page_app, seed_day
 
 PAGES = ["/", "/archive", "/archive/themes", "/archive/2026-08-01", "/search?q=a",
          "/stats", "/about", "/member/alice", "/nope",
@@ -70,24 +66,22 @@ async def test_policy_names_only_what_the_pages_use(db, bus):
 async def test_hsts_only_for_a_site_named_https(db, bus):
     """A year of "never try http" is right for the hosted site and wrong for
     a LAN radio reached over http, so it follows [web] public_url's scheme."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    secure = create_app(bus, db, player, make_router("dev", bus), public_url="https://radio.example")
+    secure = page_app(db, bus, public_url="https://radio.example")
     async with client_for(secure) as client:
         assert (await client.get("/")).headers["strict-transport-security"] == "max-age=31536000"
-    plain = create_app(bus, db, player, make_router("dev", bus), public_url="http://radio.local")
+    plain = page_app(db, bus, public_url="http://radio.local")
     async with client_for(plain) as client:
         assert "strict-transport-security" not in (await client.get("/")).headers
 
 
 async def test_report_only_and_off_switches(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    advisory = create_app(bus, db, player, make_router("dev", bus), csp_report_only=True)
+    advisory = page_app(db, bus, csp_report_only=True)
     async with client_for(advisory) as client:
         h = (await client.get("/")).headers
         assert "content-security-policy" not in h
         assert "default-src 'self'" in h["content-security-policy-report-only"]
         assert h["x-content-type-options"] == "nosniff"          # the rest stay on
-    off = create_app(bus, db, player, make_router("dev", bus), security_headers=False)
+    off = page_app(db, bus, security_headers=False)
     async with client_for(off) as client:
         h = (await client.get("/")).headers
         assert "content-security-policy" not in h and "x-content-type-options" not in h

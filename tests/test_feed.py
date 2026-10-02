@@ -6,8 +6,7 @@ from datetime import UTC, datetime
 from meshradio.ingest.parse import untitled_theme
 from meshradio.web.feed import FEED_DAYS, SONGS_PER_ENTRY, _stamp, build_feed
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 NS = {"a": "http://www.w3.org/2005/Atom"}
 T0 = 1_785_000_000.0      # a fixed mesh time, so `updated` is checkable

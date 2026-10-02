@@ -7,26 +7,13 @@ from meshradio.bus import TRACK_FAILED, TRACK_READY
 from meshradio.config import CacheConfig, PlayerConfig
 from meshradio.media import cacher as cacher_mod
 from meshradio.media.cacher import Cacher
-from meshradio.media.player import EmbedBackend, PlayerService
+from meshradio.media.player import PlayerService
 
-from .test_player import make_ready_track
-
-
-async def make_pending_track(db, video_id):
-    theme = await db.create_theme("2026-07-06", "test theme")
-    return await db.add_track(
-        video_id=video_id,
-        url=f"https://www.youtube.com/watch?v={video_id}",
-        channel="#music",
-        sender="alice",
-        mesh_ts=1_783_443_600.0,
-        source="mesh",
-        theme_id=theme["id"],
-    )
+from .helpers import make_embed_player, make_pending_track, make_ready_track
 
 
 async def test_embed_plays_without_cache_path(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+    player = make_embed_player(db, bus)
     track = await make_pending_track(db, "aaaaaaaaaaa")
     await db.set_cache_status(track["id"], "ready")  # ready, no file
     await player.play_track(await db.track_by_id(track["id"]))
@@ -146,7 +133,7 @@ async def test_process_track_skips_already_ready(db, bus, monkeypatch, tmp_path)
 
 
 async def test_report_duration_fills_missing(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+    player = make_embed_player(db, bus)
     track = await make_pending_track(db, "aaaaaaaaaaa")
     await db.set_cache_status(track["id"], "ready")
     await player.play_track(await db.track_by_id(track["id"]))

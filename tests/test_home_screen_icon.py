@@ -11,8 +11,7 @@ from zoneinfo import ZoneInfo
 
 import meshradio.web as web
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 STATIC = Path(web.__file__).parent / "static"
 

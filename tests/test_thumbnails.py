@@ -4,8 +4,7 @@ member) — one macro, so the three can't drift apart."""
 import re
 import time
 
-from .test_archive_calendar import page_app, seed_day
-from .test_sessions import client_for
+from .helpers import client_for, page_app, seed_day
 
 STILL = "https://i.ytimg.com/vi/{}/mqdefault.jpg"
 

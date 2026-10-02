@@ -8,8 +8,7 @@ per-member pages the stats board now links to.
 import re
 import time
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 
 async def share(db, date, video_id, sender, title="Song", artist=None, theme=None,

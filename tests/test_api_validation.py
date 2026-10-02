@@ -8,15 +8,17 @@ that queued the song. Both are refused at the route now."""
 import math
 import time
 
-from meshradio.audio.routing import make_router
-from meshradio.bus import EventBus
-from meshradio.config import PlayerConfig
 from meshradio.db import MAX_SENDER, MAX_TITLE
-from meshradio.ingest.service import IngestService
-from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
-from meshradio.web.server import _mmss, create_app
+from meshradio.web.server import _mmss
 
-from .test_sessions import client_for, embed_app, make_ready_on
+from .helpers import (
+    client_for,
+    embed_app,
+    make_embed_player,
+    make_ready_on,
+    page_app,
+    relay_embed_app,
+)
 
 NOT_A_LENGTH = ["inf", "-inf", "nan", "1e9", "-1"]
 
@@ -58,11 +60,8 @@ async def test_duration_report_fills_a_blank_only(db, bus):
 async def test_report_duration_guards_in_the_service_too(db, bus):
     """The route is the front door, but the OLED/other callers reach the
     service directly — it holds the same line on its own."""
-    from meshradio.config import PlayerConfig
-    from meshradio.media.player import EmbedBackend, PlayerService
-
     track = await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06", duration=None)
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+    player = make_embed_player(db, bus)
     await player.play_track(await db.track_by_id(track["id"]))
     for bad in (math.inf, -math.inf, math.nan, 0, -3):
         await player.report_duration(track["id"], bad)
@@ -72,21 +71,6 @@ async def test_report_duration_guards_in_the_service_too(db, bus):
     await player.report_duration(track["id"], 100)
     await player.report_duration(track["id"], 200)
     assert (await db.track_by_id(track["id"]))["duration"] == 100
-
-
-def relay_embed_app(db, bus, token="s3cret"):
-    """The hosted deployment: per-visitor embed sessions plus the relay
-    receiver, so a push lands in the rows every visitor is cued onto."""
-    ingest = IngestService(db, bus, channel="#music")
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
-
-    def factory(out_bus: EventBus) -> PlayerService:
-        return PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend(), events_out=out_bus)
-
-    return create_app(
-        bus, db, player, make_router("dev", bus),
-        ingest=ingest, ingest_token=token, player_factory=factory,
-    )
 
 
 async def test_relay_metadata_cannot_poison_the_shared_row(db, bus):
@@ -147,9 +131,7 @@ async def test_a_bad_length_already_in_a_row_cannot_break_a_page(db, bus):
 async def test_output_routes_exist_only_on_the_appliance(db, bus):
     """Speaker, jack and Bluetooth are the appliance's to pick. The embed host
     has nothing to select, so the routes aren't there to answer for a no-op."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    appliance = create_app(bus, db, player, make_router("dev", bus))
-    async with client_for(appliance) as client:
+    async with client_for(page_app(db, bus)) as client:
         assert (await client.get("/api/outputs")).status_code == 200
         assert (await client.post("/api/output/jack")).json()["output"] == "jack"
     async with client_for(embed_app(db, bus)) as client:

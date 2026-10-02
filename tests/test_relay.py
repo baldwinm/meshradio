@@ -6,14 +6,13 @@ import json
 
 import httpx
 
-from meshradio.audio.routing import make_router
 from meshradio.bus import INGEST_STATUS, EventBus
-from meshradio.config import PlayerConfig, RelayConfig
+from meshradio.config import RelayConfig
 from meshradio.db import Database
 from meshradio.ingest.relay import CURSOR_KEY, RelayPusher
 from meshradio.ingest.service import IngestService
-from meshradio.media.player import NullBackend, PlayerService
-from meshradio.web.server import create_app
+
+from .helpers import page_app
 
 
 async def seed_history(db: Database):
@@ -202,10 +201,8 @@ async def test_wiped_receiver_triggers_rebackfill(db, bus):
 
 
 def make_app(db, bus, token):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    ingest = IngestService(db, bus, channel="#music")
-    router = make_router("dev", bus)
-    return create_app(bus, db, player, router, ingest=ingest, ingest_token=token)
+    """The appliance with the relay receiver on."""
+    return page_app(db, bus, ingest=IngestService(db, bus, channel="#music"), ingest_token=token)
 
 
 def api_client(app):

@@ -13,7 +13,7 @@ import pytest
 
 from meshradio.runtime import spawn
 
-from .test_sessions import make_ready_on
+from .helpers import make_ready_on
 
 
 async def add(db, video_id, theme_id, sender="alice"):

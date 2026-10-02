@@ -2,17 +2,10 @@
 any human fits inside, a sustained rate a loop doesn't, keyed by the
 client's address, and never for a read."""
 
-import httpx
-
-from meshradio.audio.routing import make_router
-from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService
 from meshradio.web import ratelimit
 from meshradio.web.ratelimit import Buckets
-from meshradio.web.server import create_app
 
-from .test_api_validation import relay_embed_app
-from .test_sessions import client_for, embed_app
+from .helpers import client_for, embed_app, page_app, peer, relay_embed_app
 
 
 def test_buckets_refill_at_the_rate_and_cap_at_the_burst():
@@ -33,13 +26,6 @@ def test_idle_clients_are_swept():
     assert b.tracked() == 5                           # a second idle: still remembered
     b._sweep(3.0)
     assert b.tracked() == 0                           # full again, so forgettable
-
-
-def peer(app, host):
-    """A client arriving from ``host``."""
-    return httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app, client=(host, 1)), base_url="http://test"
-    )
 
 
 async def test_presses_and_searches_are_limited_per_client(db, bus, monkeypatch):
@@ -79,8 +65,7 @@ async def test_the_relay_push_and_refused_cross_site_presses_cost_nothing(db, bu
 
 async def test_the_limiter_can_be_switched_off(db, bus, monkeypatch):
     monkeypatch.setattr(ratelimit, "PRESSES", (1, 0.0))
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    app = create_app(bus, db, player, make_router("dev", bus), rate_limit=False)
+    app = page_app(db, bus, rate_limit=False)
     async with client_for(app) as client:
         for _ in range(5):
             assert (await client.post("/api/volume/50")).status_code == 200

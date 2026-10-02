@@ -2,15 +2,10 @@
 
 import time
 
-from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService, _is_filler
+from meshradio.media.player import _is_filler
 from meshradio.web.server import SpeakerRegistry
 
-from .test_player import make_ready_track
-
-
-def make_player(db, bus, **overrides) -> PlayerService:
-    return PlayerService(PlayerConfig(**overrides), db, bus, backend=NullBackend())
+from .helpers import make_player, make_ready_track
 
 
 async def test_stale_backfill_track_does_not_autoplay(db, bus):

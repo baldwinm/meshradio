@@ -24,8 +24,7 @@ from meshradio.db import Database
 from meshradio.media.player import NullBackend, PlayerService
 from meshradio.web.server import create_app, same_site
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 EVIL = {"origin": "https://evil.example"}
 
@@ -104,8 +103,7 @@ def test_same_site_websocket_still_connects(tmp_path):
 async def test_allowed_hosts_pin_the_instance(db, bus):
     """With [web] allowed_hosts set, a request for any other name is refused —
     that is what stops a DNS-rebinding page reaching the appliance."""
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    app = create_app(bus, db, player, make_router("dev", bus), allowed_hosts=["radio.local"])
+    app = page_app(db, bus, allowed_hosts=["radio.local"])
     async with client_for(app) as client:
         assert (await client.get("/api/state", headers={"host": "radio.local"})).status_code == 200
         assert (await client.get("/api/state", headers={"host": "evil.example"})).status_code == 400
@@ -132,9 +130,7 @@ async def test_public_url_pins_canonical_links(db, bus):
         page = await client.get("/archive", headers={**html, "x-forwarded-proto": "javascript"})
         assert canonical(page.text) == "http://test/archive"
 
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    app = create_app(bus, db, player, make_router("dev", bus),
-                     public_url="https://meshradio.example.org/")
+    app = page_app(db, bus, public_url="https://meshradio.example.org/")
     async with client_for(app) as client:
         page = await client.get("/archive", headers={**html, "host": "evil.example"})
         assert canonical(page.text) == "https://meshradio.example.org/archive"

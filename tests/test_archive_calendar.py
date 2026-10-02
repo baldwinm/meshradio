@@ -1,28 +1,9 @@
 """Archive page calendar: one month at a time, arrows stepping through the
 months the channel was actually alive in."""
 
-import time
-
-from meshradio.audio.routing import make_router
-from meshradio.config import PlayerConfig
-from meshradio.media.player import NullBackend, PlayerService
 from meshradio.web.context import archive_months, calendar_month, month_step
-from meshradio.web.server import create_app
 
-from .test_sessions import client_for
-
-
-async def seed_day(db, date, video_id):
-    theme = await db.create_theme(date, f"theme {date}")
-    await db.add_track(
-        video_id=video_id, url="u", channel="#music", sender="alice",
-        mesh_ts=time.time(), source="mesh", theme_id=theme["id"],
-    )
-
-
-def page_app(db, bus):
-    player = PlayerService(PlayerConfig(), db, bus, backend=NullBackend())
-    return create_app(bus, db, player, make_router("dev", bus))
+from .helpers import client_for, page_app, seed_day
 
 
 def test_archive_months_are_deduped_oldest_first():

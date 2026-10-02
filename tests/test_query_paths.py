@@ -2,21 +2,15 @@
 
 import time
 
-from .test_archive_calendar import page_app, seed_day
-from .test_sessions import client_for, embed_app, make_ready_on
-
-
-def counting(db, name):
-    """Count calls to one Database method (and keep it working)."""
-    calls = {"n": 0}
-    original = getattr(db, name)
-
-    async def wrapped(*args, **kwargs):
-        calls["n"] += 1
-        return await original(*args, **kwargs)
-
-    setattr(db, name, wrapped)
-    return calls
+from .helpers import (
+    client_for,
+    counting,
+    embed_app,
+    make_embed_player,
+    make_ready_on,
+    page_app,
+    seed_day,
+)
 
 
 async def test_newest_day_with_tracks(db):
@@ -63,11 +57,8 @@ async def test_tracks_by_ids_batches_and_keys_by_id(db):
 
 
 async def test_restore_fetches_the_queue_in_one_query(db, bus):
-    from meshradio.config import PlayerConfig
-    from meshradio.media.player import EmbedBackend, PlayerService
-
     tracks = [await make_ready_on(db, f"{i:011d}", "2026-07-06") for i in range(6)]
-    player = PlayerService(PlayerConfig(), db, bus, backend=EmbedBackend())
+    player = make_embed_player(db, bus)
     per_id = counting(db, "track_by_id")
     batched = counting(db, "tracks_by_ids")
     await player.restore({

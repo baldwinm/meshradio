@@ -1,59 +1,10 @@
 import asyncio
 import random
-import time
 from datetime import datetime
 
 from meshradio.bus import PLAYER_STATE
-from meshradio.config import PlayerConfig
-from meshradio.db import Database
-from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 
-
-async def make_ready_track(db: Database, video_id: str, duration: float = 0.05):
-    theme = await db.create_theme("2026-07-06", "test theme")
-    track = await db.add_track(
-        video_id=video_id,
-        url=f"https://www.youtube.com/watch?v={video_id}",
-        channel="#music",
-        sender="alice",
-        # "posted just now": a fixed timestamp here aged past the player's
-        # 30-minute live window mid-session once and failed half the suite.
-        mesh_ts=time.time(),
-        source="mesh",
-        theme_id=theme["id"],
-    )
-    await db.update_track_metadata(track["id"], title=video_id, duration=duration)
-    await db.set_cache_status(track["id"], "ready", f"/cache/{video_id}.opus")
-    return await db.track_by_id(track["id"])
-
-
-def make_player(db, bus, **config_overrides) -> PlayerService:
-    config = PlayerConfig(**config_overrides)
-    return PlayerService(config, db, bus, backend=NullBackend())
-
-
-def make_embed_player(db, bus, **config_overrides) -> PlayerService:
-    """A player whose backend streams in the browser — the public-hosting mode
-    where tracks are playable by video id without a downloaded file."""
-    config = PlayerConfig(**config_overrides)
-    return PlayerService(config, db, bus, backend=EmbedBackend())
-
-
-async def make_pending_track(db: Database, video_id: str):
-    """A channel track that never got a cached file or metadata — the state
-    most tracks sit in on the datacenter-hosted embed instance (oEmbed
-    throttled). Streamable by id all the same."""
-    theme = await db.create_theme("2026-07-06", "test theme")
-    track = await db.add_track(
-        video_id=video_id,
-        url=f"https://www.youtube.com/watch?v={video_id}",
-        channel="#music",
-        sender="alice",
-        mesh_ts=time.time(),
-        source="mesh",
-        theme_id=theme["id"],
-    )
-    return await db.track_by_id(track["id"])
+from .helpers import make_embed_player, make_pending_track, make_player, make_ready_track
 
 
 async def test_idle_live_autoplays(db, bus):

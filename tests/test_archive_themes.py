@@ -6,8 +6,7 @@ import time
 from meshradio.ingest.parse import untitled_theme
 from meshradio.web.context import archive_years, theme_history, theme_key, year_step
 
-from .test_archive_calendar import page_app
-from .test_sessions import client_for
+from .helpers import client_for, page_app
 
 
 async def seed_theme(db, date, title, video_ids=(), set_by=None):

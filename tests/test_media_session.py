@@ -9,8 +9,7 @@ from pathlib import Path
 
 import meshradio.web as web
 
-from .test_archive_calendar import page_app, seed_day
-from .test_sessions import client_for
+from .helpers import client_for, page_app, seed_day
 
 JS = Path(web.__file__).parent / "static" / "js"
 
