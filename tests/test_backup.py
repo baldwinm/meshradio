@@ -1,5 +1,4 @@
 import sqlite3
-import time
 
 from meshradio import backup
 from meshradio.backup import BackupService
@@ -130,17 +129,19 @@ async def test_restore_rejects_non_archive_file(tmp_path):
         backup.restore(db_path, bad, tmp_path / "backups")
 
 
-async def test_service_run_once_snapshots_and_prunes(tmp_path):
+async def test_service_run_once_snapshots_and_prunes(tmp_path, monkeypatch):
     src = tmp_path / "meshradio.db"
     await _seed(src)
     dest_dir = tmp_path / "backups"
     svc = BackupService(BackupConfig(keep=2), src, dest_dir)
+    # Names carry a per-second stamp; hand out three in a row rather than
+    # waiting a second between snapshots.
+    stamps = iter(f"2026010{n}T000000Z" for n in (1, 2, 3))
+    monkeypatch.setattr(backup, "_stamp", lambda: next(stamps))
 
     first = await svc.run_once()
     assert first is not None and first.exists()
-    # Distinct filenames per second; nudge so the second snapshot sorts after.
-    time.sleep(1.1)
     await svc.run_once()
-    time.sleep(1.1)
     await svc.run_once()
-    assert len(list(dest_dir.glob("meshradio-*.db"))) == 2  # pruned to keep
+    left = sorted(p.name for p in dest_dir.glob("meshradio-*.db"))
+    assert left == ["meshradio-20260102T000000Z-auto.db", "meshradio-20260103T000000Z-auto.db"]
