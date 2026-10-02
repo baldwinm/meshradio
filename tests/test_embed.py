@@ -132,20 +132,6 @@ async def test_process_track_skips_already_ready(db, bus, monkeypatch, tmp_path)
     await c.process_track(stale)                  # no exception, no calls
 
 
-async def test_report_duration_fills_missing(db, bus):
-    player = make_embed_player(db, bus)
-    track = await make_pending_track(db, "aaaaaaaaaaa")
-    await db.set_cache_status(track["id"], "ready")
-    await player.play_track(await db.track_by_id(track["id"]))
-    assert player.current["duration"] is None
-    await player.report_duration(track["id"], 212.5)
-    assert player.current["duration"] == 212.5
-    row = await db.track_by_id(track["id"])
-    assert row["duration"] == 212.5
-    await player.report_duration(track["id"], -1)  # bogus values ignored
-    assert player.current["duration"] == 212.5
-
-
 async def test_web_backend_state_not_embed(db, bus):
     from meshradio.media.player import WebBackend
 

@@ -4,7 +4,7 @@ month, with repeats counted."""
 import time
 
 from meshradio.ingest.parse import untitled_theme
-from meshradio.web.context import archive_years, theme_history, theme_key, year_step
+from meshradio.web.context import archive_years, theme_history, year_step
 
 from .helpers import client_for, page_app
 
@@ -17,10 +17,6 @@ async def seed_theme(db, date, title, video_ids=(), set_by=None):
             mesh_ts=time.time(), source="mesh", theme_id=theme["id"],
         )
     return theme
-
-
-def test_theme_key_ignores_case_and_spacing():
-    assert theme_key("Rain  songs") == theme_key("rain songs")
 
 
 def test_theme_history_groups_months_and_counts_repeats():

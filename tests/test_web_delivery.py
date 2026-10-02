@@ -305,11 +305,3 @@ def test_asset_version_follows_content_not_mtime(tmp_path, monkeypatch):
     assert server_mod._asset_version() == first
     (static / "style.css").write_text("body{margin:0}")
     assert server_mod._asset_version() != first
-
-
-async def test_healthz_reports_the_ytdlp_version_slot(db, bus):
-    """None until the startup probe has run (and always on the embed host);
-    the slot is there so the nightly update's work can be seen."""
-    async with client_for(page_app(db, bus)) as client:
-        body = (await client.get("/healthz")).json()
-        assert body["ok"] is True and "ytdlp_version" in body and body["ytdlp_version"] is None

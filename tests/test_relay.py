@@ -236,6 +236,7 @@ async def test_healthz_shape(db, bus):
         assert body["ok"] is True
         assert body["tracks"] == 0
         assert body["ingest_age_s"] is None      # nothing ingested yet
+        assert body["ytdlp_version"] is None     # the slot the startup probe fills
         await client.post(
             "/api/ingest", json={"messages": [MSG]},
             headers={"Authorization": "Bearer s3cret"},

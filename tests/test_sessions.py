@@ -209,19 +209,6 @@ async def test_session_cookie_issued_once(db, bus):
         assert client.cookies["mr_sid"] == sid
 
 
-async def test_forged_session_cookie_is_reissued(db, bus):
-    """An attacker-chosen sid (wrong shape/length) must never become a session
-    key or a DB row — the server ignores it and issues its own."""
-    app = embed_app(db, bus)
-    async with client_for(app) as client:
-        client.cookies.set("mr_sid", "x" * 4096)
-        resp = await client.get("/api/state")
-        assert "mr_sid" in resp.cookies                # reissued
-        new_sid = resp.cookies["mr_sid"]
-        assert new_sid != "x" * 4096
-        assert "x" * 4096 not in app.state.sessions._sessions
-
-
 async def test_session_cap_evicts_stalest(db, bus):
     """Cookie-spraying bots can't grow the process without bound: at the cap,
     the stalest session is flushed to disk and evicted to make room."""
@@ -336,15 +323,20 @@ async def test_a_press_opens_the_session(db, bus):
         assert (await client.get("/api/state")).json()["status"] == "playing"
 
 
-async def test_well_formed_but_unknown_cookie_opens_no_session_on_get(db, bus):
-    """The cap's worst case: a bot presenting random valid-looking sids."""
+async def test_unknown_or_forged_cookie_opens_no_session_on_get(db, bus):
+    """The cap's worst case: a bot presenting random valid-looking sids. One
+    of the wrong shape is ignored and replaced; it never becomes a key."""
     await make_ready_track(db, "aaaaaaaaaaa", duration=60)
     app = embed_app(db, bus)
     async with client_for(app) as client:
         for i in range(5):
             client.cookies.set("mr_sid", f"{i:032x}")
             assert (await client.get("/api/state")).status_code == 200
+        client.cookies.set("mr_sid", "x" * 4096)
+        resp = await client.get("/api/state")
+        assert "mr_sid" in resp.cookies and resp.cookies["mr_sid"] != "x" * 4096
         assert app.state.sessions.count() == 0
+        assert "x" * 4096 not in app.state.sessions._sessions
 
 
 async def test_websocket_opens_the_session(db, bus):

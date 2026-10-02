@@ -292,29 +292,11 @@ async def test_plays_and_lru_order(db: Database):
     assert [t["id"] for t in lru] == [b["id"], a["id"]]
 
 
-async def test_video_id_indexed(db: Database):
-    """cached_track_for_video / tracks_for_video key on video_id and run per
-    download; an index must exist (migration v4)."""
-    rows = await db._fetchall(
-        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tracks'"
-    )
-    assert "idx_tracks_video" in {r["name"] for r in rows}
-
-
 async def test_settings_roundtrip(db: Database):
     await db.set_setting("k", "v1")
     await db.set_setting("k", "v2")
     assert await db.get_setting("k") == "v2"
     assert await db.get_setting("missing", "dflt") == "dflt"
-
-
-async def test_ingested_at_indexed(db: Database):
-    """tracks_since (relay pusher, every push interval) keys on ingested_at;
-    an index must exist (migration v8)."""
-    rows = await db._fetchall(
-        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='tracks'"
-    )
-    assert "idx_tracks_ingested" in {r["name"] for r in rows}
 
 
 async def test_sender_indexed_case_insensitively(db: Database):

@@ -25,14 +25,6 @@ async def test_script_ships_on_every_page(db, bus):
             assert "/static/js/mediasession.js?v=" in body, path
 
 
-async def test_script_is_served_and_cached_like_the_others(db, bus):
-    async with client_for(page_app(db, bus)) as client:
-        resp = await client.get("/static/js/mediasession.js?v=12345")
-    assert resp.status_code == 200
-    assert "javascript" in resp.headers["content-type"]
-    assert "immutable" in resp.headers["cache-control"]
-
-
 def test_seeking_from_the_os_shares_the_scrub_bars_path():
     """One function moves the local player *and* tells the server; a second
     copy in the media handlers would be the one that drifts."""

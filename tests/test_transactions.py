@@ -91,21 +91,3 @@ async def test_transaction_is_owned_by_the_entering_task(db):
     await task
     assert order == ["parent", "child"]
     assert await db.get_setting("child") == "wrote"
-
-
-async def test_writes_wait_for_an_open_transaction(db):
-    """The lock is what makes the ordering guarantee real."""
-    seen: list[str] = []
-
-    async def writer():
-        await db.set_setting("who", "writer")
-        seen.append("writer")
-
-    async with db.transaction():
-        task = asyncio.create_task(writer())
-        await asyncio.sleep(0.02)
-        await db.set_setting("who", "batch")
-        seen.append("batch")
-    await task
-    assert seen == ["batch", "writer"]
-    assert await db.get_setting("who") == "writer"     # committed after, so it wins

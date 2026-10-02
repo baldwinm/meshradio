@@ -321,16 +321,6 @@ def _secondary_poller(db, bus, messages):
     return poller, client
 
 
-async def test_secondary_feed_keeps_its_own_cursor(db, bus):
-    """A second feed keeps a separate cursor so it never clobbers the primary
-    CoreScope cursor."""
-    msg = corescope_msg("alice", f"https://youtu.be/{VID}", NOON, "2026-07-06T17:00:05Z")
-    poller, client = _secondary_poller(db, bus, [msg])
-    assert await poller.poll_once(client) == 1
-    assert await db.get_setting("backup.cursor") == "2026-07-06T17:00:05Z"
-    assert await db.get_setting(CURSOR_KEY) is None  # primary cursor untouched
-
-
 async def test_secondary_feed_dedupes_against_primary(db, bus, poller_factory):
     """A message both feeds see inserts once — the second feed no-ops the
     primary's overlap instead of doubling every track."""

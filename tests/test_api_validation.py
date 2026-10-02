@@ -71,6 +71,7 @@ async def test_report_duration_guards_in_the_service_too(db, bus):
     await player.report_duration(track["id"], 100)
     await player.report_duration(track["id"], 200)
     assert (await db.track_by_id(track["id"]))["duration"] == 100
+    assert player.current["duration"] == 100               # the clock follows the fill
 
 
 async def test_relay_metadata_cannot_poison_the_shared_row(db, bus):

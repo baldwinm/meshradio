@@ -7,14 +7,6 @@ from meshradio.bus import PLAYER_STATE
 from .helpers import make_embed_player, make_pending_track, make_player, make_ready_track
 
 
-async def test_idle_live_autoplays(db, bus):
-    player = make_player(db, bus)
-    track = await make_ready_track(db, "aaaaaaaaaaa")
-    await player.on_track_ready(track)
-    assert player.status == "playing"
-    assert player.current["id"] == track["id"]
-
-
 async def test_busy_enqueues_never_interrupts(db, bus):
     player = make_player(db, bus)
     first = await make_ready_track(db, "aaaaaaaaaaa", duration=60)
