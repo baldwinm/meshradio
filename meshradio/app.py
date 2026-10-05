@@ -115,12 +115,19 @@ async def run(config, demo: bool = False) -> None:
     cacher = Cacher(
         config.cache, config.cache_dir, db, bus, embed=config.player.backend == "embed"
     )
-    panel = make_panel(config.hardware_profile, bus, player, router)
+    # Embed hosting is a website, not a device: no front-panel stand-in logging
+    # "now playing" for the shared player nobody is listening to.
+    panel = make_panel(
+        config.hardware_profile, bus, player, router,
+        dev_log=not isinstance(player.backend, EmbedBackend),
+    )
     power = (
         UpsPowerMonitor(bus) if config.hardware_profile == "pi4" else StaticPowerMonitor(bus)
     )
 
-    services = [player, cacher, panel, power]
+    services = [player, cacher, power]
+    if panel is not None:
+        services.insert(2, panel)
     if config.mesh.enabled:
         services.append(MeshIngest(config.mesh, ingest, bus))
     if config.corescope.enabled:

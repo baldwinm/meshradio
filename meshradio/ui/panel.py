@@ -104,10 +104,17 @@ class OledPanel(LogPanel):
             draw.text((0, 48), f"{state['status']}  vol {state['volume']}", fill="white")
 
 
-def make_panel(profile: str, bus: EventBus, player, router):
+def make_panel(profile: str, bus: EventBus, player, router, *, dev_log: bool = True):
+    """The front panel for this profile, or None when there is nothing to show.
+
+    ``dev_log=False`` drops the ``LogPanel`` stand-in on non-appliance profiles:
+    a public embed deployment is not a device, and its "now playing" lines are
+    noise (and read as if hardware were attached). An appliance whose OLED
+    fails to initialise still falls back to the log panel."""
     if profile in ("pi4", "lite"):
         try:
             return OledPanel(bus, player, router)
         except Exception:
             log.exception("OLED init failed; falling back to log panel")
-    return LogPanel(bus)
+        return LogPanel(bus)
+    return LogPanel(bus) if dev_log else None
