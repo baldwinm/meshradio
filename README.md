@@ -151,7 +151,9 @@ set. Secrets belong in the environment, not the committed file:
 `MESHRADIO_INGEST_TOKEN` for the receiver's token (`[web] ingest_token`) and
 `MESHRADIO_RELAY_TOKEN` for the pusher's (`[relay] token`), and
 `MESHRADIO_ADMIN_PASSWORD_HASH` / `MESHRADIO_ADMIN_TOTP_SECRET` for the admin
-page; each overrides the file. Values are checked at startup — a number of the wrong type or out of
+page; each overrides the file. `MESHRADIO_PUBLIC_URL` likewise overrides
+`[web] public_url`, so a host moved to its own domain names it from its
+dashboard. Values are checked at startup — a number of the wrong type or out of
 range, an unknown backend, audio format or time zone — and a bad one stops
 the radio with a message naming every offending key, instead of a loop
 crashing (or, for a negative interval, spinning) under the supervisor. A key

@@ -29,7 +29,9 @@ host = "0.0.0.0"
 port = 8080   # Render overrides this via --port $PORT
 # Where visitors reach it: canonical links, previews and the sitemap come
 # from here rather than the request's Host header, and an https site gets
-# a Strict-Transport-Security header.
+# a Strict-Transport-Security header. With a custom domain on the service,
+# set MESHRADIO_PUBLIC_URL in the dashboard to it ("https://example.com");
+# the env var wins over this line.
 public_url = "https://meshradio.onrender.com"
 # Nothing reaches the app except through Render's proxy, so its forwarding
 # headers are the truth: the visitor's address (what the rate limiter keys

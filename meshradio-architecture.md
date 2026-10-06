@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.1 — the core software is built, tested (453 tests), and running:
+*Status: v0.1 — the core software is built, tested (454 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -617,7 +617,8 @@ are caught up from the furthest song they still hold.
   `[web] allowed_hosts`. The origin guard and security headers are on by default
   everywhere (§9). [meshradio.render.toml](meshradio.render.toml) names the
   hosted site's `public_url` (so it builds its links from config and sends
-  `Strict-Transport-Security`) and trusts every peer as the proxy
+  `Strict-Transport-Security`; `MESHRADIO_PUBLIC_URL` in the dashboard
+  overrides it once the service has a custom domain) and trusts every peer as the proxy
   (`trusted_proxies = ["*"]`), since nothing reaches that app except through
   Render's; it leaves `allowed_hosts` empty.
 
