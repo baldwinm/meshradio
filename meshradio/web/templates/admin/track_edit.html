@@ -1,0 +1,21 @@
+{% extends "admin/base.html" %}
+{% block title %}Edit song{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Edit song</h1>
+  {% if date %}<a class="btn" href="/admin/days/{{ date }}">Back to {{ date }}</a>{% endif %}
+</div>
+{% if error %}<div class="notice bad" role="alert">{{ error }}</div>{% endif %}
+<form class="panel" method="post" action="/admin/tracks/{{ track.id }}/edit">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="title">Title
+    <input id="title" name="title" type="text" value="{{ track.title or '' }}" maxlength="256" required>
+  </label>
+  <label for="artist">Artist
+    <input id="artist" name="artist" type="text" value="{{ track.artist or '' }}" maxlength="256">
+  </label>
+  <p class="small muted">Shared by {{ track.sender }} · <a href="https://www.youtube.com/watch?v={{ track.video_id }}" rel="noopener">{{ track.video_id }} on YouTube ↗</a></p>
+  <p class="small muted">A saved edit stays: details looked up later from YouTube or sent by the relay won't replace it. The artist is what artist pages group by.</p>
+  <div class="row"><button class="btn primary" type="submit">Save</button></div>
+</form>
+{% endblock %}

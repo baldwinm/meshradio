@@ -1,0 +1,38 @@
+{% extends "admin/base.html" %}
+{% block title %}Device{% endblock %}
+{% block main %}
+<div class="top"><h1>Device</h1></div>
+<div class="tiles">
+  <div class="tile"><span class="k">yt-dlp</span><span class="v">{{ ytdlp or "missing" }}</span><span class="s">updated nightly by the timer</span></div>
+  <div class="tile{% if cache_max and cache_bytes and cache_bytes > cache_max * 0.95 %} warn{% endif %}">
+    <span class="k">Audio cache</span><span class="v">{{ cache_bytes|bytes }}</span><span class="s">of {{ cache_max|bytes }}</span>
+  </div>
+  <div class="tile"><span class="k">Downloaded</span><span class="v">{{ counts.get("ready", 0) }}</span><span class="s">{{ counts.get("pending", 0) }} waiting · {{ counts.get("failed", 0) }} failed</span></div>
+  <div class="tile"><span class="k">Output</span><span class="v">{{ output or "—" }}</span><span class="s">{{ outputs|join(", ") }}</span></div>
+</div>
+<section>
+  <h2>Failed downloads</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Day</th><th>Song</th><th>Shared by</th><th></th></tr></thead>
+      <tbody>
+      {% for t in failed %}
+        <tr>
+          <td class="mono">{{ t.date }}</td>
+          <td>{{ t.title or t.video_id }}</td>
+          <td>{{ t.sender }}</td>
+          <td class="actions">
+            <form method="post" action="/admin/tracks/{{ t.id }}/retry">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="btn" type="submit">Retry</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">No failed downloads.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

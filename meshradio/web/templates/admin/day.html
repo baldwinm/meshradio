@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ date }}{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>
+    {% if prev_day %}<a href="/admin/days/{{ prev_day }}" aria-label="Previous day">‹</a>{% endif %}
+    {{ date }}
+    {% if next_day %}<a href="/admin/days/{{ next_day }}" aria-label="Next day">›</a>{% endif %}
+  </h1>
+  <a class="btn" href="/archive/{{ date }}">View the public page ↗</a>
+</div>
+{% include "admin/_banner.html" %}
+<section class="panel">
+  <h2>Theme</h2>
+  <form class="row" method="post" action="/admin/days/{{ date }}/theme">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="title" class="grow">Title
+      <input id="title" name="title" type="text" value="{{ theme.title }}" maxlength="256" required>
+    </label>
+    <button class="btn primary" type="submit">Save title</button>
+  </form>
+  <p class="small muted">
+    {% if theme.locked %}<span class="chip dim">Locked</span>{% endif %}
+    {% if untitled %}<span class="chip warn">placeholder</span>{% endif %}
+    {% if theme.set_by %}Set by <b>{{ theme.set_by }}</b> · {% endif %}{{ theme.created_at|when(tz) }}
+    {% if theme.raw_message %}· original post: <code>{{ theme.raw_message }}</code>{% endif %}
+  </p>
+  <p class="small muted">Saving retitles and locks the day, the same as <code>meshradio --set-theme</code>. The other instance (public site or Pi) keeps its own title.</p>
+</section>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th></th><th>Song</th><th>Shared by</th><th>Posted</th><th></th></tr></thead>
+    <tbody>
+    {% for t in tracks %}
+      <tr>
+        <td><img class="thumb" src="https://i.ytimg.com/vi/{{ t.video_id }}/mqdefault.jpg" alt="" loading="lazy" width="56" height="32"></td>
+        <td>{{ t.title or t.video_id }}{% if t.meta_edited_at %} <span class="chip dim">edited</span>{% endif %}<br><span class="muted small">{{ t.artist or "" }}</span></td>
+        <td>{{ t.sender }}</td>
+        <td>{{ t.mesh_ts|when(tz) }}</td>
+        <td class="actions">
+          <a class="btn" href="/admin/tracks/{{ t.id }}/edit">Edit</a>
+          <a class="btn danger" href="/admin/tracks/{{ t.id }}/remove">Remove</a>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">No songs on this day.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

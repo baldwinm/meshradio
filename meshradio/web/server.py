@@ -40,7 +40,8 @@ from ..bus import (
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import supervise
-from . import routes_api, routes_ingest, routes_pages, ws
+from . import routes_admin, routes_api, routes_ingest, routes_pages, ws
+from .admin_auth import ADMIN_PATH, AdminSettings
 from .context import WebContext, absolute_url, forwarded_scheme
 from .ratelimit import RateLimiter
 from .sessions import (
@@ -67,15 +68,18 @@ DEFAULT_SKIN = "winamp"
 # and a header per request for nothing, and it hands a crawler fetching the
 # stylesheet, the relay pushing to /api/ingest and the host's health checker
 # a cookie they will present straight back. The sitemap and the feed are
-# documents, but documents nobody presses anything from.
-_NO_SESSION_PREFIXES = ("/static/", "/audio/")
+# documents, but documents nobody presses anything from. The admin page has
+# its own sign-in cookie and no player.
+_NO_SESSION_PREFIXES = ("/static/", "/audio/", f"{ADMIN_PATH}/")
 _NO_SESSION_PATHS = frozenset(
     {"/healthz", "/robots.txt", "/sitemap.xml", "/feed.xml", "/api/ingest"}
 )
 
 
 def _sessionless(path: str) -> bool:
-    return path in _NO_SESSION_PATHS or path.startswith(_NO_SESSION_PREFIXES)
+    return (
+        path in _NO_SESSION_PATHS or path == ADMIN_PATH or path.startswith(_NO_SESSION_PREFIXES)
+    )
 
 
 def _mmss(value) -> str:
@@ -305,12 +309,14 @@ def create_app(
     csp_report_only: bool = False,
     trusted_proxies: Sequence[str] = ("127.0.0.1",),
     rate_limit: bool = True,
+    admin: AdminSettings | None = None,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
     # primary or backup feed, so a primary outage the backup covers doesn't
-    # read as "every ingest source stopped".
-    health: dict = {"last_ingest": None}
+    # read as "every ingest source stopped". ``feeds`` keeps each source's
+    # last report for the admin page's Feeds screen.
+    health: dict = {"last_ingest": None, "feeds": {}}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -318,10 +324,16 @@ def create_app(
             sub = bus.subscribe(INGEST_STATUS)
             try:
                 async for _topic, payload in sub:
+                    now = time.time()
+                    for source, status in payload.items():
+                        seen = health["feeds"].setdefault(source, {})
+                        seen.update(status=status, at=now)
+                        if status == "ok":
+                            seen["last_ok"] = now
                     # "ok" is the pollers' success marker; mesh reports link
                     # state ("connected"/"disconnected"), which isn't ingest.
                     if "ok" in payload.values():
-                        health["last_ingest"] = time.time()
+                        health["last_ingest"] = now
             finally:
                 sub.close()
 
@@ -443,6 +455,21 @@ def create_app(
         app.include_router(routes_api.output_router)   # the appliance's outputs
     app.include_router(routes_ingest.router)
     app.include_router(ws.router)
+
+    # The admin page exists only with a password hash configured; without one
+    # every /admin URL is the ordinary 404.
+    app.state.admin = admin
+    if admin is not None:
+        app.include_router(routes_admin.router)
+        templates.env.filters.update(routes_admin.FILTERS)
+
+        @app.middleware("http")
+        async def admin_headers(request: Request, call_next):
+            response = await call_next(request)
+            path = request.url.path
+            if path == ADMIN_PATH or path.startswith(f"{ADMIN_PATH}/"):
+                routes_admin.admin_headers(response)
+            return response
 
     # Inside the origin guard, so a refused cross-site request never costs a
     # client its budget; outside the session middleware, so a refused press

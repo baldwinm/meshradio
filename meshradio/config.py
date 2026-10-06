@@ -119,6 +119,13 @@ class WebConfig:
     # Per-client ceilings on presses (POSTs) and searches — see
     # web/ratelimit.py. Off only behind a proxy that already enforces its own.
     rate_limit: bool = True
+    # The admin page (/admin) exists only when this is set: a scrypt hash from
+    # `meshradio --hash-admin-password`, never the password itself. Prefer the
+    # MESHRADIO_ADMIN_PASSWORD_HASH env var. admin_totp_secret turns on
+    # two-step sign-in (`meshradio --new-totp-secret`; env
+    # MESHRADIO_ADMIN_TOTP_SECRET).
+    admin_password_hash: str = ""
+    admin_totp_secret: str = ""
 
 
 @dataclass
@@ -218,6 +225,7 @@ _STRINGS = [
     ("player", "backend"), ("player", "quiet_hours"), ("player", "timezone"),
     ("cache", "ytdlp_bin"), ("cache", "audio_format"), ("cache", "ffmpeg_location"),
     ("web", "host"), ("web", "ingest_token"), ("web", "public_url"),
+    ("web", "admin_password_hash"), ("web", "admin_totp_secret"),
     ("relay", "push_url"), ("relay", "token"), ("backup", "dir"),
 ]
 _STRING_LISTS = [
@@ -294,6 +302,28 @@ def validate_config(cfg: Config) -> None:
             problems.append(
                 f"{key('player', 'timezone')} is not a known time zone: {cfg.player.timezone!r}"
             )
+    # A hash that can never match would leave an admin page nobody can enter;
+    # say so at startup instead. (Imported here: the web package isn't
+    # needed to read a config otherwise.)
+    from .web.admin_auth import password_hash_ok, totp_secret_ok
+
+    admin_hash = cfg.web.admin_password_hash
+    if isinstance(admin_hash, str) and admin_hash and not password_hash_ok(admin_hash):
+        problems.append(
+            f"{key('web', 'admin_password_hash')} is not a hash from "
+            "`meshradio --hash-admin-password`"
+        )
+    totp = cfg.web.admin_totp_secret
+    if isinstance(totp, str) and totp and not totp_secret_ok(totp):
+        problems.append(
+            f"{key('web', 'admin_totp_secret')} is not a base32 secret from "
+            "`meshradio --new-totp-secret`"
+        )
+    if isinstance(totp, str) and totp and not admin_hash:
+        problems.append(
+            f"{key('web', 'admin_totp_secret')} is set but "
+            f"{key('web', 'admin_password_hash')} isn't; the admin page needs a password"
+        )
     if problems:
         raise ConfigError("config:\n  " + "\n  ".join(problems))
 
@@ -330,6 +360,12 @@ def load_config(path: str | Path | None = None) -> Config:
     env_relay = os.environ.get("MESHRADIO_RELAY_TOKEN")
     if env_relay:
         cfg.relay.token = env_relay
+    env_admin = os.environ.get("MESHRADIO_ADMIN_PASSWORD_HASH")
+    if env_admin:
+        cfg.web.admin_password_hash = env_admin.strip()
+    env_totp = os.environ.get("MESHRADIO_ADMIN_TOTP_SECRET")
+    if env_totp:
+        cfg.web.admin_totp_secret = env_totp.strip()
 
     validate_config(cfg)
     return cfg

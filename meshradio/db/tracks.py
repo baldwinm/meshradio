@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -58,6 +59,7 @@ class TrackQueries(ThemeQueries):
         # Check and insert under one transaction: the write lock means no other
         # ingest path can slip a repost in between them.
         async with self.transaction():
+            artist = await self.canonical_artist(artist)
             if theme_id is not None:
                 already = await self._fetchone(
                     "SELECT 1 FROM tracks WHERE theme_id=? AND video_id=? LIMIT 1",
@@ -136,6 +138,9 @@ class TrackQueries(ThemeQueries):
         video so a re-backfill can't quietly put it back. Radio filler (no
         theme) leaves no tombstone — it isn't on the channel to come back.
 
+        The tombstone keeps the whole row too, so ``restore_deleted_track``
+        can put the song back exactly as it was (its plays excepted).
+
         The cached audio file isn't touched here; the caller owns the disk."""
         async with self.transaction():
             track = await self.track_by_id(track_id)
@@ -149,9 +154,10 @@ class TrackQueries(ThemeQueries):
             await self.db.execute("DELETE FROM tracks WHERE id=?", (track_id,))
             if date is not None:
                 await self.db.execute(
-                    "INSERT INTO deleted_tracks(date,video_id,title,sender,deleted_at) "
-                    "VALUES(?,?,?,?,?) ON CONFLICT(date,video_id) DO NOTHING",
-                    (date, track["video_id"], track["title"], track["sender"], utcnow()),
+                    "INSERT INTO deleted_tracks(date,video_id,title,sender,deleted_at,track_json) "
+                    "VALUES(?,?,?,?,?,?) ON CONFLICT(date,video_id) DO NOTHING",
+                    (date, track["video_id"], track["title"], track["sender"], utcnow(),
+                     json.dumps(track)),
                 )
         return track
 
@@ -190,11 +196,28 @@ class TrackQueries(ThemeQueries):
         artist = clean_text(artist, MAX_TITLE)
         duration = clean_duration(duration)
         async with self.transaction():
+            artist = await self.canonical_artist(artist)
+            # A title or artist the operator corrected by hand (the admin
+            # page) outranks whatever oEmbed or a relay re-push says later.
             await self.db.execute(
-                "UPDATE tracks SET title=COALESCE(?,title), artist=COALESCE(?,artist), "
+                "UPDATE tracks SET "
+                "title=CASE WHEN meta_edited_at IS NULL THEN COALESCE(?,title) ELSE title END, "
+                "artist=CASE WHEN meta_edited_at IS NULL THEN COALESCE(?,artist) "
+                "ELSE artist END, "
                 "duration=COALESCE(?,duration) WHERE id=?",
                 (title, artist, duration, track_id),
             )
+
+    async def canonical_artist(self, artist: str | None) -> str | None:
+        """``artist`` as the operator asked for it to be spelled: a spelling
+        merged on the admin page's Artists screen maps to the name it was
+        merged into, so a song arriving later joins the merged artist."""
+        if not artist:
+            return artist
+        row = await self._fetchone(
+            "SELECT canonical FROM artist_aliases WHERE alias=?", (artist,)
+        )
+        return row["canonical"] if row else artist
 
     async def fill_track_duration(self, track_id: int, seconds: float) -> bool:
         """Set a track's duration only if it has none. Returns whether it did.

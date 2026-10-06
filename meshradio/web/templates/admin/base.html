@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}Admin{% endblock %} · MeshRadio admin</title>
+  <link rel="icon" href="/static/favicon.svg?v={{ asset_v }}" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/admin.css?v={{ asset_v }}">
+  <script src="/static/js/admin.js?v={{ asset_v }}" defer></script>
+</head>
+<body>
+{% block body %}
+{% set nav = [
+  ("overview", "/admin", "Overview"),
+  ("days", "/admin/days", "Days"),
+  ("removed", "/admin/removed", "Removed songs"),
+  ("artists", "/admin/artists", "Artists"),
+  ("feeds", "/admin/feeds", "Feeds"),
+  ("backups", "/admin/backups", "Backups"),
+  ("log", "/admin/log", "Activity log"),
+  ("config", "/admin/config", "Config"),
+] %}
+<div class="shell">
+  <nav class="side" aria-label="Admin">
+    <span class="brand">MeshRadio admin</span>
+    {% for key, href, label in nav %}
+    <a href="{{ href }}"{% if section == key %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+    {% if not embed %}
+    <a href="/admin/device"{% if section == "device" %} aria-current="page"{% endif %}>Device</a>
+    {% endif %}
+    <div class="who">
+      <span>{{ "Public site" if embed else "This radio" }}</span>
+      <a href="/">View the site ↗</a>
+      <form method="post" action="/admin/logout">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn" type="submit">Sign out</button>
+      </form>
+    </div>
+  </nav>
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
+</body>
+</html>

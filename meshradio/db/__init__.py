@@ -2,14 +2,15 @@
 
 Everything else in meshradio talks to one ``Database`` object; its methods
 live in this package by concern (themes, tracks, the archive's read side,
-artists and weeks, the relay's cursors, visitor sessions) on top of ``core.Core``, which owns
-the connection, the write transaction and the migrations. No raw SQL
-outside this package.
+artists and weeks, the relay's cursors, visitor sessions, the admin page's
+edits) on top of ``core.Core``, which owns the connection, the write
+transaction and the migrations. No raw SQL outside this package.
 """
 
 from __future__ import annotations
 
 from . import migrations
+from .admin import AdminQueries
 from .archive import FTS_MIN_CHARS, ArchiveQueries
 from .browse import BrowseQueries
 from .core import Core, dedupe_hash, utcnow
@@ -29,13 +30,14 @@ from .web_sessions import WebSessionQueries
 
 
 class Database(
-    TrackQueries, ArchiveQueries, BrowseQueries, RelayQueries, WebSessionQueries
+    AdminQueries, ArchiveQueries, BrowseQueries, RelayQueries, WebSessionQueries
 ):
     """One connection, many coroutines — see ``core.Core`` for the model.
-    ``TrackQueries`` brings ``ThemeQueries`` with it."""
+    ``AdminQueries`` brings ``TrackQueries`` and ``ThemeQueries`` with it."""
 
 
 __all__ = [
+    "AdminQueries",
     "ArchiveQueries",
     "BrowseQueries",
     "Core",

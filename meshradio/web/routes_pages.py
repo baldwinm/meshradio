@@ -344,6 +344,7 @@ async def robots(request: Request):
         "Disallow: /partials/\n"
         "Disallow: /audio/\n"
         "Disallow: /search\n"
+        "Disallow: /admin\n"
         f"Sitemap: {sitemap_url}\n"
     )
 

@@ -1,0 +1,19 @@
+{% extends "admin/base.html" %}
+{% block title %}Config{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Running config <span class="chip dim">read-only</span></h1>
+  <span class="chip {{ 'ok' if two_step else 'dim' }}">Two-step sign-in {{ "on" if two_step else "off" }}</span>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Setting</th><th>Value</th><th>From</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr><td class="mono">{{ r.key }}</td><td class="mono">{{ r.value }}</td><td class="muted">{{ r.source }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small muted">Secrets show only their last four characters. {% if embed %}Device settings (the mesh node, the audio cache, quiet hours, volume) only apply on the Pi and aren't shown here. The public site is rebuilt from the repository on each deploy, so a setting changes with a commit.{% else %}Settings change in the config file, then a restart.{% endif %}</p>
+{% endblock %}

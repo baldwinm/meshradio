@@ -1,0 +1,63 @@
+{% extends "admin/base.html" %}
+{% block title %}Overview{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Overview</h1>
+  {% if all_ok %}<span class="chip ok">Feeds healthy</span>{% else %}<span class="chip bad">A feed needs a look</span>{% endif %}
+</div>
+<div class="tiles">
+  <div class="tile">
+    <span class="k">Last ingest</span>
+    <span class="v">{{ last_ingest_age|ago if last_ingest_age is not none else "—" }}</span>
+    <span class="s">{{ "ago" if last_ingest_age is not none else "nothing since start" }}</span>
+  </div>
+  <div class="tile">
+    <span class="k">Songs</span>
+    <span class="v">{{ "{:,}".format(track_count) }}</span>
+    <span class="s">{{ "{:,}".format(day_count) }} day{{ "" if day_count == 1 else "s" }}</span>
+  </div>
+  {% if visitors is not none %}
+  <div class="tile">
+    <span class="k">Visitors now</span>
+    <span class="v">{{ visitors }}</span>
+    <span class="s">open sessions</span>
+  </div>
+  {% endif %}
+  {% if backup %}
+  <div class="tile{% if backup.overdue %} warn{% endif %}">
+    <span class="k">Last backup</span>
+    <span class="v">{{ backup.age|ago if backup.age is not none else "none" }}</span>
+    <span class="s">due every {{ backup.interval|ago }}</span>
+  </div>
+  {% endif %}
+</div>
+{% if attention %}
+<section class="panel">
+  <h2>Needs a look</h2>
+  {% for item in attention %}
+  <div class="notice"><span>{{ item.text }}</span><a class="btn" href="{{ item.href }}">{{ item.action }}</a></div>
+  {% endfor %}
+</section>
+{% endif %}
+<div class="split">
+  <section class="panel">
+    <h2>Latest songs</h2>
+    {% for t in newest %}
+    <p class="small">{{ t.title or t.video_id }}{% if t.artist %} · <span class="muted">{{ t.artist }}</span>{% endif %}
+      <span class="muted">· <a href="/admin/days/{{ t.date }}">{{ t.date }}</a></span></p>
+    {% else %}
+    <p class="muted small">No songs yet.</p>
+    {% endfor %}
+  </section>
+  <section class="panel">
+    <h2>Recent changes</h2>
+    {% for e in changes %}
+    <p class="small">{{ labels.get(e.action, e.action) }}{% if e.target %} · {{ e.target }}{% endif %}{% if e.before or e.after %}: {% if e.before %}{{ e.before }} → {% endif %}{{ e.after or "" }}{% endif %}
+      <span class="muted">· {{ e.at|when(tz) }}{% if e.actor == "cli" %} · CLI{% endif %}</span></p>
+    {% else %}
+    <p class="muted small">Nothing changed yet.</p>
+    {% endfor %}
+    <a class="small" href="/admin/log">Whole activity log</a>
+  </section>
+</div>
+{% endblock %}

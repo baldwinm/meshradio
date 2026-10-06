@@ -149,8 +149,9 @@ Config precedence: `--config` flag → `$MESHRADIO_CONFIG` → `./meshradio.toml
 see [meshradio.example.toml](meshradio.example.toml) for the full annotated
 set. Secrets belong in the environment, not the committed file:
 `MESHRADIO_INGEST_TOKEN` for the receiver's token (`[web] ingest_token`) and
-`MESHRADIO_RELAY_TOKEN` for the pusher's (`[relay] token`); either overrides
-the file. Values are checked at startup — a number of the wrong type or out of
+`MESHRADIO_RELAY_TOKEN` for the pusher's (`[relay] token`), and
+`MESHRADIO_ADMIN_PASSWORD_HASH` / `MESHRADIO_ADMIN_TOTP_SECRET` for the admin
+page; each overrides the file. Values are checked at startup — a number of the wrong type or out of
 range, an unknown backend, audio format or time zone — and a bad one stops
 the radio with a message naming every offending key, instead of a loop
 crashing (or, for a negative interval, spinning) under the supervisor. A key
@@ -171,6 +172,8 @@ exit:
 | `--set-theme TITLE`, `--theme-date DATE` | retitle a day — see [Fixing a theme](#fixing-a-theme) |
 | `--delete-track VIDEO`, `--track-date DATE` | drop a song from a day — see [Removing a song](#removing-a-song) |
 | `--probe-feed [corescope\|comchan]` | poll an analyzer feed once and show what it answered — see *The backup feed* |
+| `--hash-admin-password` | ask for an admin password and print the hash that turns on `/admin` — see [The admin page](#the-admin-page) |
+| `--new-totp-secret` | print a secret for two-step admin sign-in |
 
 ---
 
@@ -419,11 +422,62 @@ able to drive it:
   finite number of seconds is simply not stored — so a relay's metadata can't
   plant a value that breaks every page showing the day.
 
+### The admin page
+
+`/admin` does in a browser what the maintenance flags below do over SSH: name
+or fix a day's theme, take a song off a day (and put it back), correct a
+song's title or artist, merge artist spellings ("Beatles", "The Beatles - Topic")
+into one, check and probe the feeds, and take or download backups. It's off
+until you give it a password:
+
+```
+meshradio --hash-admin-password      # asks twice, prints scrypt$16384$8$1$…
+```
+
+Set what it prints as `MESHRADIO_ADMIN_PASSWORD_HASH` (Render: the service's
+Environment settings; the Pi: `/etc/meshradio/env`) and restart. Only the hash
+is stored, and a new one signs every browser out. For two-step sign-in, run
+`meshradio --new-totp-secret`, add the secret to an authenticator app, and set
+it as `MESHRADIO_ADMIN_TOTP_SECRET`. Without a hash every `/admin` URL is a 404.
+
+What keeps it safe:
+
+- **Sign-in.** A wrong password (or code) is logged, and five from one address
+  pause sign-in from it for 15 minutes. Signing in sets a cookie scoped to
+  `/admin` (HttpOnly, `SameSite=Strict`, Secure over https) that lasts at most
+  12 hours and ends after 30 idle minutes; the archive keeps only its hash.
+  Every form carries a CSRF token on top of the cross-site guard every POST
+  already passes, and admin pages are `no-store` and `noindex`.
+- **The activity log** (`/admin/log`) records every sign-in and every change,
+  with the value before and after, for a year — including fixes made with
+  `--set-theme` and `--delete-track`, marked CLI. Renames, removals, song edits
+  and artist merges each carry an **Undo**, which adds an entry rather than
+  erasing one.
+- **Removing a song** shows what goes (the song, its plays) and needs the day's
+  date typed to confirm. A backup is taken first (at most one every ten
+  minutes, so a clean-up doesn't rotate the scheduled ones out). The removal
+  keeps the song's details, so **Put back** under Removed songs restores it
+  exactly, plays aside.
+- **A hand-edited title or artist stays**: a late YouTube lookup or a relay
+  re-push won't replace it. A merged artist spelling is remembered, so a song
+  arriving later with it is respelled as it's stored.
+- **Restoring a backup stays on the command line**, because it needs the
+  service stopped; the Backups screen prints the command.
+- **The config view is read-only**, with secrets cut to their last four
+  characters. On the public site it leaves out the device settings (mesh node,
+  audio cache, quiet hours, volume), and the **Device** screen (yt-dlp, cache
+  use, failed downloads with Retry, the audio output) exists only on the Pi.
+
+Each instance keeps its own archive and its own admin page: a fix made on the
+public site stays there, and one made on the Pi stays on the Pi (a removal
+isn't relayed, and a receiver ignores a relayed rename for a day it has
+already locked).
+
 ### Fixing a theme
 
 A day's theme locks on the channel's first `Theme:` post, so a bad title —
 a typo, or a parse that split on the wrong colon (`theme is: planes :-) or
-trains?`) — can't be corrected by posting again. Retitle it directly:
+trains?`) — can't be corrected by posting again. Retitle it on the admin page's day screen, or directly:
 
 ```
 meshradio --set-theme "water"                          # today
@@ -444,7 +498,7 @@ channel. Run it once per instance you want fixed (the Pi and the host).
 The queue's **✕ Remove** takes a song out of what's playing; it stays in the
 day's playlist and comes back next time the day is played. To drop it from the
 archive itself — a song posted before anyone set the theme, or posted to the
-wrong day — remove it by video id or link:
+wrong day — remove it from the admin page's day screen, or by video id or link:
 
 ```
 meshradio --delete-track "https://youtu.be/VIDEOID"           # today
@@ -528,6 +582,7 @@ integration pending.**
 | **Supervised runtime, CI gate, `/healthz`** | ✅ working |
 | Archive browsing: calendar, all-themes list, search, stats, member pages, Atom feed, link previews | ✅ working, tested |
 | DB snapshots + restore, `--set-theme` / `--delete-track` operator fixes | ✅ working, tested |
+| Admin page: sign-in (+ two-step), activity log with undo, theme/song fixes, artist merges, feeds, backups | ✅ working, tested |
 | Hardening: cross-site guard, CSP + security headers, https-only relay | ✅ working, tested |
 | Mesh serial ingestion (meshcore) | 🟡 built, needs validation on a Heltec V3 |
 | OLED panel + encoder/buttons | 🟡 skeleton, needs hardware bring-up |
@@ -546,7 +601,8 @@ meshradio/
 ├── config.py        # TOML config over dataclass defaults, checked at load (+ env secrets)
 ├── db/              # aiosqlite layer behind one Database facade: core.py (connection,
 │                    #   transactions, the migrations.py runner), fields.py (text bounds),
-│                    #   and query mixins — themes, tracks, archive, browse, relay, web_sessions
+│                    #   and query mixins — themes, tracks, archive, browse, relay, web_sessions,
+│                    #   admin
 ├── backup.py        # rotating DB snapshots + --list-backups / --restore-backup
 ├── net.py           # shared outbound HTTP client setup (User-Agent, timeouts)
 ├── runtime.py       # supervised task/Service runtime (restart-with-backoff)
@@ -563,12 +619,16 @@ meshradio/
     ├── routes_pages.py  # HTML pages (now playing, archive, search, stats, members, artists, weeks…) + htmx partials
     ├── routes_api.py    # player/queue control API
     ├── routes_ingest.py # /audio streaming, relay /api/ingest, /healthz
+    ├── routes_admin.py  # /admin: overview, days, removals, artists, feeds, backups, log, config
+    ├── admin_auth.py    # admin sign-in: scrypt password hash, two-step codes, lockout, CSRF
     ├── ws.py            # WebSocket: forwards bus events → htmx re-fetch
     ├── feed.py          # /feed.xml Atom builder (pure; safe against hostile text)
     ├── recap.py         # weekly recap summary + /weekly.xml builder (pure)
-    ├── static/          # vendored htmx, style.css, icons, and js/ — radio (socket + audio),
-    │                    #   embed, eq, playbar, queue, keys, mediasession, nav, help, skin, fx
-    └── templates/       # Jinja2 (base, index, archive*, search, stats, member, artist, week, about, partials/)
+    ├── static/          # vendored htmx, style.css, admin.css, icons, and js/ — radio (socket +
+    │                    #   audio), embed, eq, playbar, queue, keys, mediasession, nav, help,
+    │                    #   skin, fx, admin
+    └── templates/       # Jinja2 (base, index, archive*, search, stats, member, artist, week,
+                         #   about, partials/, admin/)
 
 deploy/meshradio.service   # systemd unit for the Pi relay
 render.yaml + *.render.toml # public embed-mode deployment

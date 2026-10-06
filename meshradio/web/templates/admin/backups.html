@@ -1,0 +1,38 @@
+{% extends "admin/base.html" %}
+{% block title %}Backups{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Backups</h1>
+  <form method="post" action="/admin/backups">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn primary" type="submit">Take a backup now</button>
+  </form>
+</div>
+<p class="small muted">
+  {% if backup.enabled %}Every {{ backup.interval_s|ago }}, the newest {{ backup.keep }} kept.{% else %}Scheduled backups are off.{% endif %}
+  {% if same_disk %}They sit on the same disk as the archive, so download one now and then to keep a copy somewhere else.{% endif %}
+</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Taken</th><th>Why</th><th>Size</th><th></th></tr></thead>
+    <tbody>
+    {% for s in snapshots %}
+      <tr>
+        <td>{{ s.taken|when(tz) if s.taken else s.name }}</td>
+        <td>{{ s.reason }}</td>
+        <td>{{ s.size|bytes }}</td>
+        <td class="actions"><a class="btn" href="/admin/backups/{{ s.name }}" download>Download</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No backups yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<section class="panel">
+  <h2>Restore</h2>
+  <p class="small">Restoring needs the service stopped, so it stays on the command line. On the server, stop the service, then run:</p>
+  <code>meshradio --restore-backup {{ snapshots[0].name if snapshots else "latest" }}</code>
+  <p class="small muted">The current archive is backed up first, so a restore can itself be undone.</p>
+</section>
+{% endblock %}
