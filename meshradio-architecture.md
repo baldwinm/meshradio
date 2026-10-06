@@ -1,15 +1,15 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.1 — the core software is built, tested (390+ tests), and running:
+*Status: v0.1 — the core software is built, tested (380+ tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member pages, feed),
 and a public embed-mode deployment fed by a home-node relay (§14). The hardware
 kit (§2) remains design-locked and not yet built; module status is tracked in
 the [README](README.md). This document is the full design; sections marked below
 note where the implementation has diverged from or gone beyond the original plan
-— and where a described piece is still only a plan (§7 nightly yt-dlp update and
-iTunes preview, §9 settings page and log viewer, §10 first-boot flow).*
+— and where a described piece is still only a plan (§7 iTunes preview, §9
+settings page and log viewer, §10 first-boot flow).*
 
 ---
 
@@ -356,7 +356,7 @@ Now Playing always tracks the latest day: the server re-cues an idle session ont
 - **Updates:** OLED/web "Update" button = `git pull` + `pip install -e .` + restart. Nightly `yt-dlp` self-update as a systemd timer.
 - **Repo deliverables:** source, STLs (`/hardware/stl`), wiring diagram (`/hardware/wiring.svg` — everything is header/screw-terminal), BOM with live links, assembly guide with photos, channel-convention doc, image-build workflow.
 
-*As built, none of the above exists yet.* `system/provision.py` holds only `write_config_toml()`, which renders a minimal `config.toml` (profile, `#music` channel key, CoreScope URL) for a provisioned radio; the AP/captive-portal flow, the `pi-gen` image, the update button, the yt-dlp timer, `/hardware/` and the guides are all still to do. Today an appliance is set up by hand: clone, install, write `/etc/meshradio/config.toml`, and install [deploy/meshradio.service](deploy/meshradio.service) (§14).
+*As built, little of the above exists yet.* `system/provision.py` holds only `write_config_toml()`, which renders a minimal `config.toml` (profile, `#music` channel key, CoreScope URL) for a provisioned radio; the AP/captive-portal flow, the `pi-gen` image, the update button, `/hardware/` and the guides are all still to do; the nightly yt-dlp timer is in `deploy/` (§7). Today an appliance is set up by hand: clone, install, write `/etc/meshradio/config.toml`, and install [deploy/meshradio.service](deploy/meshradio.service) (§14).
 
 ---
 
