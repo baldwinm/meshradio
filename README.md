@@ -257,8 +257,9 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   you press **◼ Radio on** to stop. Radio tracks show a `radio` badge in the
   queue and never pollute the channel archive.
 - **10-band EQ + spectrum analyzer** — a real graphic equalizer with classic
-  presets and an FFT spectrum display, Winamp-style. (Web-playback mode; the
-  embed player is the plain YouTube stream.)
+  presets and an FFT spectrum display, Winamp-style. (Web-playback mode only;
+  the embed player is the plain YouTube stream, so the panel isn't shown
+  there.)
 - **First click** — browsers block audio until you interact with the page
   once; if you see **🔊 Click to enable audio**, click it and you're set.
 - **One speaker at a time** — on a communal player (LAN/appliance) open the

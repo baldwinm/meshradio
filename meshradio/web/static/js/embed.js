@@ -47,8 +47,6 @@ function onYtState(e) {
 
 function applyEmbed(s) {
   const win = document.getElementById("yt-window");
-  const eqWin = document.getElementById("eq-window");
-  if (eqWin) eqWin.style.display = "none";   // EQ can't reach iframe audio
   if (!win) return;
   if (!s.speaker) {
     win.hidden = true;
