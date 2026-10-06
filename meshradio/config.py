@@ -101,6 +101,8 @@ class WebConfig:
     # The URL visitors use ("https://meshradio.example.org"): canonical
     # links, link previews and the sitemap are built from it instead of from
     # whatever Host header a request carried. Empty = derive from the request.
+    # MESHRADIO_PUBLIC_URL overrides it, so a host can move to its own domain
+    # from its dashboard without a commit.
     public_url: str = ""
     # Content-Security-Policy and friends on every response (see
     # web/server.py: SecurityHeaders). Off only if a proxy in front already
@@ -366,6 +368,11 @@ def load_config(path: str | Path | None = None) -> Config:
     env_totp = os.environ.get("MESHRADIO_ADMIN_TOTP_SECRET")
     if env_totp:
         cfg.web.admin_totp_secret = env_totp.strip()
+    # Not a secret, but where a host is reached is the host's business: a
+    # custom domain is added in its dashboard, and so is the name to match.
+    env_public = os.environ.get("MESHRADIO_PUBLIC_URL")
+    if env_public and env_public.strip():
+        cfg.web.public_url = env_public.strip()
 
     validate_config(cfg)
     return cfg

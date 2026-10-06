@@ -50,6 +50,18 @@ token = "from-file"
     assert cfg.relay.token == "pusher-env"
 
 
+def test_public_url_env_overrides_the_file(tmp_path, monkeypatch):
+    path = write(tmp_path, """
+[web]
+public_url = "https://meshradio.onrender.com"
+""")
+    assert load_config(path).web.public_url == "https://meshradio.onrender.com"
+    monkeypatch.setenv("MESHRADIO_PUBLIC_URL", " https://radio.example.org ")
+    assert load_config(path).web.public_url == "https://radio.example.org"
+    monkeypatch.setenv("MESHRADIO_PUBLIC_URL", "")
+    assert load_config(path).web.public_url == "https://meshradio.onrender.com"
+
+
 def test_every_bad_value_is_reported_at_once(tmp_path):
     path = write(tmp_path, """
 hardware_profile = "pi5"
