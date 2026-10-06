@@ -15,6 +15,12 @@ log = logging.getLogger(__name__)
 FTS_MIN_CHARS = 3
 
 
+def _like_escape(text: str) -> str:
+    """Wildcards a visitor typed are literal characters, not a pattern: a
+    search for "100%" must not degenerate into a match-everything LIKE."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class ArchiveQueries(Core):
     """The archive as the pages read it."""
 
@@ -131,40 +137,110 @@ class ArchiveQueries(Core):
 
     # -- search & stats -------------------------------------------------------
 
-    async def search_tracks(self, query: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Channel tracks whose title, artist, sharer, or theme matches
-        ``query`` (case-insensitive substring), newest first.
+    async def search_tracks(
+        self,
+        query: str,
+        limit: int = 100,
+        sender: str | None = None,
+        year: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Channel songs whose title, artist, sharer, or theme matches
+        ``query`` (case-insensitive substring), best match first.
 
         Three characters and up are answered by the trigram FTS index
         (migration v13): the same substring match LIKE made, with the
         Unicode case folding LIKE never had, from an index instead of four
         scans of the join. The index can't see a shorter query, so one or
         two characters still take the LIKE path, with its wildcards escaped
-        so "100%" searches for the literal text either way."""
+        so "100%" searches for the literal text either way.
+
+        ``sender`` and ``year`` narrow the result without naming a song, and
+        are a search on their own: "everything Ana shared in 2026" is a
+        question with no query text in it. With none of the three set there
+        is nothing to search for, and the answer is empty rather than the
+        whole archive.
+
+        A row is a *song*, not a share. The same video posted on eight days
+        was eight rows, which buried seven other songs; it is now one row
+        carrying ``shares`` and ``sharers`` counts, with the track columns
+        taken from the newest share — SQLite hands a bare column the row its
+        single min/max aggregate picked, so the id a result offers to queue
+        is the most recent copy. Ordering puts a title that matches exactly
+        above one that merely starts with the query, then a title hit above
+        an artist hit, above a match that was only on the sharer or the
+        theme; ties go to the newest share. The tiers are LIKE, so they fold
+        ASCII case only: ``CAFÉ`` still finds ``café`` through the index, it
+        just doesn't win the exact-match tier."""
         query = query.strip()
-        if len(query) >= FTS_MIN_CHARS:
-            # One quoted phrase: every character in it is literal to FTS5.
-            match = '"' + query.replace('"', '""') + '"'
-            return await self._fetchall(
-                "SELECT tr.*, t.date AS date, t.title AS theme_title "
-                "FROM tracks tr JOIN themes t ON tr.theme_id=t.id "
-                "WHERE tr.source != 'radio' AND ("
-                "  tr.id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?) "
-                "  OR tr.theme_id IN (SELECT rowid FROM themes_fts WHERE themes_fts MATCH ?)) "
-                "ORDER BY tr.mesh_ts DESC LIMIT ?",
-                (match, match, limit),
+        if not (query or sender or year):
+            return []
+
+        where = ["tr.source != 'radio'"]
+        params: list[Any] = []
+        rank, rank_params = "0", []
+
+        if query:
+            if len(query) >= FTS_MIN_CHARS:
+                # One quoted phrase: every character in it is literal to FTS5.
+                match = '"' + query.replace('"', '""') + '"'
+                where.append(
+                    "(tr.id IN (SELECT rowid FROM tracks_fts WHERE tracks_fts MATCH ?)"
+                    " OR tr.theme_id IN (SELECT rowid FROM themes_fts WHERE themes_fts MATCH ?))"
+                )
+                params += [match, match]
+            else:
+                like = f"%{_like_escape(query)}%"
+                where.append(
+                    "(tr.title LIKE ? ESCAPE '\\' OR tr.artist LIKE ? ESCAPE '\\'"
+                    " OR tr.sender LIKE ? ESCAPE '\\' OR t.title LIKE ? ESCAPE '\\')"
+                )
+                params += [like] * 4
+            escaped = _like_escape(query)
+            rank = (
+                "CASE WHEN tr.title LIKE ? ESCAPE '\\' THEN 0"
+                " WHEN tr.title LIKE ? ESCAPE '\\' THEN 1"
+                " WHEN tr.title LIKE ? ESCAPE '\\' THEN 2"
+                " WHEN tr.artist LIKE ? ESCAPE '\\' THEN 3 ELSE 4 END"
             )
-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        like = f"%{escaped}%"
+            rank_params = [escaped, f"{escaped}%", f"%{escaped}%", f"%{escaped}%"]
+
+        if sender:
+            where.append("tr.sender = ? COLLATE NOCASE")
+            params.append(sender)
+        if year:
+            where.append("substr(t.date, 1, 4) = ?")
+            params.append(year)
+
         return await self._fetchall(
-            "SELECT tr.*, t.date AS date, t.title AS theme_title "
+            "SELECT tr.*, t.date AS date, t.title AS theme_title, "
+            " MAX(tr.mesh_ts) AS newest_ts, COUNT(*) AS shares, "
+            f" COUNT(DISTINCT tr.sender) AS sharers, {rank} AS match_rank "
             "FROM tracks tr JOIN themes t ON tr.theme_id=t.id "
-            "WHERE tr.source != 'radio' AND ("
-            "  tr.title LIKE ? ESCAPE '\\' OR tr.artist LIKE ? ESCAPE '\\' "
-            "  OR tr.sender LIKE ? ESCAPE '\\' OR t.title LIKE ? ESCAPE '\\') "
-            "ORDER BY tr.mesh_ts DESC LIMIT ?",
-            (like, like, like, like, limit),
+            f"WHERE {' AND '.join(where)} "
+            "GROUP BY tr.video_id "
+            "ORDER BY match_rank, newest_ts DESC LIMIT ?",
+            tuple(rank_params + params + [limit]),
         )
+
+    async def search_filters(self) -> dict[str, list[str]]:
+        """What the search page offers to filter by: every member who has
+        posted, and every year the archive covers. Both are short lists that
+        change only when a song or a theme lands, so the page reads them
+        from the aggregate cache rather than querying them per visit. Names
+        are grouped case-insensitively, the way a member page resolves one,
+        so a member who once typed their name differently is one option."""
+        senders = await self._fetchall(
+            "SELECT sender FROM tracks "
+            "WHERE source != 'radio' AND sender IS NOT NULL AND sender != '' "
+            "GROUP BY sender COLLATE NOCASE ORDER BY sender COLLATE NOCASE"
+        )
+        years = await self._fetchall(
+            "SELECT DISTINCT substr(date, 1, 4) AS year FROM themes ORDER BY year DESC"
+        )
+        return {
+            "senders": [r["sender"] for r in senders],
+            "years": [r["year"] for r in years],
+        }
 
     async def overall_stats(self) -> dict[str, Any]:
         row = await self._fetchone(

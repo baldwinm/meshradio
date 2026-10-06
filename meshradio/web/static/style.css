@@ -143,7 +143,17 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 }
 
 /* -- search --------------------------------------------------------------- */
-.search-form { display: flex; gap: 0.5rem; margin-bottom: 0.9rem; }
+/* The filters wrap under the box on a phone rather than squeezing it: the
+   query is what gets typed, the selects are what gets picked. */
+.search-form { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.9rem; }
+.search-form select {
+  flex: 0 1 auto; max-width: 9rem;
+  padding: 0.3rem 0.35rem;
+  background: var(--lcd-bg); color: var(--green);
+  border: 2px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+  font-family: "Lucida Console", "Courier New", monospace; font-size: 0.78rem;
+}
 .search-form input[type="search"] {
   flex: 1; min-width: 0;
   padding: 0.35rem 0.5rem;
@@ -166,6 +176,7 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .results .title { color: var(--green); }
 .results .artist { color: var(--green-dim); }
 .results .sender { color: var(--amber); font-size: 0.75rem; }
+.results .shares { color: var(--green-dim); font-size: 0.72rem; }
 .results .day-link { color: var(--green-dark); margin-left: auto; font-size: 0.72rem; text-decoration: none; }
 .results .day-link:hover { color: var(--amber); }
 .results button { flex: none; }
@@ -881,7 +892,8 @@ html[data-skin="itunes"] .days,
 html[data-skin="itunes"] section.theme ol,
 html[data-skin="itunes"] .results,
 html[data-skin="itunes"] .board,
-html[data-skin="itunes"] .search-form input[type="search"] {
+html[data-skin="itunes"] .search-form input[type="search"],
+html[data-skin="itunes"] .search-form select {
   background: #ffffff; border: 1px solid #b7bcc5; color: #1b1d21;
   font-family: "Lucida Grande", Helvetica, Arial, sans-serif;
 }
@@ -952,7 +964,8 @@ html[data-skin="wmp"] .days,
 html[data-skin="wmp"] section.theme ol,
 html[data-skin="wmp"] .results,
 html[data-skin="wmp"] .board,
-html[data-skin="wmp"] .search-form input[type="search"] {
+html[data-skin="wmp"] .search-form input[type="search"],
+html[data-skin="wmp"] .search-form select {
   background: #0a1c34; border: 1px solid #2b527f; color: #d3e6ff; border-radius: 4px;
 }
 html[data-skin="wmp"] .queue li:hover,
