@@ -73,10 +73,10 @@ async def test_unknown_artist_and_radio_filler_are_404s(db, bus):
             assert "ghost42" not in resp.text
 
 
-async def test_artists_link_from_days_members_and_stats(db, bus):
+async def test_artists_link_from_days_members_search_and_stats(db, bus):
     await share(db, "2026-08-01", "aaaaaaaaaaa", "ana", artist="Nilsson - Topic")
     async with client_for(page_app(db, bus)) as client:
-        for path in ("/archive/2026-08-01", "/member/ana", "/stats"):
+        for path in ("/archive/2026-08-01", "/member/ana", "/stats", "/search?q=Nilsson"):
             body = (await client.get(path)).text
             href = re.search(r'href="(/artist/[^"]+)"', body)
             assert href, path

@@ -1,26 +1,48 @@
 {% extends "base.html" %}
 {% from "partials/thumb.html" import thumb %}
+{% set searched = q or member or year %}
+{%- set scope %}
+  {%- if q %} for “{{ q }}”{% endif %}
+  {%- if member %} shared by {{ member }}{% endif %}
+  {%- if year %} in {{ year }}{% endif %}
+{%- endset %}
 {% block title %}{% if q %}“{{ q }}” — {% endif %}Search · MeshRadio{% endblock %}
 {% block content %}
 <h2>Search</h2>
 <form class="search-form" method="get" action="/search" role="search">
   <input type="search" name="q" value="{{ q }}" autofocus
          placeholder="song, artist, sharer, or theme…" aria-label="Search the archive">
+  <select name="member" aria-label="Filter by member">
+    <option value="">anyone</option>
+    {% for name in filters.senders %}
+    <option value="{{ name }}" {% if name|lower == member|lower %}selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+  <select name="year" aria-label="Filter by year">
+    <option value="">any year</option>
+    {% for y in filters.years %}
+    <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+    {% endfor %}
+  </select>
   <button type="submit">Search</button>
 </form>
-{% if q %}
+{% if searched %}
   {% if results %}
   <p class="search-count">
-    {%- if more %}first {{ results|length }} matches for “{{ q }}” — narrow it down for the rest
-    {%- else %}{{ results|length }} {{ "match" if results|length == 1 else "matches" }} for “{{ q }}”
+    {%- if more %}first {{ results|length }} songs{{ scope }} — narrow it down for the rest
+    {%- else %}{{ results|length }} {{ "song" if results|length == 1 else "songs" }}{{ scope }}
     {%- endif %}</p>
   <ol class="results">
     {% for tr in results %}
     <li>
       {{ thumb(tr) }}
       <span class="title">{{ tr.title or tr.video_id }}</span>
-      {% if tr.artist %}<span class="artist">— {{ tr.artist }}</span>{% endif %}
+      {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
       <span class="sender">({% if tr.sender %}<a href="/member/{{ tr.sender|urlencode }}">{{ tr.sender }}</a>{% else %}?{% endif %})</span>
+      {# A song shared again is one row: say how often rather than repeating it. #}
+      {% if tr.shares > 1 %}
+      <span class="shares">shared {{ tr.shares }}&times;{% if tr.sharers > 1 %} by {{ tr.sharers }} members{% endif %}</span>
+      {% endif %}
       <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
       {% if tr.cache_status == "ready" %}
       <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>
@@ -29,9 +51,9 @@
     {% endfor %}
   </ol>
   {% else %}
-  <p class="empty">No matches for “{{ q }}”.</p>
+  <p class="empty">No songs{{ scope }}.</p>
   {% endif %}
 {% else %}
-<p class="empty">Search past songs by title, artist, the member who shared it, or a theme.</p>
+<p class="empty">Search past songs by title, artist, the member who shared it, or a theme — or pick a member and a year to see everything they shared.</p>
 {% endif %}
 {% endblock %}

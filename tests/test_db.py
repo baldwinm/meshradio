@@ -6,6 +6,8 @@ import pytest
 from meshradio import db as db_mod
 from meshradio.db import MAX_SENDER, MAX_TITLE, MIGRATIONS, Database, dedupe_hash, utcnow
 
+from .helpers import seed_shares
+
 VID = "dQw4w9WgXcQ"
 
 
@@ -254,6 +256,76 @@ async def test_search_escapes_like_wildcards(db: Database):
     assert [t["id"] for t in await db.search_tracks("%")] == [pct["id"]]
     assert await db.search_tracks("____") == []
     assert len(await db.search_tracks("Song")) == 1   # normal search still works
+
+
+async def test_search_collapses_repeat_shares_into_one_song(db: Database):
+    """A song posted on eight days was eight rows, which buried seven other
+    songs. It is one row now, counting the shares and the members behind
+    them, and carrying the newest share's id so + queue cues that copy."""
+    shares = await seed_shares(
+        db, "aaaaaaaaaaa", ["2026-07-06", "2026-07-07", "2026-07-08"],
+        title="Purple Rain", senders=("alice", "bob", "alice"))
+    await seed_shares(db, "bbbbbbbbbbb", ["2026-07-09"], title="Rain Dogs")
+
+    rows = await db.search_tracks("rain")
+    assert [r["video_id"] for r in rows] == ["bbbbbbbbbbb", "aaaaaaaaaaa"]
+    repeat = rows[1]
+    assert repeat["shares"] == 3 and repeat["sharers"] == 2
+    assert repeat["id"] == shares[-1]["id"]           # the newest copy, to queue
+    assert repeat["date"] == "2026-07-08"             # and the day it last charted
+    assert rows[0]["shares"] == 1 and rows[0]["sharers"] == 1
+
+
+async def test_search_ranks_the_title_people_typed_first(db: Database):
+    """Newest-first alone put an incidental theme-title hit above the song
+    actually named. An exact title wins, then a title that starts with the
+    query, then one that contains it, then an artist — and only then the
+    rows that matched on the sharer or the theme."""
+    await seed_shares(db, "aaaaaaaaaaa", ["2026-07-01"], title="Rain Dogs")
+    await seed_shares(db, "bbbbbbbbbbb", ["2026-07-02"], title="Purple Rain")
+    await seed_shares(db, "ccccccccccc", ["2026-07-03"], title="Shelter", artist="Rain Parade")
+    await seed_shares(db, "ddddddddddd", ["2026-07-04"], title="rain")
+    # Newest of the lot, and matches only through its theme title.
+    theme = await db.create_theme("2026-07-05", "Rain songs")
+    stray = await db.add_track(**_track_args(theme_id=theme["id"], video_id="eeeeeeeeeee"))
+    await db.update_track_metadata(stray["id"], title="Quiet")
+
+    assert [r["title"] for r in await db.search_tracks("rain")] == [
+        "rain", "Rain Dogs", "Purple Rain", "Shelter", "Quiet",
+    ]
+
+
+async def test_search_filters_by_member_and_year(db: Database):
+    """A filter is a search on its own: "everything Ana shared in 2026"
+    names no song. With none of the three set there is nothing to look for,
+    and the answer is empty rather than the whole archive."""
+    await seed_shares(db, "aaaaaaaaaaa", ["2025-07-06"], title="Old One", senders=("Ana",))
+    await seed_shares(db, "bbbbbbbbbbb", ["2026-07-06"], title="New One", senders=("Ana",))
+    await seed_shares(db, "ccccccccccc", ["2026-07-07"], title="Theirs", senders=("bob",))
+
+    async def titles(query="", **kw):
+        return sorted(r["title"] for r in await db.search_tracks(query, **kw))
+
+    assert await titles(sender="Ana") == ["New One", "Old One"]
+    assert await titles(sender="ana") == ["New One", "Old One"]   # as typed on the mesh
+    assert await titles(year="2026") == ["New One", "Theirs"]
+    assert await titles(sender="Ana", year="2026") == ["New One"]
+    assert await titles("one", year="2025") == ["Old One"]
+    assert await titles(sender="nobody") == []
+    assert await titles() == []                                   # no criteria, no answer
+
+
+async def test_search_filters_list_the_members_and_years_on_record(db: Database):
+    """The two dropdowns: every member who has posted, deduped the way a
+    member page resolves a name, and every year the archive covers."""
+    await seed_shares(db, "aaaaaaaaaaa", ["2025-07-06"], senders=("Ana",))
+    await seed_shares(db, "bbbbbbbbbbb", ["2026-07-06"], senders=("ana",))
+    await seed_shares(db, "ccccccccccc", ["2026-07-07"], senders=("bob",))
+    await db.add_track(**_track_args(video_id="ddddddddddd", sender="radio", source="radio"))
+
+    filters = await db.search_filters()
+    assert [s.lower() for s in filters["senders"]] == ["ana", "bob"]
+    assert filters["years"] == ["2026", "2025"]
 
 
 async def _build_v9_db(path):

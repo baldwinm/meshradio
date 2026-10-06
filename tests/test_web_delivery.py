@@ -6,7 +6,15 @@ import time
 
 import pytest
 
-from .helpers import client_for, counting, embed_app, make_ready_on, page_app, seed_day
+from .helpers import (
+    client_for,
+    counting,
+    embed_app,
+    make_ready_on,
+    page_app,
+    seed_day,
+    seed_shares,
+)
 
 GZIP = {"accept-encoding": "gzip"}
 HTML = {"accept": "text/html,application/xhtml+xml"}
@@ -208,7 +216,7 @@ async def test_search_says_when_the_list_is_cut_off(db, bus):
         )
     async with client_for(page_app(db, bus)) as client:
         body = (await client.get("/search", params={"q": "Song"})).text
-    assert "first 100 matches" in body
+    assert "first 100 songs" in body
     assert body.count("+ queue") <= 100
 
 
@@ -246,9 +254,9 @@ async def test_search_queries_are_cut_to_a_sane_length(db, bus):
     seen = []
     original = db.search_tracks
 
-    async def spy(query, limit=100):
+    async def spy(query, **kwargs):
         seen.append(query)
-        return await original(query, limit=limit)
+        return await original(query, **kwargs)
 
     db.search_tracks = spy
     try:
@@ -257,6 +265,44 @@ async def test_search_queries_are_cut_to_a_sane_length(db, bus):
         assert seen == ["x" * SEARCH_MAX_CHARS]
     finally:
         db.search_tracks = original
+
+
+async def test_search_filters_narrow_the_page_and_stay_in_the_url(db, bus):
+    """A member and a year are a search on their own, and they survive in the
+    form so a narrowed search is a link somebody can paste."""
+    await seed_shares(db, "aaaaaaaaaaa", ["2025-07-06"], title="Old One", senders=("Ana",))
+    await seed_shares(db, "bbbbbbbbbbb", ["2026-07-06"], title="New One", senders=("Ana",))
+    await seed_shares(db, "ccccccccccc", ["2026-07-07"], title="Theirs", senders=("bob",))
+
+    async with client_for(page_app(db, bus)) as client:
+        both = (await client.get("/search", params={"member": "Ana", "year": "2026"})).text
+        opened = (await client.get("/search")).text
+        junk = (await client.get("/search", params={"year": "sometime"})).text
+
+    assert "New One" in both and "Old One" not in both and "Theirs" not in both
+    assert "shared by Ana" in both and "in 2026" in both
+    assert '<option value="Ana" selected>' in both and '<option value="2026" selected>' in both
+    # Both dropdowns are offered before anything is searched, and nothing is
+    # listed until one of the three is set.
+    assert '<option value="bob"' in opened and '<option value="2025"' in opened
+    assert "New One" not in opened and "Old One" not in opened
+    # A year that isn't a year is dropped, not a 404: the page still answers.
+    assert "New One" not in junk and "Old One" not in junk
+
+
+async def test_search_lists_a_repeat_share_once(db, bus):
+    """The same song on three days is one row saying so, not three rows
+    pushing other songs off the page."""
+    await seed_shares(
+        db, "aaaaaaaaaaa", ["2026-07-06", "2026-07-07", "2026-07-08"],
+        title="Purple Rain", senders=("alice", "bob", "alice"))
+
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/search", params={"q": "rain"})).text
+
+    assert body.count("Purple Rain") == 1
+    assert "shared 3&times; by 2 members" in body
+    assert "1 song for “rain”" in body
 
 
 def test_asset_version_follows_content_not_mtime(tmp_path, monkeypatch):

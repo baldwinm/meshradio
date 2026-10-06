@@ -260,6 +260,12 @@ class WebContext:
             return [summarize_week(s, by_week[s], firsts) for s in starts if by_week[s]]
         return await self._cached("weekly", load)
 
+    async def search_filters(self) -> dict[str, list[str]]:
+        """The search page's filter options behind the TTL. Every visit to
+        /search draws them, query or not, and they change only when a song
+        or a theme lands — which drops the cache anyway."""
+        return await self._cached("search_filters", self.db.search_filters)
+
     async def stats(self) -> dict[str, Any]:
         """Everything the Stats page shows, behind the TTL."""
         async def load() -> dict[str, Any]:

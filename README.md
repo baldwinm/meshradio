@@ -213,8 +213,16 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   aren't listed.
 - **Search** — find a song by title, artist, the member who shared it, or the
   theme it was shared under: any part of a word, in any case (`café` finds
-  `CAFÉ`). Results run newest first, are cut off at 100 (the page says so when
-  more match), and each links to its day, with a **+ queue** button on any
+  `CAFÉ`). The song whose title you actually typed comes first, then a title
+  that starts with it, then one that contains it, then an artist, then the
+  rows that matched only on a sharer or a theme; ties go to the most recent
+  share. A row is a song, not a share, so a track posted on eight days is one
+  line saying `shared 8× by 3 members` rather than eight lines burying
+  everything else. Two dropdowns narrow it by **member** and **year**, and
+  either works on its own — pick a member and a year with the box empty to see
+  everything they shared that year. Both stay in the URL, so a narrowed
+  search is a link you can paste. Results are cut off at 100 (the page says so
+  when more match), and each links to its day with a **+ queue** button on any
   song that can be played. It's answered from an index, so it stays quick
   however large the archive grows.
 - **Skins** — the header's dropdown re-dresses the player as **Winamp** (the

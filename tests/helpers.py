@@ -42,6 +42,30 @@ async def share(db, date, video_id, sender, title="Song", artist=None, theme=Non
     return await db.track_by_id(track["id"])
 
 
+async def seed_shares(db, video_id, days, title=None, artist=None, senders=("alice",)):
+    """One song posted on several archive days — the repeat share the search
+    page collapses into a single row. Each day gets its own theme because
+    ``add_track`` dedupes a same-day repost, so a song can only be shared
+    again on another day. ``senders`` cycles, for the several-members case.
+
+    The shares are an hour apart and end at now: the same message arriving
+    twice is one dedupe bucket of sixty seconds, so shares closer than that
+    by one member would collapse into one, and a timestamp in the future
+    sits outside the player's live window."""
+    tracks = []
+    span = len(days) - 1
+    for i, date in enumerate(days):
+        theme = await db.create_theme(date, f"theme {date}")
+        track = await db.add_track(
+            video_id=video_id, url=f"https://www.youtube.com/watch?v={video_id}",
+            channel="#music", sender=senders[i % len(senders)],
+            mesh_ts=time.time() - (span - i) * 3600, source="mesh", theme_id=theme["id"],
+        )
+        await db.update_track_metadata(track["id"], title=title or video_id, artist=artist)
+        tracks.append(track)
+    return tracks
+
+
 async def make_ready_track(db: Database, video_id: str, duration: float = 0.05):
     """A cached, titled track on 2026-07-06, posted just now. (A fixed
     timestamp here aged past the player's live window mid-session once and
