@@ -233,10 +233,20 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   How much a given phone shows depends on its browser — in embed mode the audio
   plays inside YouTube's frame, which the page can't fully speak for.
 - **Stats** — the channel's numbers: songs, shares, sharers, days, themes and
-  plays, plus top sharers, most-shared songs, and the busiest themes.
+  plays, plus top sharers, top artists, most-shared songs, and the busiest themes.
 - **Member pages** — every sharer's name is a link: what they've shared, the
   days they named, the artists they keep coming back to, and the span they've
   been on the channel.
+- **Artist pages** — every artist name is a link too: their songs (most-shared
+  first), who on the channel posts them most, and the themes they turned up in.
+  A YouTube Music share names an auto-generated "Artist - Topic" channel; the
+  suffix is folded away, so it lands on the same page as a plain video link.
+- **Weekly recap** — `/week` sums up the newest week (Sunday to Saturday, like
+  the calendar's rows): each day's theme, the busiest day, the top sharers and
+  artists, who shared for the first time, and songs the channel had heard
+  before. Step back through earlier weeks, or reach one from any day page.
+  `/weekly.xml` is the same recap as an Atom feed, one entry per finished week,
+  for a digest instead of a post a day.
 - **Feed** — `/feed.xml` is an Atom feed of the last 30 days, one entry per
   day: the theme, the songs (each linked), and the day's first cover. Subscribe
   in any feed reader to hear the day's theme without opening the site; every
@@ -528,7 +538,7 @@ meshradio/
 ├── config.py        # TOML config over dataclass defaults, checked at load (+ env secrets)
 ├── db/              # aiosqlite layer behind one Database facade: core.py (connection,
 │                    #   transactions, the migrations.py runner), fields.py (text bounds),
-│                    #   and query mixins — themes, tracks, archive, relay, web_sessions
+│                    #   and query mixins — themes, tracks, archive, browse, relay, web_sessions
 ├── backup.py        # rotating DB snapshots + --list-backups / --restore-backup
 ├── net.py           # shared outbound HTTP client setup (User-Agent, timeouts)
 ├── runtime.py       # supervised task/Service runtime (restart-with-backoff)
@@ -542,14 +552,15 @@ meshradio/
     ├── server.py        # create_app: assembly, lifespan, sessions, origin guard, CSP headers
     ├── context.py       # WebContext shared state on app.state (+ short-TTL archive caches)
     ├── sessions.py      # per-visitor session players + speaker registry
-    ├── routes_pages.py  # HTML pages (now playing, archive, search, stats, members…) + htmx partials
+    ├── routes_pages.py  # HTML pages (now playing, archive, search, stats, members, artists, weeks…) + htmx partials
     ├── routes_api.py    # player/queue control API
     ├── routes_ingest.py # /audio streaming, relay /api/ingest, /healthz
     ├── ws.py            # WebSocket: forwards bus events → htmx re-fetch
     ├── feed.py          # /feed.xml Atom builder (pure; safe against hostile text)
+    ├── recap.py         # weekly recap summary + /weekly.xml builder (pure)
     ├── static/          # vendored htmx, style.css, icons, and js/ — radio (socket + audio),
     │                    #   embed, eq, playbar, queue, keys, mediasession, nav, help, skin, fx
-    └── templates/       # Jinja2 (base, index, archive*, search, stats, member, about, partials/)
+    └── templates/       # Jinja2 (base, index, archive*, search, stats, member, artist, week, about, partials/)
 
 deploy/meshradio.service   # systemd unit for the Pi relay
 render.yaml + *.render.toml # public embed-mode deployment

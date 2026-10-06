@@ -24,6 +24,7 @@ from ..bus import EventBus
 from ..db import Database
 from ..media.player import PlayerService
 from .feed import FEED_DAYS
+from .recap import finished_weeks, summarize_week, week_end, week_start, week_starts
 from .sessions import SessionManager, SpeakerRegistry
 
 # Sunday-first weeks (US convention; the channel is Austin-local).
@@ -239,6 +240,26 @@ class WebContext:
             "feed", lambda: self.db.recent_days_tracks(FEED_DAYS)
         )
 
+    async def sender_first_days(self) -> dict[str, str]:
+        """``Database.sender_first_days`` behind the TTL — every recap view
+        and the weekly feed ask it, and it aggregates the whole history."""
+        return await self._cached("firsts", self.db.sender_first_days)
+
+    async def finished_weeks(self) -> list[dict[str, Any]]:
+        """The weekly feed's recaps behind the TTL, newest first: one query
+        for the whole window, split into weeks here."""
+        async def load() -> list[dict[str, Any]]:
+            starts = finished_weeks(self.today(), week_starts(await self.archive_days()))
+            if not starts:
+                return []
+            rows = await self.db.tracks_between(min(starts), week_end(max(starts)))
+            by_week: dict[str, list[dict[str, Any]]] = {s: [] for s in starts}
+            for row in rows:
+                by_week.setdefault(week_start(row["date"]), []).append(row)
+            firsts = await self.sender_first_days()
+            return [summarize_week(s, by_week[s], firsts) for s in starts if by_week[s]]
+        return await self._cached("weekly", load)
+
     async def stats(self) -> dict[str, Any]:
         """Everything the Stats page shows, behind the TTL."""
         async def load() -> dict[str, Any]:
@@ -248,6 +269,7 @@ class WebContext:
                 "top_songs": await self.db.top_songs(),
                 "top_sharers": await self.db.top_sharers(),
                 "busiest_themes": await self.db.busiest_themes(),
+                "top_artists": await self.db.top_artists(),
             }
         return await self._cached("stats", load)
 

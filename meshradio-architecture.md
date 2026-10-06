@@ -1,9 +1,9 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.1 — the core software is built, tested (380+ tests), and running:
+*Status: v0.1 — the core software is built, tested (400+ tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
-browsable archive site (calendar, themes, search, stats, member pages, feed),
+browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 and a public embed-mode deployment fed by a home-node relay (§14). The hardware
 kit (§2) remains design-locked and not yet built; module status is tracked in
 the [README](README.md). This document is the full design; sections marked below
@@ -144,7 +144,8 @@ meshradio/
 │   ├── fields.py       #   bounds on free text and lengths, applied where rows are written
 │   ├── themes.py       #   query mixins, one per concern: themes, tracks (+ plays),
 │   ├── tracks.py       #   the archive's read side (calendar, search, stats, members),
-│   ├── archive.py      #   the relay's cursors, visitor session snapshots
+│   ├── archive.py      #   the relay's cursors, visitor session snapshots,
+│   ├── browse.py       #   artists and weeks
 │   ├── relay.py
 │   └── web_sessions.py
 ├── backup.py           # rotating DB snapshots; --list-backups / --restore-backup (§14)
@@ -171,11 +172,12 @@ meshradio/
 │   ├── server.py       # create_app: assembly, lifespan, session middleware, origin guard, security headers
 │   ├── context.py      # WebContext — shared state on app.state; short-TTL whole-archive caches
 │   ├── sessions.py     # per-visitor session players + speaker registry (embed)
-│   ├── routes_pages.py # HTML pages (now playing, archive, search, stats, member, about, feed) + htmx partials
+│   ├── routes_pages.py # HTML pages (now playing, archive, search, stats, member, artist, week, about, feeds) + htmx partials
 │   ├── routes_api.py   # player/queue control API
 │   ├── routes_ingest.py# /audio streaming, relay /api/ingest, /healthz
 │   ├── ws.py           # WebSocket: forwards bus events → htmx re-fetch
 │   ├── feed.py         # /feed.xml Atom builder — pure functions over db rows
+│   ├── recap.py        # weekly recap summary + /weekly.xml builder — pure, like feed.py
 │   ├── templates/      # Jinja2 + htmx — no JS build chain, ever
 │   └── static/         # vendored htmx, style.css, icons, js/ (radio, embed, eq, playbar, queue,
 │                       #   keys, mediasession, nav, help, skin, fx)
@@ -330,6 +332,10 @@ The calendar answers "what happened on this day"; **`/archive/themes`** answers 
 **Skins.** The header dropdown re-themes the whole UI as Winamp (default), iTunes or Media Player. The choice rides in a `skin` cookie that the server reads into `<html data-skin>`, so the first paint is already the right skin — a client-only switch would flash the default on every load. An unrecognised cookie value falls back to the default rather than being echoed into the page.
 
 **Member pages.** `/member/<name>` gathers what the channel already knows about a sharer — their songs, the days they named (`themes.set_by`), the artists they repeat, the span they've been around. Names arrive as typed on the mesh, so lookups are `COLLATE NOCASE` and the page titles itself with the spelling that member uses most; the URL's spelling is never echoed. Radio filler carries the seed track's sender but nobody posted it, so `source != 'radio'` runs through every member query.
+
+**Artist pages.** `/artist/<name>` is the member page turned around: an artist's songs (one row per video, most-shared first), who posts them, and the days they came up. The artist is oEmbed's `author_name`, which is the YouTube *channel*, and a YouTube Music share link resolves to an auto-generated `<Artist> - Topic` channel while a plain video link names the artist's own — so the suffix is folded away in one SQL expression (`db/browse.py`, `ARTIST_SQL`) and its Python twin (`artist_name`), and lookups are `COLLATE NOCASE`, so both spellings and any case reach one page. Other channel-name variants (`…VEVO`) are left alone: guessing at them would merge artists that aren't the same. Day, member and stats pages link artist names here; search results are left to the search page. The queries live in their own mixin (`BrowseQueries`) rather than `archive.py`, and scan rather than use an index — the expression can't use one, and the tracks table is thousands of rows, not millions.
+
+**Weekly recap.** `/week/<sunday>` sums up one Sunday-to-Saturday week (the calendar's rows): each day's theme and who set it, the busiest day, top sharers and artists, members whose first-ever share fell that week, and songs first posted before it. `/week` is the newest week with songs, with its canonical link pointing at the dated page; any other date in a week 301s to its Sunday, so a day page links its week without working out the date and each week keeps one URL. Prev/next step only between weeks with songs, and the sitemap lists every one. The summary is a pure function (`web/recap.py`, `summarize_week`) over one `tracks_between` query, plus each member's first day (`sender_first_days`, behind the TTL — it aggregates all of history) and the week's songs' first days. Names are grouped lowercased, as member pages match them, so a retyped name is neither a second sharer nor a newcomer. `/weekly.xml` carries the newest `WEEKLY_FEED_WEEKS` (12) *finished* weeks, newest first: a week still running would change under a reader that had already shown it, so an entry appears once, stamped at the week's close, and keeps its page as its id. It reuses `feed.py`'s escaping, and `base.html` advertises it beside `/feed.xml`.
 
 **Link previews.** A day of the channel gets pasted into a chat far more often than it gets browsed, and an unfurled card was blank. `base.html` builds Open Graph and Twitter tags for every page, and the day route fills them with the theme, the song count, and the day's first track as `og:image`. `absolute_url` honours `x-forwarded-proto`, because the hosted deployment terminates TLS upstream and would otherwise advertise `http://` URLs. `robots.txt` keeps crawlers off the API, partials, audio and search; `sitemap.xml` lists every archived day. The 404 is `noindex` and points its canonical at the site root rather than reflecting the path that missed. With `[web] public_url` set, `absolute_url` takes the authority from config instead of the request's `Host` header — a canonical link is a statement about where the page lives, and a spoofed `Host` must not be able to make one. For iOS "Add to Home Screen", `base.html` pins `apple-mobile-web-app-title` and links a real 180×180 opaque PNG (`apple-touch-icon.png`): iOS ignores SVG icons and fills transparency black, and without these it names the app after the page `<title>` — on Now Playing, the day's theme — and draws a letter tile.
 

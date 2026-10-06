@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
 from .. import __version__
 from .context import (
@@ -23,6 +23,15 @@ from .context import (
     yt_thumbnail,
 )
 from .feed import build_feed
+from .recap import (
+    build_weekly_feed,
+    summarize_week,
+    week_end,
+    week_label,
+    week_start,
+    week_starts,
+    week_summary_line,
+)
 
 router = APIRouter()
 
@@ -141,6 +150,7 @@ async def archive_day(request: Request, date: str):
             "prev_day": max((d for d in days if d < date), default=None),
             "next_day": min((d for d in days if d > date), default=None),
             "month": date[:7],
+            "week": week_start(date),
             # A day is the unit people paste into a chat, so give the unfurl
             # something to say: the theme, the count, and the day's first song
             # as the picture.
@@ -207,6 +217,92 @@ async def member(request: Request, name: str):
     )
 
 
+@router.get("/artist/{name:path}", response_class=HTMLResponse)
+async def artist(request: Request, name: str):
+    """Everything the channel has posted by one artist, and who posts it.
+
+    The artist is whatever YouTube's oEmbed named as the video's channel, with
+    YouTube Music's "- Topic" suffix folded away so a Music share and a plain
+    video link land on the same page. ``:path`` for the same reason as the
+    member route: a name may carry a slash."""
+    ctx = ctx_of(request)
+    canonical = await ctx.db.artist_lookup(name)
+    if canonical is None:
+        raise HTTPException(404, "no songs by that artist")
+    profile = await ctx.db.artist_profile(canonical)
+    songs = await ctx.db.artist_songs(canonical)
+    shares = profile.get("shares") or 0
+    sharers = profile.get("sharers") or 0
+    return ctx.templates.TemplateResponse(
+        request,
+        "artist.html",
+        {
+            "name": canonical,
+            "profile": profile,
+            "songs": songs,
+            "sharers": await ctx.db.artist_sharers(canonical),
+            "themes": await ctx.db.artist_themes(canonical),
+            "yt_export_url": yt_export_url(songs),
+            "meta_description": (
+                f"{canonical} has come up {shares} {'time' if shares == 1 else 'times'}, "
+                f"shared by {sharers} {'member' if sharers == 1 else 'members'} "
+                "of the Austin mesh #music channel."
+            ),
+            "meta_image": yt_thumbnail(songs[0]["video_id"] if songs else None),
+        },
+    )
+
+
+async def _week_page(request: Request, start: str | None):
+    ctx = ctx_of(request)
+    starts = week_starts(await ctx.archive_days())
+    if start is None:
+        if not starts:
+            return ctx.templates.TemplateResponse(request, "week.html", {"week": None})
+        start = starts[-1]
+    rows = await ctx.db.tracks_between(start, week_end(start))
+    if not rows:
+        raise HTTPException(404, "no songs that week")
+    song_firsts = await ctx.db.song_first_days(sorted({r["video_id"] for r in rows}))
+    week = summarize_week(start, rows, await ctx.sender_first_days(), song_firsts)
+    return ctx.templates.TemplateResponse(
+        request,
+        "week.html",
+        {
+            "week": week,
+            "prev_week": max((s for s in starts if s < start), default=None),
+            "next_week": min((s for s in starts if s > start), default=None),
+            "week_label": week_label,
+            "meta_description": week_summary_line(week),
+            "meta_image": yt_thumbnail(rows[0]["video_id"]),
+            # /week moves every Sunday; the dated page is the one to keep.
+            "meta_url": absolute_url(request, f"/week/{start}"),
+        },
+    )
+
+
+@router.get("/week", response_class=HTMLResponse)
+async def week_latest(request: Request):
+    """The newest week with songs in it."""
+    return await _week_page(request, None)
+
+
+@router.get("/week/{date}", response_class=HTMLResponse)
+async def week(request: Request, date: str):
+    """One Sunday-to-Saturday week. Any date in it finds it: a day page links
+    its own date's week without working out the Sunday, and the redirect
+    keeps one URL per week."""
+    if not ISO_DATE.fullmatch(date):
+        raise HTTPException(404, "no such week")
+    try:
+        start = week_start(date)
+    except ValueError:
+        raise HTTPException(404, "no such week") from None
+    if start != date:
+        return RedirectResponse(f"/week/{start}", status_code=301)
+    return await _week_page(request, start)
+
+
 @router.get("/about", response_class=HTMLResponse)
 async def about(request: Request):
     return ctx_of(request).templates.TemplateResponse(
@@ -231,10 +327,13 @@ async def robots(request: Request):
 
 @router.get("/sitemap.xml")
 async def sitemap(request: Request):
-    """Every archived day is a page worth finding — that's the whole archive."""
+    """Every archived day is a page worth finding — that's the whole archive —
+    and so is every week's recap."""
     ctx = ctx_of(request)
-    paths = ["/", "/archive", "/archive/themes", "/stats", "/about"]
-    paths += [f"/archive/{d['date']}" for d in await ctx.archive_days()]
+    days = await ctx.archive_days()
+    paths = ["/", "/archive", "/archive/themes", "/week", "/stats", "/about"]
+    paths += [f"/archive/{d['date']}" for d in days]
+    paths += [f"/week/{s}" for s in week_starts(days)]
     urls = "".join(f"<url><loc>{absolute_url(request, p)}</loc></url>" for p in paths)
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -254,6 +353,23 @@ async def feed(request: Request):
             await ctx.recent_days_tracks(),
             feed_url=absolute_url(request, "/feed.xml"),
             site_url=absolute_url(request, "/"),
+            day_url=lambda date: absolute_url(request, f"/archive/{date}"),
+        ),
+        media_type="application/atom+xml",
+    )
+
+
+@router.get("/weekly.xml")
+async def weekly_feed(request: Request):
+    """The recap as an Atom feed: one entry per finished week, so a
+    subscriber gets a digest instead of a post a day."""
+    ctx = ctx_of(request)
+    return Response(
+        build_weekly_feed(
+            await ctx.finished_weeks(),
+            feed_url=absolute_url(request, "/weekly.xml"),
+            site_url=absolute_url(request, "/"),
+            week_url=lambda start: absolute_url(request, f"/week/{start}"),
             day_url=lambda date: absolute_url(request, f"/archive/{date}"),
         ),
         media_type="application/atom+xml",

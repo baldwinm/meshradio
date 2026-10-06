@@ -30,6 +30,18 @@ async def seed_day(db, date, video_id):
     )
 
 
+async def share(db, date, video_id, sender, title="Song", artist=None, theme=None,
+                set_by=None, source="mesh"):
+    """One song posted to a day (creating the day's theme on first use)."""
+    row = await db.create_theme(date, theme or f"theme {date}", set_by=set_by)
+    track = await db.add_track(
+        video_id=video_id, url="u", channel="#music", sender=sender,
+        mesh_ts=time.time(), source=source, theme_id=row["id"],
+    )
+    await db.update_track_metadata(track["id"], title=title, artist=artist, duration=60)
+    return await db.track_by_id(track["id"])
+
+
 async def make_ready_track(db: Database, video_id: str, duration: float = 0.05):
     """A cached, titled track on 2026-07-06, posted just now. (A fixed
     timestamp here aged past the player's live window mid-session once and
