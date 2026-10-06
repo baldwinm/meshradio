@@ -9,11 +9,6 @@
     <label for="password">Password
       <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
     </label>
-    {% if two_step %}
-    <label for="code">Authenticator code
-      <input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" required>
-    </label>
-    {% endif %}
     <button class="btn primary" type="submit">Sign in</button>
   </form>
 </div>

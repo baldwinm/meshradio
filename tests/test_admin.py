@@ -7,6 +7,7 @@ logged, and that the undoable ones really undo."""
 import asyncio
 import base64
 import json
+import re
 import sqlite3
 import time
 from argparse import Namespace
@@ -87,10 +88,36 @@ def test_five_failures_pause_one_address_for_the_window():
     throttle = LoginThrottle(max_failures=5, window_s=900)
     for i in range(5):
         assert throttle.locked_for("1.2.3.4", 1000 + i) == 0
-        throttle.fail("1.2.3.4", 1000 + i)
+        throttle.begin("1.2.3.4", 1000 + i)
     assert throttle.locked_for("1.2.3.4", 1010) > 0
     assert throttle.locked_for("5.6.7.8", 1010) == 0
     assert throttle.locked_for("1.2.3.4", 1000 + 901) == 0
+
+
+def test_guesses_spread_over_many_addresses_still_meet_a_ceiling():
+    throttle = LoginThrottle(max_failures=5, window_s=900, global_max=20)
+    for i in range(20):
+        throttle.begin(f"10.0.0.{i}", 1000 + i)        # one guess per address
+    assert throttle.locked_for("192.0.2.1", 1030) > 0  # a fresh address too
+    assert throttle.locked_for("192.0.2.1", 1000 + 901) == 0
+
+
+def test_an_attempt_counts_before_its_answer_is_known():
+    # Parallel guesses can't all slip past the check while scrypt runs.
+    throttle = LoginThrottle(max_failures=5, window_s=900)
+    for _ in range(5):
+        throttle.begin("1.2.3.4", 1000)
+    assert throttle.locked_for("1.2.3.4", 1000) > 0
+    # A right one is taken back, but leaves the earlier failures standing.
+    other = LoginThrottle(max_failures=5, window_s=900)
+    for i in range(4):
+        other.begin("1.2.3.4", 1000 + i)
+    other.begin("1.2.3.4", 1010)
+    other.passed("1.2.3.4", 1010)
+    other.begin("1.2.3.4", 1011)
+    assert other.locked_for("1.2.3.4", 1012) > 0
+    other.succeed("1.2.3.4", 1011)
+    assert other.locked_for("1.2.3.4", 1012) == 0
 
 
 # -- getting in ---------------------------------------------------------------
@@ -177,18 +204,119 @@ async def test_a_form_without_its_csrf_token_is_refused(db, bus, tmp_path):
     assert (await db.latest_theme_for_date(DAY))["title"] == "water"
 
 
-async def test_two_step_sign_in_needs_a_fresh_code(db, bus, tmp_path):
+def _code_for(secret, now=None):
+    return totp_at(secret, int((now or time.time()) // 30))
+
+
+def _wrong(code):
+    return "000000" if code != "000000" else "111111"
+
+
+async def _enter_code(client, code):
+    page = await client.get("/admin/login/code")
+    csrf = re.search(r'name="csrf" value="([0-9a-f]+)"', page.text).group(1)
+    return await client.post("/admin/login/code", data={"csrf": csrf, "code": code})
+
+
+async def test_the_password_page_never_mentions_a_code(db, bus, tmp_path):
+    plain = _app(db, bus, tmp_path)
+    two_step = _app(db, bus, tmp_path, totp_secret=new_totp_secret())
+    pages = []
+    for app in (plain, two_step):
+        async with client_for(app, visited=False) as client:
+            page = (await client.get("/admin/login")).text
+            assert "code" not in page.lower()
+            wrong = await sign_in(client, password="nope")
+            pages.append((page, wrong.status_code, wrong.text))
+    # A wrong password reads the same with or without a second step.
+    assert pages[0] == pages[1]
+
+
+async def test_the_code_comes_only_after_the_right_password(db, bus, tmp_path):
     secret = new_totp_secret()
     app = _app(db, bus, tmp_path, totp_secret=secret)
-    code = totp_at(secret, int(time.time() // 30))
     async with client_for(app, visited=False) as client:
-        assert "Authenticator code" in (await client.get("/admin/login")).text
-        assert (await sign_in(client)).status_code == 401                # no code
-        assert (await sign_in(client, code="000000" if code != "000000" else "111111")
-                ).status_code == 401
-        assert (await sign_in(client, code=code)).status_code == 303
-    async with client_for(app, visited=False) as other:
-        assert (await sign_in(other, code=code)).status_code == 401      # replayed
+        # No way to the code page, or to trying a code, without the password.
+        resp = await client.get("/admin/login/code")
+        assert resp.status_code == 303 and resp.headers["location"] == "/admin/login"
+        resp = await client.post("/admin/login/code", data={"code": _code_for(secret)})
+        assert resp.status_code == 303 and "mr_admin=" not in resp.headers.get("set-cookie", "")
+
+        resp = await client.post(
+            "/admin/login", data={"password": ADMIN_PASSWORD, "next": "/admin/days"}
+        )
+        assert resp.headers["location"] == "/admin/login/code"
+        cookie = resp.headers["set-cookie"].lower()
+        assert "mr_admin_step=" in cookie and "path=/admin/login" in cookie
+        assert "httponly" in cookie and "samesite=strict" in cookie
+        assert "mr_admin" not in client.cookies
+        assert (await client.get("/admin")).status_code == 303   # not signed in yet
+
+        resp = await _enter_code(client, _code_for(secret))
+        assert resp.status_code == 303 and resp.headers["location"] == "/admin/days"
+        assert (await client.get("/admin")).status_code == 200
+    actions = [e["action"] for e in await db.admin_log_entries("sign-ins")]
+    assert actions == ["sign_in"]
+
+
+async def test_a_wrong_code_is_logged_as_a_known_password(db, bus, tmp_path):
+    secret = new_totp_secret()
+    async with client_for(_app(db, bus, tmp_path, totp_secret=secret), visited=False) as client:
+        await sign_in(client)
+        resp = await _enter_code(client, _wrong(_code_for(secret)))
+        assert resp.status_code == 401 and "code didn" in resp.text
+    [entry] = await db.admin_log_entries("sign-ins")
+    assert entry["action"] == "sign_in_code_failed"
+
+
+async def test_three_wrong_codes_send_you_back_to_the_password(db, bus, tmp_path):
+    secret = new_totp_secret()
+    async with client_for(_app(db, bus, tmp_path, totp_secret=secret), visited=False) as client:
+        await sign_in(client)
+        wrong = _wrong(_code_for(secret))
+        assert (await _enter_code(client, wrong)).status_code == 401
+        assert (await _enter_code(client, wrong)).status_code == 401
+        last = await _enter_code(client, wrong)
+        assert last.status_code == 401 and "Start again" in last.text
+        assert 'name="password"' in last.text
+        # The step is gone: even the right code needs the password again.
+        resp = await client.get("/admin/login/code")
+        assert resp.status_code == 303 and resp.headers["location"] == "/admin/login"
+
+
+async def test_a_right_password_buys_no_fresh_tries(db, bus, tmp_path):
+    secret = new_totp_secret()
+    async with client_for(_app(db, bus, tmp_path, totp_secret=secret), visited=False) as client:
+        for _ in range(4):
+            assert (await sign_in(client, password="nope")).status_code == 401
+        await sign_in(client)                                   # right password
+        resp = await _enter_code(client, _wrong(_code_for(secret)))  # fifth failure
+        assert resp.status_code == 401
+        assert (await sign_in(client)).status_code == 429
+
+
+async def test_the_code_step_belongs_to_one_address(db, bus, tmp_path):
+    secret = new_totp_secret()
+    app = _app(db, bus, tmp_path, totp_secret=secret)
+    async with client_for(app, visited=False) as client:
+        await sign_in(client)
+        step = client.cookies["mr_admin_step"]
+    async with peer(app, "198.51.100.7") as other:
+        other.cookies.set("mr_admin_step", step, path="/admin/login")
+        resp = await other.get("/admin/login/code")
+        assert resp.status_code == 303 and resp.headers["location"] == "/admin/login"
+
+
+async def test_a_used_code_stays_used_across_a_restart(db, bus, tmp_path):
+    secret = new_totp_secret()
+    code = _code_for(secret)
+    async with client_for(_app(db, bus, tmp_path, totp_secret=secret), visited=False) as client:
+        await sign_in(client)
+        assert (await _enter_code(client, code)).status_code == 303
+    # A fresh process: nothing in memory remembers that code.
+    async with client_for(_app(db, bus, tmp_path, totp_secret=secret), visited=False) as client:
+        await sign_in(client)
+        assert (await _enter_code(client, code)).status_code == 401
 
 
 async def test_robots_keeps_crawlers_off_admin(db, bus):

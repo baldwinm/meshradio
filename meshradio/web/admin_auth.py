@@ -7,6 +7,11 @@ exist at all. Two-step sign-in adds a time-based code from an authenticator
 app (RFC 6238, ``MESHRADIO_ADMIN_TOTP_SECRET``). Everything here is the
 standard library: no new dependency for the appliance to carry.
 
+Sign-in is two steps when a code is configured, and the first never says so:
+the password page looks the same either way, and only a right password leads
+to the code page. That page is held by its own short-lived cookie, so the
+code can't be tried without the password having passed first.
+
 A successful sign-in issues a random cookie scoped to ``/admin``; the
 database keeps only its hash. Forms carry a CSRF token derived from it, on
 top of the origin guard every POST already passes.
@@ -26,6 +31,9 @@ from urllib.parse import quote
 
 ADMIN_COOKIE = "mr_admin"
 ADMIN_PATH = "/admin"
+# Held between a right password and its code, and sent only to the code page.
+STEP_COOKIE = "mr_admin_step"
+STEP_PATH = f"{ADMIN_PATH}/login"
 
 # A sign-in lasts at most this long, and ends sooner after this much idle.
 SESSION_MAX_S = 12 * 3600
@@ -34,6 +42,15 @@ SESSION_IDLE_S = 30 * 60
 # Wrong passwords (or codes) from one address before sign-in pauses for it.
 MAX_FAILURES = 5
 LOCKOUT_S = 15 * 60
+# Wrong tries from every address together before sign-in pauses for all of
+# them: a guesser spreading over many addresses (or forging its address
+# behind a proxy) still meets a ceiling. It's well above what one person
+# mistyping makes, and the CLI still works while it holds.
+GLOBAL_MAX_FAILURES = 50
+
+# A right password opens the code page for this long, for this many codes.
+STEP_TTL_S = 5 * 60
+STEP_MAX_TRIES = 3
 
 # scrypt's cost: 16 MiB and about 50 ms a check, which is what OWASP's
 # password storage guidance names for scrypt at its lowest recommended setting.
@@ -185,39 +202,135 @@ def csrf_token(session_token: str) -> str:
 
 
 class LoginThrottle:
-    """Failed sign-ins per address, in memory. Five inside the lockout window
-    pause that address for the rest of it. A restart forgets — the rate
-    limiter and scrypt's cost still bound a guesser across one."""
+    """Failed sign-ins in memory: per address, and across all of them. Five
+    from one address inside the lockout window pause that address for the
+    rest of it; ``GLOBAL_MAX_FAILURES`` from everywhere pause everyone. A
+    restart forgets — the rate limiter and scrypt's cost still bound a
+    guesser across one.
 
-    def __init__(self, max_failures: int = MAX_FAILURES, window_s: float = LOCKOUT_S) -> None:
+    An attempt counts against the limits as it starts (``begin``), not when
+    it fails: scrypt runs off the event loop, so a burst of parallel guesses
+    would otherwise all pass the check before the first one was counted.
+    ``passed`` takes back an attempt that turned out right."""
+
+    GLOBAL = "*"
+
+    def __init__(
+        self,
+        max_failures: int = MAX_FAILURES,
+        window_s: float = LOCKOUT_S,
+        global_max: int = GLOBAL_MAX_FAILURES,
+    ) -> None:
         self.max_failures = max_failures
         self.window_s = window_s
+        self.global_max = global_max
         self._failures: dict[str, deque[float]] = {}
 
-    def _recent(self, ip: str, now: float) -> deque[float]:
-        times = self._failures.get(ip, deque())
+    def _recent(self, key: str, now: float) -> deque[float]:
+        times = self._failures.get(key, deque())
         while times and now - times[0] >= self.window_s:
             times.popleft()
         return times
 
+    def _wait(self, key: str, limit: int, now: float) -> float:
+        times = self._recent(key, now)
+        if len(times) < limit:
+            return 0.0
+        return max(0.0, self.window_s - (now - times[-limit]))
+
     def locked_for(self, ip: str, now: float) -> float:
         """Seconds until ``ip`` may try again; 0 when it may now."""
-        times = self._recent(ip, now)
-        if len(times) < self.max_failures:
-            return 0.0
-        return max(0.0, self.window_s - (now - times[-self.max_failures]))
+        return max(
+            self._wait(ip, self.max_failures, now),
+            self._wait(self.GLOBAL, self.global_max, now),
+        )
 
-    def fail(self, ip: str, now: float) -> None:
-        times = self._recent(ip, now)
-        times.append(now)
-        self._failures[ip] = times
+    def begin(self, ip: str, now: float) -> None:
+        """Count an attempt as a failure until it proves otherwise."""
+        for key in (ip, self.GLOBAL):
+            times = self._recent(key, now)
+            times.append(now)
+            self._failures[key] = times
         if len(self._failures) > 10_000:
             self._failures = {
                 k: v for k, v in self._failures.items() if v and now - v[-1] < self.window_s
             }
 
-    def succeed(self, ip: str) -> None:
+    def passed(self, ip: str, now: float) -> None:
+        """The attempt ``begin`` counted at ``now`` was right: uncount it.
+        The address's earlier failures stand, so a right password doesn't
+        buy fresh tries at the code."""
+        for key in (ip, self.GLOBAL):
+            times = self._failures.get(key)
+            if times and now in times:
+                times.remove(now)
+
+    def succeed(self, ip: str, now: float) -> None:
+        """Fully signed in: the address starts clean (the global count
+        keeps everyone else's failures)."""
+        self.passed(ip, now)
         self._failures.pop(ip, None)
+
+
+@dataclass
+class PendingSignIn:
+    """A right password waiting for its code."""
+
+    created: float
+    ip: str
+    landing: str
+    fingerprint: str
+    tries: int = 0
+
+
+class PendingSignIns:
+    """Code pages opened by a right password, keyed by the hash of the step
+    cookie. In memory: a restart just sends the operator back to the
+    password, and there's never more than a handful."""
+
+    MAX = 100
+
+    def __init__(self, ttl_s: float = STEP_TTL_S) -> None:
+        self.ttl_s = ttl_s
+        self._pending: dict[str, PendingSignIn] = {}
+
+    def open(self, ip: str, landing: str, fingerprint: str, now: float) -> str:
+        """A new step token for the cookie."""
+        self._prune(now)
+        while len(self._pending) >= self.MAX:
+            self._pending.pop(next(iter(self._pending)))
+        token = new_session_token()
+        self._pending[token_hash(token)] = PendingSignIn(now, ip, landing, fingerprint)
+        return token
+
+    def get(self, token: str | None, ip: str, fingerprint: str, now: float
+            ) -> PendingSignIn | None:
+        """The waiting sign-in for ``token``, if it's still good for this
+        address and this password."""
+        if not token:
+            return None
+        key = token_hash(token)
+        pending = self._pending.get(key)
+        if pending is None:
+            return None
+        if (
+            now - pending.created > self.ttl_s
+            or pending.fingerprint != fingerprint
+            or pending.ip != ip
+            or pending.tries >= STEP_MAX_TRIES
+        ):
+            self._pending.pop(key, None)
+            return None
+        return pending
+
+    def close(self, token: str | None) -> None:
+        if token:
+            self._pending.pop(token_hash(token), None)
+
+    def _prune(self, now: float) -> None:
+        self._pending = {
+            k: v for k, v in self._pending.items() if now - v.created <= self.ttl_s
+        }
 
 
 @dataclass
@@ -233,6 +346,7 @@ class AdminSettings:
     config: Any = None
     relay: Any = None
     throttle: LoginThrottle = field(default_factory=LoginThrottle)
+    pending: PendingSignIns = field(default_factory=PendingSignIns)
     last_totp_counter: int = -1
 
     @property
