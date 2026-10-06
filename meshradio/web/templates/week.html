@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "partials/thumb.html" import thumb %}
+{% block title %}{% if week %}Week of {{ week.label }}{% else %}Weekly recap{% endif %} · MeshRadio{% endblock %}
+{% block content %}
+{% if week %}
+<h2>Week of {{ week.label }}</h2>
+{# Weeks with songs only, as the calendar steps months with songs. #}
+<nav class="day-steps" aria-label="Recap weeks">
+  {% if prev_week %}
+  <a class="cal-step" href="/week/{{ prev_week }}" rel="prev"
+     title="The week before ({{ week_label(prev_week) }})">← Earlier</a>
+  {% else %}
+  <span class="cal-step cal-step-off" aria-hidden="true">←</span>
+  {% endif %}
+  <a class="day-month" href="/archive?m={{ week.start[:7] }}" title="Back to the month">📅 Calendar</a>
+  {% if next_week %}
+  <a class="cal-step" href="/week/{{ next_week }}" rel="next"
+     title="The week after ({{ week_label(next_week) }})">Later →</a>
+  {% else %}
+  <span class="cal-step cal-step-off" aria-hidden="true">→</span>
+  {% endif %}
+</nav>
+<div class="stat-tiles">
+  <div class="stat"><span class="stat-n">{{ week.shares }}</span><span class="stat-l">shares</span></div>
+  <div class="stat"><span class="stat-n">{{ week.songs }}</span><span class="stat-l">songs</span></div>
+  <div class="stat"><span class="stat-n">{{ week.sharers }}</span><span class="stat-l">sharers</span></div>
+  <div class="stat"><span class="stat-n">{{ week.days|length }}</span><span class="stat-l">days</span></div>
+</div>
+{% if week.busiest %}
+<p class="cal-hint">Busiest day: <a href="/archive/{{ week.busiest.date }}">{{ week.busiest.weekday }}
+  {{ week.busiest.date }}</a> with {{ week.busiest.tracks }} songs.</p>
+{% endif %}
+
+<h3>The week's themes</h3>
+<ol class="board board-plain">
+  {% for d in week.days %}
+  <li><a class="board-name" href="/archive/{{ d.date }}">{{ d.weekday }} · {{ d.themes|join(" · ") or "No theme" }}</a>
+    <span class="board-val">{{ d.tracks }} {{ "song" if d.tracks == 1 else "songs" }}{% if d.set_by %} · set by {{ d.set_by }}{% endif %}</span></li>
+  {% endfor %}
+</ol>
+
+{% if week.new_faces %}
+<h3>New on the channel</h3>
+<p>{% for n in week.new_faces %}<a href="/member/{{ n|urlencode }}">{{ n }}</a>{{ ", " if not loop.last }}{% endfor %}
+  shared for the first time.</p>
+{% endif %}
+
+<h3>Most shares</h3>
+<ol class="board">
+  {% for s in week.top_sharers %}
+  <li><a class="board-name" href="/member/{{ s.sender|urlencode }}">{{ s.sender }}</a>
+    <span class="board-val">{{ s.shares }}×</span></li>
+  {% endfor %}
+</ol>
+
+{% if week.top_artists %}
+<h3>Top artists</h3>
+<ol class="board">
+  {% for a in week.top_artists %}
+  <li><a class="board-name" href="/artist/{{ a.artist|urlencode }}">{{ a.artist }}</a>
+    <span class="board-val">{{ a.shares }}×</span></li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+{% if week.heard_before %}
+<h3>Heard before</h3>
+<ol class="results">
+  {% for tr in week.heard_before %}
+  <li>
+    {{ thumb(tr) }}
+    <span class="title">{{ tr.title or tr.video_id }}</span>
+    <a class="day-link" href="/archive/{{ tr.first_day }}">first on {{ tr.first_day }}</a>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+{% else %}
+<h2>Weekly recap</h2>
+<p class="empty">No songs yet.</p>
+{% endif %}
+{% endblock %}

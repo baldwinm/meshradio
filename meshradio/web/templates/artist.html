@@ -6,8 +6,8 @@
 <div class="stat-tiles">
   <div class="stat"><span class="stat-n">{{ profile.shares or 0 }}</span><span class="stat-l">shares</span></div>
   <div class="stat"><span class="stat-n">{{ profile.songs or 0 }}</span><span class="stat-l">songs</span></div>
+  <div class="stat"><span class="stat-n">{{ profile.sharers or 0 }}</span><span class="stat-l">sharers</span></div>
   <div class="stat"><span class="stat-n">{{ profile.days or 0 }}</span><span class="stat-l">days</span></div>
-  <div class="stat"><span class="stat-n">{{ themes|length }}</span><span class="stat-l">themes set</span></div>
 </div>
 {% if profile.first_day %}
 <p class="cal-hint">
@@ -20,42 +20,35 @@
   <a href="/archive/{{ profile.last_day }}">{{ profile.last_day }}</a>{% endif %}.</p>
 {% endif %}
 
-{% if artists %}
-<h3>On repeat</h3>
+{% if sharers %}
+<h3>Shared most by</h3>
 <ol class="board">
-  {% for a in artists %}
-  <li><a class="board-name" href="/artist/{{ a.artist|urlencode }}">{{ a.artist }}</a>
-    <span class="board-val">{{ a.shares }}×</span></li>
+  {% for s in sharers %}
+  <li><a class="board-name" href="/member/{{ s.sender|urlencode }}">{{ s.sender }}</a>
+    <span class="board-val">{{ s.shares }}×</span></li>
   {% endfor %}
 </ol>
 {% endif %}
 
+<h3>Songs</h3>
+<ol class="results">
+  {% for s in songs %}
+  <li>
+    {{ thumb(s) }}
+    <a class="title" href="https://youtu.be/{{ s.video_id }}" target="_blank" rel="noopener">{{ s.title }}</a>
+    <span class="artist">{{ s.shares }}×</span>
+    <a class="day-link" href="/archive/{{ s.last_day }}">last on {{ s.last_day }}</a>
+  </li>
+  {% endfor %}
+</ol>
+
 {% if themes %}
-<h3>Themes they set</h3>
+<h3>Themes they turned up in</h3>
 <ol class="board board-plain">
   {% for t in themes %}
   <li><a class="board-name" href="/archive/{{ t.date }}">{{ t.title }}</a>
     <span class="board-val">{{ t.date }} · {{ t.tracks }} {{ "song" if t.tracks == 1 else "songs" }}</span></li>
   {% endfor %}
 </ol>
-{% endif %}
-
-<h3>Songs shared</h3>
-{% if tracks %}
-<ol class="results">
-  {% for tr in tracks %}
-  <li>
-    {{ thumb(tr) }}
-    <span class="title">{{ tr.title or tr.video_id }}</span>
-    {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
-    <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
-    {% if tr.cache_status == "ready" %}
-    <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>
-    {% endif %}
-  </li>
-  {% endfor %}
-</ol>
-{% else %}
-<p class="empty">Nothing shared yet.</p>
 {% endif %}
 {% endblock %}

@@ -24,6 +24,8 @@
   {# Feed readers and browsers look for this on any page the visitor lands on. #}
   <link rel="alternate" type="application/atom+xml" title="MeshRadio — daily themes and songs"
         href="{{ absolute_url(request, '/feed.xml') }}">
+  <link rel="alternate" type="application/atom+xml" title="MeshRadio — weekly recap"
+        href="{{ absolute_url(request, '/weekly.xml') }}">
   <meta property="og:site_name" content="MeshRadio">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ og_title }}">

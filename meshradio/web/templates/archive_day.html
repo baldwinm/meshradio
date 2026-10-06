@@ -14,6 +14,7 @@
   <span class="cal-step cal-step-off" aria-hidden="true">←</span>
   {% endif %}
   <a class="day-month" href="/archive?m={{ month }}" title="Back to the month">📅 Calendar</a>
+  <a class="day-month" href="/week/{{ week }}" title="This day's week, summed up">📰 Week</a>
   {% if next_day %}
   <a class="cal-step" href="/archive/{{ next_day }}" rel="next"
      title="The day after ({{ next_day }})">{{ next_day }} →</a>
@@ -40,7 +41,7 @@
     <li>
       {{ thumb(track) }}
       <span class="title">{{ track.title or track.video_id }}</span>
-      {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
+      {% if track.artist %}<span class="artist">— <a href="/artist/{{ track.artist|urlencode }}">{{ track.artist }}</a></span>{% endif %}
       <span class="sender">({% if track.sender %}<a href="/member/{{ track.sender|urlencode }}">{{ track.sender }}</a>{% else %}?{% endif %})</span>
       {% if track.cache_status == "ready" %}
         <button hx-post="/api/queue/{{ track.id }}" hx-swap="none">+ queue</button>

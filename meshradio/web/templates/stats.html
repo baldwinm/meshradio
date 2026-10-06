@@ -2,6 +2,8 @@
 {% block title %}Channel stats · MeshRadio{% endblock %}
 {% block content %}
 <h2>Channel stats</h2>
+<p class="cal-hint"><a class="cal-swap" href="/week">📰 This week</a>
+  The whole channel, all time. The weekly recap sums up one week at a time.</p>
 <div class="stat-tiles">
   <div class="stat"><span class="stat-n">{{ totals.songs or 0 }}</span><span class="stat-l">songs</span></div>
   <div class="stat"><span class="stat-n">{{ totals.shares or 0 }}</span><span class="stat-l">shares</span></div>
@@ -20,6 +22,16 @@
   {% endfor %}
 </ol>
 {% else %}<p class="empty">No shares yet.</p>{% endif %}
+
+<h3>Top artists</h3>
+{% if top_artists %}
+<ol class="board">
+  {% for a in top_artists %}
+  <li><a class="board-name" href="/artist/{{ a.artist|urlencode }}">{{ a.artist }}</a>
+    <span class="board-val">{{ a.shares }} shares · {{ a.sharers }} {{ "person" if a.sharers == 1 else "people" }}</span></li>
+  {% endfor %}
+</ol>
+{% else %}<p class="empty">No artists yet.</p>{% endif %}
 
 <h3>Most-shared songs</h3>
 {% if top_songs %}

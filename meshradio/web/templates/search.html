@@ -37,7 +37,7 @@
     <li>
       {{ thumb(tr) }}
       <span class="title">{{ tr.title or tr.video_id }}</span>
-      {% if tr.artist %}<span class="artist">— {{ tr.artist }}</span>{% endif %}
+      {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
       <span class="sender">({% if tr.sender %}<a href="/member/{{ tr.sender|urlencode }}">{{ tr.sender }}</a>{% else %}?{% endif %})</span>
       {# A song shared again is one row: say how often rather than repeating it. #}
       {% if tr.shares > 1 %}
