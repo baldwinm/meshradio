@@ -23,12 +23,14 @@ services:
     autoDeployTrigger: checksPass
     healthCheckPath: /healthz
     # Persists ./data (meshradio.db lives here; data_dir in
-    # meshradio.render.toml resolves to /opt/render/project/src/data). Small:
-    # embed mode stores only metadata rows, never downloaded audio.
+    # meshradio.render.toml resolves to /opt/render/project/src/data). Embed
+    # mode stores only metadata rows, never downloaded audio, so 1 GB would
+    # do, but the live disk is already 5 GB and Render can grow a disk but
+    # never shrink it: a smaller sizeGB here fails every blueprint sync.
     disk:
       name: meshradio-data
       mountPath: /opt/render/project/src/data
-      sizeGB: 1
+      sizeGB: 5
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
