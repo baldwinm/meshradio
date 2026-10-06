@@ -36,6 +36,11 @@ ISO_DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 SEARCH_LIMIT = 100
 # The longest query searched; nobody types more, and the page echoes it.
 SEARCH_MAX_CHARS = 200
+# A member filter is a mesh name, which the archive stores at 64 characters.
+SEARCH_NAME_MAX_CHARS = 64
+# A year filter is four digits or it is nothing. Anything else is dropped
+# rather than 404'd: a stale link should still return the search it names.
+SEARCH_YEAR = re.compile(r"\A\d{4}\Z")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -154,16 +159,34 @@ async def archive_day(request: Request, date: str):
 
 
 @router.get("/search", response_class=HTMLResponse)
-async def search(request: Request, q: str = ""):
+async def search(request: Request, q: str = "", member: str = "", year: str = ""):
     """Results are capped; ask for one more than we show so the page can say
-    the list is cut off instead of reporting the cap as the total."""
+    the list is cut off instead of reporting the cap as the total.
+
+    A filter is a search in its own right — "everything Ana shared in 2026"
+    names no song — so the query runs whenever any of the three is set, and
+    the filters stay in the URL so a narrowed search is a link."""
     ctx = ctx_of(request)
     q = q.strip()[:SEARCH_MAX_CHARS].strip()
-    rows = await ctx.db.search_tracks(q, limit=SEARCH_LIMIT + 1) if q else []
+    member = member.strip()[:SEARCH_NAME_MAX_CHARS]
+    year = year if SEARCH_YEAR.match(year) else ""
+    rows = (
+        await ctx.db.search_tracks(
+            q, limit=SEARCH_LIMIT + 1, sender=member or None, year=year or None
+        )
+        if (q or member or year) else []
+    )
     return ctx.templates.TemplateResponse(
         request,
         "search.html",
-        {"q": q, "results": rows[:SEARCH_LIMIT], "more": len(rows) > SEARCH_LIMIT},
+        {
+            "q": q,
+            "member": member,
+            "year": year,
+            "filters": await ctx.search_filters(),
+            "results": rows[:SEARCH_LIMIT],
+            "more": len(rows) > SEARCH_LIMIT,
+        },
     )
 
 
