@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from .helpers import client_for, counting, make_ready_on, page_app, seed_day
+from .helpers import client_for, counting, embed_app, make_ready_on, page_app, seed_day
 
 GZIP = {"accept-encoding": "gzip"}
 HTML = {"accept": "text/html,application/xhtml+xml"}
@@ -277,3 +277,17 @@ def test_asset_version_follows_content_not_mtime(tmp_path, monkeypatch):
     assert server_mod._asset_version() == first
     (static / "style.css").write_text("body{margin:0}")
     assert server_mod._asset_version() != first
+
+
+@pytest.mark.parametrize("headers", [{}, {"HX-Request": "true", "HX-Boosted": "true"}])
+async def test_equalizer_is_device_only(db, bus, headers):
+    """The EQ shapes this tab's Web Audio graph, which embed hosting's YouTube
+    iframe never feeds — so the public site must not render it, whether Now
+    Playing is a first load or a boosted hop back from the Archive."""
+    async with client_for(embed_app(db, bus)) as client:
+        await client.get("/archive", headers=headers)
+        hosted = (await client.get("/", headers=headers)).text
+    async with client_for(page_app(db, bus)) as client:
+        appliance = (await client.get("/", headers=headers)).text
+    assert 'id="eq-window"' not in hosted
+    assert 'id="eq-window"' in appliance

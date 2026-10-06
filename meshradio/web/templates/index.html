@@ -11,6 +11,11 @@
   {% include "partials/now_playing.html" %}
 </div>
 
+{# Device-only: the EQ shapes the Web Audio graph this tab plays through, and
+   on embed hosting the audio lives inside YouTube's iframe where it can't
+   reach. Gate it here, not in JS: a boosted navigation back to Now Playing
+   renders this page fresh, and a client-side hide only ran on state pushes. #}
+{% if not embed_mode %}
 <details id="eq-window" class="eq-window">
   <summary>Equalizer</summary>
   <div class="eq-body">
@@ -44,6 +49,7 @@
     </div>
   </div>
 </details>
+{% endif %}
 
 <h2>Queue</h2>
 <div id="queue">
