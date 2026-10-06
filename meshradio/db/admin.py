@@ -23,7 +23,7 @@ from .tracks import TrackQueries
 LOG_RETENTION_DAYS = 365
 
 # Log entries by kind, for the activity log's filter.
-SIGN_IN_ACTIONS = ("sign_in", "sign_in_failed", "sign_out")
+SIGN_IN_ACTIONS = ("sign_in", "sign_in_failed", "sign_in_code_failed", "sign_out")
 
 
 class AdminQueries(TrackQueries):

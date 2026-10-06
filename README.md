@@ -442,8 +442,17 @@ it as `MESHRADIO_ADMIN_TOTP_SECRET`. Without a hash every `/admin` URL is a 404.
 
 What keeps it safe:
 
-- **Sign-in.** A wrong password (or code) is logged, and five from one address
-  pause sign-in from it for 15 minutes. Signing in sets a cookie scoped to
+- **Sign-in.** The sign-in page asks only for the password, and looks the
+  same whether or not two-step is on: the code is asked for on a page of its
+  own that only a right password opens (for five minutes, three codes, from
+  the same address). A wrong password is logged, and a wrong code is logged
+  apart ("Right password, wrong code"), since it means the password is known.
+  Five failures from one address pause sign-in from it for 15 minutes, and 50
+  from all addresses together pause it for everyone, so guesses spread over
+  many addresses still meet a limit. Each attempt counts before its answer is
+  known, so parallel guesses can't slip past, and a right password doesn't
+  reset the count until the code is right too. A used code stays used across
+  a restart. Signing in sets a cookie scoped to
   `/admin` (HttpOnly, `SameSite=Strict`, Secure over https) that lasts at most
   12 hours and ends after 30 idle minutes; the archive keeps only its hash.
   Every form carries a CSRF token on top of the cross-site guard every POST
