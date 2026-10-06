@@ -325,3 +325,22 @@ def _kill(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is None:
         with contextlib.suppress(ProcessLookupError):
             proc.kill()
+
+
+def drop_cache_file(cache_dir: str | Path, track: dict[str, Any]) -> Path | None:
+    """Delete a removed song's cached audio, if this node downloaded one, and
+    return the path that went.
+
+    Best-effort and confined to the cache directory: a stale or hand-edited
+    cache_path must not turn a track deletion into an arbitrary unlink."""
+    path = track.get("cache_path")
+    if not path:
+        return None
+    root = Path(cache_dir).resolve()
+    try:
+        target = Path(path).resolve()
+        target.relative_to(root)
+        target.unlink()
+    except (OSError, ValueError):
+        return None
+    return target

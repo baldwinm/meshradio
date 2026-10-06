@@ -12,10 +12,11 @@ import httpx
 
 from meshradio.audio.routing import make_router
 from meshradio.bus import EventBus
-from meshradio.config import PlayerConfig
+from meshradio.config import Config, PlayerConfig
 from meshradio.db import Database
 from meshradio.ingest.service import IngestService
 from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
+from meshradio.web.admin_auth import AdminSettings, csrf_token, hash_password
 from meshradio.web.server import create_app
 
 # -- tracks -------------------------------------------------------------------
@@ -244,3 +245,40 @@ class Socket:
         await self.inbox.put({"type": "websocket.disconnect", "code": 1000})
         await asyncio.wait_for(self.task, 2)
         await asyncio.sleep(0.02)              # the leave broadcast to the others
+
+
+# -- the admin page -----------------------------------------------------------
+
+ADMIN_PASSWORD = "correct horse battery"
+
+
+def admin_settings(tmp_path, totp_secret="", **config_overrides):
+    """Admin on, with a cheap hash (scrypt at N=16: the real cost is for
+    production, not for a test that signs in forty times) and a config whose
+    data directory is the test's own."""
+    config = Config(data_dir=tmp_path)
+    for key, value in config_overrides.items():
+        section, name = key.split("__")
+        setattr(getattr(config, section), name, value)
+    return AdminSettings(
+        password_hash=hash_password(ADMIN_PASSWORD, n=16),
+        totp_secret=totp_secret,
+        config=config,
+    )
+
+
+async def sign_in(client, password=ADMIN_PASSWORD, code=None):
+    """Post the sign-in form; returns the response (a 303 on success)."""
+    data = {"password": password}
+    if code is not None:
+        data["code"] = code
+    return await client.post("/admin/login", data=data)
+
+
+def csrf_for(client) -> str:
+    return csrf_token(client.cookies["mr_admin"])
+
+
+async def admin_post(client, path, **data):
+    """A signed-in admin's form post, CSRF token included."""
+    return await client.post(path, data={"csrf": csrf_for(client), **data})

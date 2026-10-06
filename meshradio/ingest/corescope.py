@@ -387,3 +387,38 @@ async def probe(
 def _describe(exc: BaseException) -> str:
     text = str(exc).strip()
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
+def format_probe(report: FeedProbe) -> list[str]:
+    """A probe report as the lines the CLI prints and the admin page shows."""
+    lines = []
+    if report.channels_error:
+        lines.append(f"channel listing failed: {report.channels_error}")
+    elif report.channels:
+        listed = ", ".join(report.channels[:12])
+        more = f", … ({len(report.channels)} in all)" if len(report.channels) > 12 else ""
+        lines.append(f"channels listed: {listed}{more}")
+        if report.channel_listed is False:
+            lines.append(
+                f"{report.channel} is NOT among them — check [corescope]/[comchan] channel"
+            )
+    if not report.ok and not report.served:
+        lines.append(f"FAILED after {report.elapsed_s:.1f}s: {report.error}")
+        return lines
+    total = "unknown" if report.total is None else f"{report.total:,}"
+    lines.append(f"messages: {total} on the analyzer; newest page served {report.served}, "
+                 f"{report.parsed} parse")
+    if report.fields:
+        lines.append("fields: " + ", ".join(report.fields))
+    if report.newest:
+        lines.append("newest:")
+        for msg in report.newest:
+            text = msg["text"].replace("\n", " ")
+            if len(text) > 72:
+                text = text[:71] + "…"
+            lines.append(f"  {msg['first_seen'] or '(no first_seen)'}  {msg['sender']}: {text}")
+    if report.ok:
+        lines.append(f"ok ({report.elapsed_s:.1f}s)")
+    else:
+        lines.append(f"FAILED: {report.error}")
+    return lines

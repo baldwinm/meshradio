@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -60,6 +61,9 @@ class RelayPusher(Service):
         self.config = config
         self.db = db
         self.tz = ZoneInfo(tz)
+        # The last push as the admin page's Feeds screen shows it: when, and
+        # either the receiver's answer or what went wrong.
+        self.status: dict[str, Any] = {}
 
     async def _run(self) -> None:
         async with http_client(
@@ -70,13 +74,16 @@ class RelayPusher(Service):
                 try:
                     await self.push_once(client)
                 except httpx.HTTPStatusError as exc:
+                    self.status = {"at": time.time(), "ok": False,
+                                   "error": f"HTTP {exc.response.status_code}"}
                     log.error(
                         "relay push: HTTP %d from %s; server said: %.200s",
                         exc.response.status_code,
                         exc.request.url,
                         exc.response.text,
                     )
-                except Exception:
+                except Exception as exc:
+                    self.status = {"at": time.time(), "ok": False, "error": type(exc).__name__}
                     log.exception("relay push failed")
                 await asyncio.sleep(self.config.interval_s)
 
@@ -111,6 +118,8 @@ class RelayPusher(Service):
                 log.warning("relay: receiver's track count is %r, not a number", remote_total)
             remote_total = None
         local_total = await self.db.relay_track_total()
+        self.status = {"at": time.time(), "ok": True, "pushed": len(messages),
+                       "remote_total": remote_total, "local_total": local_total}
         if remote_total is not None and remote_total < local_total:
             log.warning(
                 "relay: receiver has %d tracks vs %d local — wiped? re-backfilling",

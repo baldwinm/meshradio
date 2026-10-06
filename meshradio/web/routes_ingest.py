@@ -89,6 +89,7 @@ async def api_ingest(request: Request):
                 except (KeyError, TypeError, ValueError, OverflowError):
                     continue  # skip malformed entries, keep the batch going
     ctx.health["last_ingest"] = time.time()
+    ctx.health.setdefault("feeds", {})["relay"] = {"status": "ok", "at": time.time()}
     # Total lets the pusher detect a wiped DB (ephemeral hosting) and reset
     # its cursor for a full re-backfill.
     return JSONResponse({

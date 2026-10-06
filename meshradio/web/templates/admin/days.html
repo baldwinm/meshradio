@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block title %}Days{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Days</h1>
+  <nav class="tabs" aria-label="Which days">
+    <a href="/admin/days"{% if not untitled %} aria-current="page"{% endif %}>By month</a>
+    <a href="/admin/days?untitled=1"{% if untitled %} aria-current="page"{% endif %}>Untitled only</a>
+  </nav>
+</div>
+{% if months %}
+<nav class="tabs" aria-label="Month">
+  {% for m in months[:18] %}
+  <a href="/admin/days?month={{ m }}"{% if m == month %} aria-current="page"{% endif %}>{{ m }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Day</th><th>Theme</th><th>Songs</th><th></th></tr></thead>
+    <tbody>
+    {% for d in days %}
+      <tr>
+        <td class="mono">{{ d.date }}</td>
+        <td>{{ d.titles }}{% if d.titles.startswith("Untitled — ") %} <span class="chip warn">untitled</span>{% endif %}</td>
+        <td>{{ d.tracks }}</td>
+        <td class="actions"><a class="btn" href="/admin/days/{{ d.date }}">Open</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">{{ "Every day with songs has a theme." if untitled else "No days yet." }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

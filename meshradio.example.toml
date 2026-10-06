@@ -73,6 +73,11 @@ trusted_proxies = ["127.0.0.1"] # reverse proxies whose X-Forwarded-For/-Proto t
                                 # the proxy is the only way in; leave as is on a LAN appliance
 rate_limit = true               # per-client ceilings on presses and searches (30 then 10/s;
                                 # 15 then 3/s); false only behind a proxy that enforces its own
+admin_password_hash = ""        # turns on /admin: the hash `meshradio --hash-admin-password`
+                                # prints (never the password); prefer the
+                                # MESHRADIO_ADMIN_PASSWORD_HASH env var
+admin_totp_secret = ""          # two-step admin sign-in: `meshradio --new-totp-secret`;
+                                # prefer the MESHRADIO_ADMIN_TOTP_SECRET env var
 
 [relay]
 # Mirror this node's channel history to a hosted instance that can't poll

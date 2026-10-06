@@ -7,11 +7,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import getpass
 import logging
 import sqlite3
 import sys
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import backup as backup_mod
@@ -19,8 +19,10 @@ from .app import run
 from .config import ConfigError, load_config, validate_config
 from .db import MAX_TITLE, VIDEO_ID_RE, Database, clean_text
 from .ingest import parse
-from .ingest.corescope import probe
+from .ingest.corescope import format_probe, probe
+from .media.cacher import drop_cache_file
 from .net import http_client
+from .web.admin_auth import hash_password, new_totp_secret, otpauth_uri
 
 log = logging.getLogger("meshradio")
 
@@ -64,8 +66,24 @@ def main() -> None:
                              "list the channel, and does its API still parse? "
                              "'corescope', 'comchan', or both when the name is left off. "
                              "Exits non-zero if a probed feed fails.")
+    parser.add_argument("--hash-admin-password", action="store_true",
+                        help="ask for an admin password and print the hash to set as "
+                             "MESHRADIO_ADMIN_PASSWORD_HASH (or [web] admin_password_hash); "
+                             "the admin page at /admin exists only once one is set")
+    parser.add_argument("--new-totp-secret", action="store_true",
+                        help="print a new secret for two-step admin sign-in, to set as "
+                             "MESHRADIO_ADMIN_TOTP_SECRET and add to an authenticator app")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+
+    # Neither needs a config: they print a value for the operator to set.
+    if args.hash_admin_password:
+        raise SystemExit(_run_hash_admin_password())
+    if args.new_totp_secret:
+        secret = new_totp_secret()
+        print(secret)
+        print(f"authenticator link: {otpauth_uri(secret)}")
+        raise SystemExit(0)
 
     # Mesh sender names and theme titles carry emoji; keep Windows dev
     # consoles (cp1252) from raising on every log line that includes one.
@@ -107,6 +125,22 @@ def main() -> None:
 
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run(config, demo=args.demo))
+
+
+def _run_hash_admin_password() -> int:
+    """Handle --hash-admin-password: read a password twice, print its hash."""
+    password = getpass.getpass("Admin password: ")
+    if len(password) < 12:
+        print("use at least 12 characters", file=sys.stderr)
+        return 1
+    if getpass.getpass("Again: ") != password:
+        print("the two didn't match", file=sys.stderr)
+        return 1
+    print(hash_password(password))
+    print("Set that as MESHRADIO_ADMIN_PASSWORD_HASH (Render: Environment; the Pi: "
+          "/etc/meshradio/env) and restart. Setting a new one signs every browser out.",
+          file=sys.stderr)
+    return 0
 
 
 def _run_backup_cli(config, args) -> int:
@@ -164,6 +198,7 @@ async def _run_set_theme(config, args) -> int:
             theme = await db.create_theme(
                 date, title, raw_message=f"Theme: {title}", locked=True
             )
+            await db.log_admin("create_theme", actor="cli", target=date, after=title)
             print(f"{date}: no theme existed — created {theme['title']!r}")
             return 0
         if existing["title"] == title:
@@ -175,6 +210,11 @@ async def _run_set_theme(config, args) -> int:
             print(f"{date} already has a different theme row titled {title!r}; "
                   f"rename or remove it first", file=sys.stderr)
             return 1
+        await db.log_admin(
+            "rename_theme", actor="cli", target=date,
+            before=existing["title"], after=theme["title"],
+            undo={"theme_id": theme["id"], "title": existing["title"]},
+        )
         count = len(await db.tracks_for_theme(theme["id"]))
         plural = "" if count == 1 else "s"
         print(f"{date}: {existing['title']!r} -> {theme['title']!r} ({count} song{plural} kept)")
@@ -236,9 +276,15 @@ async def _run_delete_track(config, args) -> int:
             deleted = await db.delete_track(track["id"])
             assert deleted is not None
             label = deleted["title"] or deleted["url"]
+            await db.log_admin(
+                "remove_track", actor="cli", target=date, before=label, after="removed",
+                undo={"date": date, "video_id": deleted["video_id"]},
+            )
             print(f"{date}: removed {label} ({deleted['video_id']}, "
                   f"shared by {deleted['sender']})")
-            _drop_cache_file(config, deleted)
+            dropped = drop_cache_file(config.cache_dir, deleted)
+            if dropped is not None:
+                print(f"  cached audio removed ({dropped.name})")
             if theme_id is not None and await db.delete_empty_placeholder(theme_id):
                 print(f"{date}: the day's empty 'Untitled —' placeholder went with it")
         print("It won't come back: a replayed channel message for it is now ignored, "
@@ -273,63 +319,11 @@ async def _run_probe_feed(config, args) -> int:
         print(f"{name}: {feed.base_url}  {feed.channel}{state}")
         async with http_client(base_url=feed.base_url) as client:
             report = await probe(client, feed.channel, name=name)
-        for line in _format_probe(report):
+        for line in format_probe(report):
             print(f"  {line}")
         if not report.ok:
             failed += 1
     return 1 if failed else 0
-
-
-def _format_probe(report) -> list[str]:
-    lines = []
-    if report.channels_error:
-        lines.append(f"channel listing failed: {report.channels_error}")
-    elif report.channels:
-        listed = ", ".join(report.channels[:12])
-        more = f", … ({len(report.channels)} in all)" if len(report.channels) > 12 else ""
-        lines.append(f"channels listed: {listed}{more}")
-        if report.channel_listed is False:
-            lines.append(
-                f"{report.channel} is NOT among them — check [corescope]/[comchan] channel"
-            )
-    if not report.ok and not report.served:
-        lines.append(f"FAILED after {report.elapsed_s:.1f}s: {report.error}")
-        return lines
-    total = "unknown" if report.total is None else f"{report.total:,}"
-    lines.append(f"messages: {total} on the analyzer; newest page served {report.served}, "
-                 f"{report.parsed} parse")
-    if report.fields:
-        lines.append("fields: " + ", ".join(report.fields))
-    if report.newest:
-        lines.append("newest:")
-        for msg in report.newest:
-            text = msg["text"].replace("\n", " ")
-            if len(text) > 72:
-                text = text[:71] + "…"
-            lines.append(f"  {msg['first_seen'] or '(no first_seen)'}  {msg['sender']}: {text}")
-    if report.ok:
-        lines.append(f"ok ({report.elapsed_s:.1f}s)")
-    else:
-        lines.append(f"FAILED: {report.error}")
-    return lines
-
-
-def _drop_cache_file(config, track: dict) -> None:
-    """Delete the removed song's cached audio, if this node downloaded one.
-
-    Best-effort and confined to the cache directory: a stale or hand-edited
-    cache_path must not turn a track deletion into an arbitrary unlink."""
-    path = track.get("cache_path")
-    if not path:
-        return
-    cache_dir = Path(config.cache_dir).resolve()
-    try:
-        target = Path(path).resolve()
-        target.relative_to(cache_dir)
-        target.unlink()
-    except (OSError, ValueError):
-        return
-    print(f"  cached audio removed ({target.name})")
 
 
 if __name__ == "__main__":

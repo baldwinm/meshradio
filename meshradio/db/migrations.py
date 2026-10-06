@@ -344,4 +344,45 @@ MIGRATIONS: list[str] = [
         INSERT INTO themes_fts(rowid, title) VALUES (new.id, new.title);
     END;
     """,
+    # v14 — the admin page (web/routes_admin.py).
+    #
+    # admin_log: every sign-in and every change made from /admin or the
+    # operator CLI, with the value before and after, so the archive's hand
+    # edits read straight through and the undoable ones can be undone.
+    # admin_sessions: signed-in admin browsers, by the hash of their cookie
+    # (the cookie itself is never stored). artist_aliases: spellings the
+    # operator merged into one; ingest maps a new song's artist through it.
+    # tracks.meta_edited_at: set when the operator corrects a title or artist
+    # by hand, so a late oEmbed answer or a relay re-push can't put the wrong
+    # one back. deleted_tracks.track_json: the removed track as it was, so a removal
+    # can be put back exactly instead of waiting for the channel to replay it.
+    """
+    CREATE TABLE admin_log (
+        id INTEGER PRIMARY KEY,
+        at TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        ip TEXT,
+        action TEXT NOT NULL,
+        target TEXT,
+        before TEXT,
+        after TEXT,
+        undo TEXT,
+        undone_by INTEGER
+    );
+    CREATE INDEX idx_admin_log_at ON admin_log(at);
+    CREATE TABLE admin_sessions (
+        token_hash TEXT PRIMARY KEY,
+        created_at REAL NOT NULL,
+        seen_at REAL NOT NULL,
+        ip TEXT,
+        key_fp TEXT NOT NULL
+    );
+    CREATE TABLE artist_aliases (
+        alias TEXT PRIMARY KEY COLLATE NOCASE,
+        canonical TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    ALTER TABLE tracks ADD COLUMN meta_edited_at TEXT;
+    ALTER TABLE deleted_tracks ADD COLUMN track_json TEXT;
+    """,
 ]

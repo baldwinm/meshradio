@@ -1,0 +1,27 @@
+{% extends "admin/base.html" %}
+{% block title %}Remove song{% endblock %}
+{% block body %}
+<div class="center">
+  <form class="card wide" method="post" action="/admin/tracks/{{ track.id }}/remove">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <h1>Remove “{{ track.title or track.video_id }}” from {{ date }}?</h1>
+    {% if error %}<div class="notice bad" role="alert">{{ error }}</div>{% endif %}
+    <div class="small">
+      <p>This removes:</p>
+      <ul class="effects">
+        <li>the song from the day's playlist, search, and artist pages</li>
+        <li>its {{ plays }} recorded play{{ "" if plays == 1 else "s" }}</li>
+      </ul>
+      <p>It keeps a note that stops the song coming back when the channel is read again. You can lift it under Removed songs, and the activity log keeps an Undo.</p>
+      <p class="muted">A backup is taken first. Anyone who already has it queued hears it out.</p>
+    </div>
+    <label for="confirm"><span>Type <b class="mono">{{ date }}</b> to confirm</span>
+      <input id="confirm" name="confirm" type="text" autocomplete="off" data-confirm-value="{{ date }}" required>
+    </label>
+    <div class="row">
+      <a class="btn" href="/admin/days/{{ date }}">Keep it</a>
+      <button class="btn danger solid" type="submit" data-confirm-button>Remove song</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

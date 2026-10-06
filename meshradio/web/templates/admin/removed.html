@@ -1,0 +1,33 @@
+{% extends "admin/base.html" %}
+{% block title %}Removed songs{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Removed songs</h1>
+  <p class="small muted">These stay out even when the channel's history is read again.</p>
+</div>
+{% include "admin/_banner.html" %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Day</th><th>Song</th><th>Shared by</th><th>Removed</th><th></th></tr></thead>
+    <tbody>
+    {% for r in removed %}
+      <tr>
+        <td class="mono">{{ r.date }}</td>
+        <td>{{ r.title or r.video_id }}</td>
+        <td>{{ r.sender or "—" }}</td>
+        <td>{{ r.deleted_at|when(tz) }}</td>
+        <td class="actions">
+          <form method="post" action="/admin/removed/{{ r.date }}/{{ r.video_id }}/restore">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn" type="submit">{{ "Put back" if r.track_json else "Allow back" }}</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">Nothing has been removed.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="small muted"><b>Put back</b> returns the song to its day straight away, with its title and artist; its plays aren't restored. <b>Allow back</b> is for older removals that didn't keep the song's details: it lifts the block, and the song returns the next time the channel's whole history is read.</p>
+{% endblock %}

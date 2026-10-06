@@ -1,0 +1,61 @@
+{% extends "admin/base.html" %}
+{% block title %}Artists{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>Artist names</h1>
+  <span class="chip dim">{{ groups|length }} look-alike group{{ "" if groups|length == 1 else "s" }}</span>
+</div>
+{% include "admin/_banner.html" %}
+<p class="small muted">Songs carry the artist name YouTube gave them, which varies ("Beatles", "The Beatles", "The Beatles - Topic"). Merging respells every song under one name and remembers the spelling, so new songs with it are respelled too. Each merge can be undone from the activity log.</p>
+{% for g in groups %}
+<form class="panel" method="post" action="/admin/artists/merge">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="row">
+    {% for s in g.spellings %}
+    <label class="check"><input type="checkbox" name="spelling" value="{{ s.artist }}" checked> {{ s.artist }} <span class="muted">({{ s.songs }})</span></label>
+    {% endfor %}
+  </div>
+  <div class="row">
+    <label class="grow" for="canonical-{{ loop.index }}">Show as
+      <input id="canonical-{{ loop.index }}" name="canonical" type="text" value="{{ g.suggested }}" maxlength="256" required>
+    </label>
+    <button class="btn primary" type="submit">Merge</button>
+    <button class="btn" type="submit" formaction="/admin/artists/ignore" formnovalidate name="key" value="{{ g.key }}">Different artists</button>
+  </div>
+</form>
+{% else %}
+<p class="panel muted">No spellings look alike.</p>
+{% endfor %}
+<form class="panel" method="post" action="/admin/artists/merge">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>Merge two names by hand</h2>
+  <p class="small muted">For names that don't look alike but are one artist, like "Sinatra" and "Frank Sinatra".</p>
+  <datalist id="artist-names">
+    {% for s in spellings[:2000] %}<option value="{{ s.artist }}">{% endfor %}
+  </datalist>
+  <div class="row">
+    <label class="grow" for="from-name">Fold this name
+      <input id="from-name" name="spelling" type="text" list="artist-names" maxlength="256" required>
+    </label>
+    <label class="grow" for="into-name">into this one
+      <input id="into-name" name="canonical" type="text" list="artist-names" maxlength="256" required>
+    </label>
+    <button class="btn primary" type="submit">Merge</button>
+  </div>
+</form>
+{% if aliases %}
+<section>
+  <h2>Merged spellings</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Spelling</th><th>Shown as</th><th>Since</th></tr></thead>
+      <tbody>
+      {% for a in aliases %}
+        <tr><td>{{ a.alias }}</td><td>{{ a.canonical }}</td><td>{{ a.created_at|when(tz) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

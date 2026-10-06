@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+{% block title %}Feeds{% endblock %}
+{% block main %}
+<div class="top"><h1>Feeds</h1></div>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Source</th><th>Status</th><th>Last report</th><th>Last good answer</th><th></th></tr></thead>
+    <tbody>
+    {% for f in feeds %}
+      <tr>
+        <td>{{ f.label }}{% if f.detail %}<br><span class="muted small mono">{{ f.detail }}</span>{% endif %}</td>
+        <td><span class="chip {{ f.state }}">{{ f.status }}</span></td>
+        <td>{{ f.at|when(tz) if f.at else "—" }}</td>
+        <td>{{ f.last_ok|when(tz) if f.last_ok else "—" }}</td>
+        <td class="actions">
+          {% if f.probe %}
+          <form method="post" action="/admin/feeds/{{ f.name }}/probe">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn" type="submit">Probe</button>
+          </form>
+          {% elif f.resend %}
+          <form method="post" action="/admin/feeds/relay/resend">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn" type="submit">Re-send everything</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% if result %}
+<section class="panel">
+  <h2>Probe result · {{ result.name }} <span class="chip {{ 'ok' if result.ok else 'bad' }}">{{ "OK" if result.ok else "Failed" }}</span></h2>
+  <pre class="probe">{% for line in result.lines %}{{ line }}
+{% endfor %}</pre>
+</section>
+{% endif %}
+<p class="small muted">A probe asks the feed for its newest page from this server, the same check as <code>meshradio --probe-feed</code>. It never writes to the archive.{% if feeds|selectattr("name", "equalto", "relay-push")|list %} <b>Re-send everything</b> makes the next relay push send the whole channel to the public site again.{% endif %}</p>
+{% endblock %}

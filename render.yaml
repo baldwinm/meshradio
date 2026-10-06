@@ -36,3 +36,7 @@ services:
       # history here). Copy the generated value into the Pi's [relay] token.
       - key: MESHRADIO_INGEST_TOKEN
         generateValue: true
+      # The admin page (/admin) is off until MESHRADIO_ADMIN_PASSWORD_HASH is
+      # set in the dashboard to what `meshradio --hash-admin-password` prints
+      # (and, for two-step sign-in, MESHRADIO_ADMIN_TOTP_SECRET). Not declared
+      # here, so a blueprint sync never touches them.

@@ -28,6 +28,7 @@ from .media.radio import RadioService
 from .runtime import spawn
 from .system.power import StaticPowerMonitor, UpsPowerMonitor
 from .ui.panel import make_panel
+from .web.admin_auth import AdminSettings
 from .web.server import create_app
 
 log = logging.getLogger("meshradio")
@@ -141,9 +142,11 @@ async def run(config, demo: bool = False) -> None:
                 config.comchan, ingest, db, bus, name="comchan", source="comchan"
             )
         )
+    relay = None
     if config.relay.push_url and config.relay.token:
         try:
-            services.append(RelayPusher(config.relay, db, tz=config.player.timezone))
+            relay = RelayPusher(config.relay, db, tz=config.player.timezone)
+            services.append(relay)
         except ValueError as exc:
             # A misconfigured relay must not take the radio down with it (or
             # loop the systemd unit); it just doesn't push until fixed.
@@ -174,6 +177,16 @@ async def run(config, demo: bool = False) -> None:
                 events_out=out_bus,        # announces state only to its session
             )
 
+    # The admin page exists only with a password hash configured (§9).
+    admin = None
+    if config.web.admin_password_hash:
+        admin = AdminSettings(
+            password_hash=config.web.admin_password_hash,
+            totp_secret=config.web.admin_totp_secret,
+            config=config,
+            relay=relay,
+        )
+
     web_app = create_app(
         bus,
         db,
@@ -188,6 +201,7 @@ async def run(config, demo: bool = False) -> None:
         csp_report_only=config.web.csp_report_only,
         trusted_proxies=config.web.trusted_proxies,
         rate_limit=config.web.rate_limit,
+        admin=admin,
     )
     server = uvicorn.Server(
         uvicorn.Config(
