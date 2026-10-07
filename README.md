@@ -408,6 +408,12 @@ able to drive it:
   it in `[web] trusted_proxies` (`["*"]` on a host like Render, where the proxy
   is the only way in) so the limiter sees visitors' real addresses and an
   `X-Forwarded-Proto` is believed; a header from any other peer is ignored.
+  If the proxy appends to an `X-Forwarded-For` the visitor sent rather than
+  replacing it, as Render's does, also set `[web] proxy_hops` to the number of
+  proxies in front (2 on Render): the address is then read that many entries
+  from the right, where a visitor can't write, instead of from the left,
+  where anyone can. The admin overview's **This connection** panel shows the
+  header as it arrives, to check the number against.
 - **Pin the host name** with `[web] allowed_hosts` (`["meshradio.local",
   "192.168.1.20"]`) to keep DNS-rebinding pages away from a LAN radio. Empty
   means any host, which an appliance reached by IP, `.local` name and
@@ -445,6 +451,15 @@ it as `MESHRADIO_ADMIN_TOTP_SECRET`. Without a hash every `/admin` URL is a 404.
 
 What keeps it safe:
 
+- **Where to sign in.** The public site is https end to end: the browser
+  encrypts the password before it leaves your device, Render redirects plain
+  http to https, the site sends `Strict-Transport-Security` once `public_url`
+  is an `https://` address, and the admin cookie is Secure, HttpOnly and
+  `SameSite=Strict`. Sign in there from any network. The Pi serves plain http,
+  so its sign-in page warns that the password would cross the network
+  unencrypted: use it on your own network or over a VPN such as Tailscale,
+  or put it behind an https proxy. The overview's **This connection** panel
+  says which you're on and which address the sign-in limits see.
 - **Sign-in.** The sign-in page asks only for the password, and looks the
   same whether or not two-step is on: the code is asked for on a page of its
   own that only a right password opens (for five minutes, three codes, from
@@ -649,6 +664,7 @@ meshradio/
 └── web/             # FastAPI app split into:
     ├── server.py        # create_app: assembly, lifespan, sessions, origin guard, CSP headers
     ├── context.py       # WebContext shared state on app.state (+ short-TTL archive caches)
+    ├── proxy.py         # visitor address from X-Forwarded-For, counted from the right
     ├── sessions.py      # per-visitor session players + speaker registry
     ├── routes_pages.py  # HTML pages (now playing, archive, search, stats, members, artists, weeks…) + htmx partials
     ├── routes_api.py    # player/queue control API

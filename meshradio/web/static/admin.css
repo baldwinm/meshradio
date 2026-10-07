@@ -39,6 +39,7 @@ h1 { font-size: 22px; }
 h2 { font-size: 17px; }
 p { margin: 0; }
 code, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.9em; }
+.conn code { overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 

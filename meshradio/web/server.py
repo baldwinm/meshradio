@@ -43,6 +43,7 @@ from ..runtime import supervise
 from . import routes_admin, routes_api, routes_ingest, routes_pages, ws
 from .admin_auth import ADMIN_PATH, AdminSettings
 from .context import WebContext, absolute_url, forwarded_scheme
+from .proxy import ForwardedClient
 from .ratelimit import RateLimiter
 from .sessions import (
     MAX_SOCKETS_COMMUNAL,
@@ -308,6 +309,7 @@ def create_app(
     security_headers: bool = True,
     csp_report_only: bool = False,
     trusted_proxies: Sequence[str] = ("127.0.0.1",),
+    proxy_hops: int = 0,
     rate_limit: bool = True,
     admin: AdminSettings | None = None,
 ) -> FastAPI:
@@ -491,4 +493,8 @@ def create_app(
             report_only=csp_report_only,
             hsts=public_url.startswith("https://"),
         )
+    if proxy_hops:
+        # Before anything reads the client's address or scheme: the rate
+        # limits, the admin sign-in throttle, the Secure cookie flag.
+        app.add_middleware(ForwardedClient, hops=proxy_hops, trusted=list(trusted_proxies))
     return app

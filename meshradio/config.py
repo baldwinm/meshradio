@@ -118,6 +118,12 @@ class WebConfig:
     # except through its proxy, and wrong for a LAN appliance anyone can
     # connect to directly.
     trusted_proxies: list = field(default_factory=lambda: ["127.0.0.1"])
+    # How many proxies stand between the visitor and the app, for reading
+    # their address off X-Forwarded-For from the right (see web/proxy.py).
+    # 0 keeps uvicorn's reading, which takes the leftmost entry: fine for a
+    # proxy that overwrites the header, forgeable behind one that appends
+    # to it, as Render's does.
+    proxy_hops: int = 0
     # Per-client ceilings on presses (POSTs) and searches — see
     # web/ratelimit.py. Off only behind a proxy that already enforces its own.
     rate_limit: bool = True
@@ -211,6 +217,7 @@ _INTS: list[tuple[str, str, int | None, int | None]] = [
     ("cache", "retry_backoff_s", 0, None),
     ("cache", "concurrency", 1, None),
     ("web", "port", 1, 65535),
+    ("web", "proxy_hops", 0, None),
     ("relay", "interval_s", 1, None),
     ("backup", "interval_s", 1, None),
     ("backup", "keep", 0, None),

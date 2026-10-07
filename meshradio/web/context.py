@@ -92,9 +92,13 @@ def proxy_trusted(request: Request) -> bool:
     """Did this request come through a proxy whose forwarding headers we
     believe (``[web] trusted_proxies``)? With uvicorn's own proxy handling on
     the same list, a trusted proxy has already been replaced by the visitor
-    in ``request.client``; what's left to check here is the direct peer."""
+    in ``request.client``; what's left to check here is the direct peer —
+    which web/proxy.py keeps as ``request.state.peer`` when it does the
+    replacing."""
     trusted = getattr(request.app.state, "trusted_proxies", frozenset({"127.0.0.1"}))
-    peer = request.client.host if request.client else ""
+    peer = getattr(request.state, "peer", None)
+    if peer is None:
+        peer = request.client.host if request.client else ""
     return "*" in trusted or peer in trusted
 
 

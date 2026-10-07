@@ -34,6 +34,13 @@ port = 8080   # Render overrides this via --port $PORT
 # the env var wins over this line.
 public_url = "https://meshradio.onrender.com"
 # Nothing reaches the app except through Render's proxy, so its forwarding
-# headers are the truth: the visitor's address (what the rate limiter keys
-# on) and that they arrived over https.
+# headers are believed: the visitor's address (what the rate limiter and the
+# admin sign-in throttle key on) and that they arrived over https.
 trusted_proxies = ["*"]
+# But Render's proxy appends to an X-Forwarded-For the visitor sent rather
+# than replacing it, so only the right-hand entries are Render's own. Its
+# users report the visitor's address arrives second from the right; reading
+# the leftmost (uvicorn's way with "*") let anyone name their own address
+# and walk around the rate limits. Admin -> Overview -> "This connection"
+# shows the chain as it arrives, to check this number against.
+proxy_hops = 2
