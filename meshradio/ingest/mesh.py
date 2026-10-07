@@ -44,7 +44,7 @@ class MeshIngest(Service):
 
         Reconnects with backoff on serial errors — RF nodes get unplugged.
         NOTE: written against the published `meshcore` (meshcore-py) API;
-        validate on real hardware before the v0.1 image build.
+        validate on real hardware before the first image build.
         """
         backoff = 5
         while True:

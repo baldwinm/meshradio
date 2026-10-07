@@ -1,6 +1,6 @@
 [project]
 name = "meshradio"
-version = "0.1.0"
+version = "0.9.0"
 description = "A standalone internet radio that plays the Austin MeshCore #music channel."
 readme = "README.md"
 license = { file = "LICENSE" }
