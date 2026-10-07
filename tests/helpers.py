@@ -217,7 +217,15 @@ class Socket:
     async def open(self):
         await self.inbox.put({"type": "websocket.connect"})
         self.task = asyncio.create_task(self.app(self.scope, self.inbox.get, self._send))
-        await asyncio.sleep(0.05)              # let the handshake and first push run
+        # Wait for the handshake's answer rather than a fixed time: the first
+        # one writes the session secret, which a slow CI runner can take past
+        # any fixed sleep. Then a moment more for the first push.
+        deadline = asyncio.get_running_loop().time() + 2
+        while not self.sent and not self.task.done():
+            if asyncio.get_running_loop().time() > deadline:
+                break
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0.05)
         return self
 
     async def _send(self, message):
