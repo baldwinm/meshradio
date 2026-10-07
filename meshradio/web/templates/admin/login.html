@@ -4,6 +4,7 @@
 <div class="center">
   <form class="card" method="post" action="/admin/login">
     <h1>MeshRadio admin</h1>
+    {% if plain_http %}<div class="notice warn">This page isn't https, so your password crosses the network unencrypted. Sign in here only on your own network or over a VPN.</div>{% endif %}
     {% if error %}<div class="notice bad" role="alert">{{ error }}</div>{% endif %}
     <input type="hidden" name="next" value="{{ next }}">
     <label for="password">Password

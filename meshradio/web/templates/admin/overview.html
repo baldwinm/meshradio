@@ -60,4 +60,12 @@
     <a class="small" href="/admin/log">Whole activity log</a>
   </section>
 </div>
+<section class="panel conn">
+  <h2>This connection</h2>
+  <p class="small">{% if connection.https %}<span class="chip ok">https</span> Encrypted from your browser to the radio's front door.{% else %}<span class="chip bad">plain http</span> Not encrypted: your password and session cross the network readable. Use this page only on your own network or a VPN.{% endif %}</p>
+  <p class="small">Your address, as the sign-in limits see it: <code>{{ connection.address or "unknown" }}</code>{% if connection.peer != connection.address %} <span class="muted">· via {{ connection.peer }}</span>{% endif %}</p>
+  {% for name, value in connection.headers %}
+  <p class="small muted"><code>{{ name }}: {{ value }}</code></p>
+  {% endfor %}
+</section>
 {% endblock %}

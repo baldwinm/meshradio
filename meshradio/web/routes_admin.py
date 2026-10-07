@@ -354,6 +354,7 @@ def render(request: Request, name: str, token: str | None, **context: Any) -> HT
             "embed": is_embed(request),
             "tz": ctx.player.tz,
             "section": "",
+            "plain_http": not _https(request),
             **context,
         },
         status_code=status_code,
@@ -579,7 +580,28 @@ async def overview(request: Request):
         changes=await ctx.db.admin_log_entries("changes", limit=5),
         labels=ACTION_LABELS,
         all_ok=not any(f["state"] == "bad" for f in feeds),
+        connection=connection_info(request),
     )
+
+
+# Headers a proxy may use to say who the visitor is, shown as they arrived
+# so [web] proxy_hops can be checked against a real request.
+_CLIENT_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "true-client-ip",
+                   "cf-connecting-ip", "x-real-ip")
+
+
+def connection_info(request: Request) -> dict[str, Any]:
+    """How this request reached the app: the address the rate limits and the
+    sign-in throttle use, whether it came over https, and what the proxy
+    said. Your own address is the check — it should be the one shown."""
+    peer = getattr(request.state, "peer", None)
+    return {
+        "address": client_ip(request),
+        "peer": peer if peer is not None else client_ip(request),
+        "https": _https(request),
+        "headers": [(name, request.headers[name]) for name in _CLIENT_HEADERS
+                    if name in request.headers],
+    }
 
 
 # -- days ---------------------------------------------------------------------

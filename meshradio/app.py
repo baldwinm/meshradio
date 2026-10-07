@@ -207,6 +207,7 @@ async def run(config, demo: bool = False) -> None:
         security_headers=config.web.security_headers,
         csp_report_only=config.web.csp_report_only,
         trusted_proxies=config.web.trusted_proxies,
+        proxy_hops=config.web.proxy_hops,
         rate_limit=config.web.rate_limit,
         admin=admin,
     )
@@ -216,7 +217,9 @@ async def run(config, demo: bool = False) -> None:
             # The same list gates uvicorn's own reading of X-Forwarded-For
             # and -Proto, so request.client and request.url.scheme are the
             # visitor's when the proxy is trusted and the peer's when not.
-            proxy_headers=True,
+            # With [web] proxy_hops set, web/proxy.py does this instead,
+            # counting from the right where a visitor can't forge entries.
+            proxy_headers=not config.web.proxy_hops,
             forwarded_allow_ips=",".join(config.web.trusted_proxies) or "127.0.0.1",
         )
     )
