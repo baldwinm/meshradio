@@ -6,6 +6,19 @@
   <span class="chip dim">{{ groups|length }} look-alike group{{ "" if groups|length == 1 else "s" }}</span>
 </div>
 {% include "admin/_banner.html" %}
+<section class="panel">
+  <h2>Fix songs' artists</h2>
+  <p class="small muted">{% if unfiled %}<b>{{ unfiled }} song{{ "" if unfiled == 1 else "s" }}</b> {{ "has" if unfiled == 1 else "have" }} no real artist (none at all, or a stand-in like “Release - Topic”).{% else %}Every song has an artist.{% endif %} To correct songs one by one rather than merge whole names, list them and type each one's artist.</p>
+  <div class="row">
+    <a class="btn{% if unfiled %} primary{% endif %}" href="/admin/artists/fix">Songs with no real artist</a>
+    <form class="row grow" method="get" action="/admin/artists/fix">
+      <label class="grow" for="fix-name">or the songs filed under
+        <input id="fix-name" name="name" type="text" list="artist-names" maxlength="256" placeholder="an artist name" required>
+      </label>
+      <button class="btn" type="submit">Show</button>
+    </form>
+  </div>
+</section>
 <p class="small muted">Songs carry the artist name YouTube gave them, which varies ("Beatles", "The Beatles", "The Beatles - Topic"). Merging respells every song under one name and remembers the spelling, so new songs with it are respelled too. Each merge can be undone from the activity log.</p>
 {% for g in groups %}
 <form class="panel" method="post" action="/admin/artists/merge">

@@ -15,8 +15,9 @@ from typing import Any
 import aiosqlite
 
 from ..ingest.parse import untitled_theme
+from .browse import ARTIST_SQL
 from .core import utcnow
-from .fields import MAX_TITLE, clean_text
+from .fields import MAX_TITLE, PLACEHOLDER_ARTISTS, clean_text
 from .tracks import TrackQueries
 
 # How long the activity log keeps an entry. Pruned as entries are written.
@@ -326,3 +327,55 @@ class AdminQueries(TrackQueries):
                     "UPDATE tracks SET artist=? WHERE id=? AND artist = ? COLLATE BINARY",
                     (old, track_id, canonical),
                 )
+
+    # -- one song's artist, many songs at once --------------------------------
+
+    async def songs_to_fix(self, name: str | None = None) -> list[dict[str, Any]]:
+        """Channel songs, one row per video, for the Fix artists screen.
+
+        With ``name``: the songs filed under that artist as the public pages
+        show it (case and the Topic suffix set aside). Without: the songs
+        with no artist, or with a stand-in channel name for one. Newest
+        share first."""
+        args: tuple[str, ...]
+        if name:
+            where, args = f"{ARTIST_SQL} = ? COLLATE NOCASE", (name.strip(),)
+        else:
+            marks = ",".join("?" * len(PLACEHOLDER_ARTISTS))
+            where = f"(tr.artist IS NULL OR TRIM(tr.artist) = '' OR lower(tr.artist) IN ({marks}))"
+            args = tuple(sorted(PLACEHOLDER_ARTISTS))
+        return await self._fetchall(
+            "SELECT tr.video_id, MAX(tr.title) AS title, MAX(tr.artist) AS artist, "
+            " COUNT(*) AS shares, MAX(t.date) AS last_day, MAX(tr.id) AS track_id, "
+            " MAX(tr.meta_edited_at) AS edited "
+            "FROM tracks tr LEFT JOIN themes t ON t.id = tr.theme_id "
+            f"WHERE tr.source != 'radio' AND {where} "
+            "GROUP BY tr.video_id ORDER BY MAX(tr.mesh_ts) DESC LIMIT 500",
+            args,
+        )
+
+    async def set_song_artists(self, artists: dict[str, str]) -> list[dict[str, Any]]:
+        """Give every channel share of each video the artist mapped to it, and
+        pin it like a hand edit. ``artists`` is ``{video_id: artist}``.
+        Returns each changed row as it was (id, title, artist, pin), which is
+        what undoing it needs; rows already carrying the name are skipped."""
+        cleaned = {v: clean_text(a, MAX_TITLE) for v, a in artists.items()}
+        if any(a is None for a in cleaned.values()):
+            raise ValueError("an artist needs a name")
+        before: list[dict[str, Any]] = []
+        now = utcnow()
+        async with self.transaction():
+            for video_id, artist in cleaned.items():
+                rows = await self._fetchall(
+                    "SELECT id, title, artist, meta_edited_at FROM tracks "
+                    "WHERE video_id = ? AND source != 'radio' "
+                    "AND (artist IS NULL OR artist != ? COLLATE BINARY)",
+                    (video_id, artist),
+                )
+                for row in rows:
+                    await self.db.execute(
+                        "UPDATE tracks SET artist=?, meta_edited_at=? WHERE id=?",
+                        (artist, now, row["id"]),
+                    )
+                before += rows
+        return before

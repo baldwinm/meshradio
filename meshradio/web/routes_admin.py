@@ -35,6 +35,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 
 from .. import backup as backup_mod
 from ..bus import TRACK_DISCOVERED
+from ..db.fields import VIDEO_ID_RE
 from ..ingest.corescope import format_probe, probe
 from ..ingest.parse import untitled_theme
 from ..ingest.relay import CURSOR_KEY
@@ -103,6 +104,7 @@ ACTION_LABELS = {
     "edit_track": "Edited song",
     "merge_artists": "Merged artist names",
     "ignore_artists": "Kept artist names apart",
+    "fix_artists": "Set song artists",
     "backup": "Took a backup",
     "download_backup": "Downloaded a backup",
     "probe_feed": "Probed a feed",
@@ -832,6 +834,7 @@ async def artists_page(request: Request, done: int | None = None, error: str = "
         request, "artists.html", token, section="artists",
         groups=lookalike_groups(spellings, await _ignored_artists(request)),
         spellings=spellings, aliases=await db.artist_aliases(),
+        unfiled=len(await db.songs_to_fix()),
         banner=banner, labels=ACTION_LABELS, error=error,
     )
 
@@ -877,6 +880,62 @@ async def ignore_artists(request: Request):
         await db.set_setting(IGNORED_ARTISTS_KEY, json.dumps(sorted(ignored)))
         await db.log_admin("ignore_artists", ip=client_ip(request), target=key)
     return go(f"{ADMIN_PATH}/artists")
+
+
+# Each song's artist box on the Fix artists screen is named this plus its
+# video id, so one form can carry a whole list.
+FIX_FIELD = "artist."
+
+
+def _fix_path(name: str = "") -> str:
+    return f"{ADMIN_PATH}/artists/fix" + ("?" + urlencode({"name": name}) if name else "")
+
+
+@router.get("/artists/fix", response_class=HTMLResponse)
+async def fix_artists_page(request: Request, name: str = "", done: int | None = None,
+                           error: str = ""):
+    """Songs to give an artist by hand, many at once: the ones with no artist
+    (or a stand-in channel name like "Release - Topic" for one), or every
+    song filed under one artist name."""
+    token = await require_admin(request)
+    db = ctx_of(request).db
+    name = name.strip()[:256]
+    banner = await db.admin_log_entry(done) if done else None
+    return render(
+        request, "artists_fix.html", token, section="artists",
+        artist=name, songs=await db.songs_to_fix(name or None),
+        spellings=await db.artist_spellings(), field_prefix=FIX_FIELD,
+        banner=banner, labels=ACTION_LABELS, error=error,
+    )
+
+
+@router.post("/artists/fix")
+async def fix_artists(request: Request):
+    _token, form = await checked_form(request)
+    ctx = ctx_of(request)
+    name = field(form, "name")[:256]
+    wanted: dict[str, str] = {}
+    for key, values in form.items():
+        if not key.startswith(FIX_FIELD):
+            continue
+        video_id = key[len(FIX_FIELD):]
+        artist = values[0].strip() if values else ""
+        if artist and VIDEO_ID_RE.match(video_id):
+            wanted[video_id] = artist
+    if not wanted:
+        return go(_fix_path(name), error="Type an artist next to at least one song.")
+    changed = await ctx.db.set_song_artists(wanted)
+    if not changed:
+        return go(_fix_path(name))
+    names = sorted(set(wanted.values()), key=str.lower)
+    shown = " · ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
+    entry = await ctx.db.log_admin(
+        "fix_artists", ip=client_ip(request), target=name or None,
+        before=f"{len(changed)} song{'' if len(changed) == 1 else 's'}", after=shown,
+        undo={"rows": changed},
+    )
+    ctx.invalidate()
+    return go(_fix_path(name), done=entry)
 
 
 # -- feeds --------------------------------------------------------------------
@@ -1048,7 +1107,7 @@ async def log_page(request: Request, kind: str = "all", before: int | None = Non
                   error=error)
 
 
-UNDOABLE = {"rename_theme", "remove_track", "edit_track", "merge_artists"}
+UNDOABLE = {"rename_theme", "remove_track", "edit_track", "merge_artists", "fix_artists"}
 
 
 @router.post("/log/{entry_id}/undo")
@@ -1086,6 +1145,12 @@ async def undo(request: Request, entry_id: int):
             data["track_id"], data["title"], data["artist"], data["edited_at"]
         ):
             return go(f"{ADMIN_PATH}/log", error="That song is no longer in the archive.")
+        after = entry["before"]
+    elif action == "fix_artists":
+        for row in data["rows"]:
+            await db.revert_track_edit(
+                row["id"], row["title"], row["artist"], row["meta_edited_at"]
+            )
         after = entry["before"]
     elif action == "merge_artists":
         await db.unmerge_artists(

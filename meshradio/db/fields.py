@@ -28,6 +28,18 @@ MAX_TITLE = 256          # track and theme titles, artists
 MAX_SENDER = 64          # MeshCore node names are at most 32 characters
 MAX_DURATION_S = 24 * 3600
 
+# Channel names YouTube gives auto-generated "art track" uploads whose artist
+# has no channel of their own. oEmbed reports the channel as the author, so
+# without this every such song files under one made-up artist ("Release",
+# once the Topic suffix is dropped). Lower case; matched case-insensitively.
+PLACEHOLDER_ARTISTS = frozenset({"release - topic"})
+
+
+def is_placeholder_artist(name: str | None) -> bool:
+    """Whether ``name`` is a stand-in channel name rather than an artist."""
+    return bool(name) and " ".join(str(name).split()).lower() in PLACEHOLDER_ARTISTS
+
+
 # C0 and C1 controls (newlines and tabs included: these fields are one line),
 # plus the two non-characters XML forbids, which the feed had to strip itself.
 _CONTROL = re.compile("[\x00-\x1f\x7f-\x9f￾￿]")
