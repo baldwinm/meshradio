@@ -348,6 +348,24 @@ class AdminSettings:
     throttle: LoginThrottle = field(default_factory=LoginThrottle)
     pending: PendingSignIns = field(default_factory=PendingSignIns)
     last_totp_counter: int = -1
+    # The editable settings' values from the file (what Reset goes back to),
+    # the admin page's saved changes, and what was in force at startup (so
+    # the page can say which changes still wait for a restart). app.py fills
+    # them; left empty, they're read from ``config`` as it stands.
+    file_values: dict = field(default_factory=dict)
+    overrides: dict = field(default_factory=dict)
+    started: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            return
+        from ..config_overrides import SETTINGS, current
+
+        now = {s.key: current(self.config, s) for s in SETTINGS}
+        if not self.file_values:
+            self.file_values = {k: v for k, v in now.items() if k not in self.overrides}
+        if not self.started:
+            self.started = dict(now)
 
     @property
     def fingerprint(self) -> str:

@@ -12,11 +12,12 @@ import logging
 
 import uvicorn
 
-from . import __version__
+from . import __version__, config_overrides
 from . import backup as backup_mod
 from .audio.routing import make_router
 from .backup import BackupService
 from .bus import EventBus
+from .config_overrides import SETTINGS, current
 from .db import Database
 from .ingest.corescope import CoreScopePoller
 from .ingest.mesh import MeshIngest
@@ -98,6 +99,10 @@ async def run(config, demo: bool = False) -> None:
 
     db = Database(config.db_path)
     await db.connect()
+    # Settings changed on the admin page, laid over the file's before
+    # anything reads them (§9).
+    file_values = {s.key: current(config, s) for s in SETTINGS}
+    overrides = config_overrides.apply_saved(config, await config_overrides.load(db))
     bus = EventBus()
 
     ingest = IngestService(
@@ -185,6 +190,8 @@ async def run(config, demo: bool = False) -> None:
             totp_secret=config.web.admin_totp_secret,
             config=config,
             relay=relay,
+            file_values=file_values,
+            overrides=overrides,
         )
 
     web_app = create_app(
