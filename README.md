@@ -429,7 +429,8 @@ able to drive it:
 `/admin` does in a browser what the maintenance flags below do over SSH: name
 or fix a day's theme, take a song off a day (and put it back), correct a
 song's title or artist, merge artist spellings ("Beatles", "The Beatles - Topic")
-into one, check and probe the feeds, and take or download backups. It's off
+into one, give many songs their artist from one list (**Artists → Songs with
+no real artist**, or the songs filed under any name), check and probe the feeds, and take or download backups. It's off
 until you give it a password:
 
 ```
@@ -461,8 +462,8 @@ What keeps it safe:
   already passes, and admin pages are `no-store` and `noindex`.
 - **The activity log** (`/admin/log`) records every sign-in and every change,
   with the value before and after, for a year — including fixes made with
-  `--set-theme` and `--delete-track`, marked CLI. Renames, removals, song edits
-  and artist merges each carry an **Undo**, which adds an entry rather than
+  `--set-theme` and `--delete-track`, marked CLI. Renames, removals, song edits,
+  artist fixes and artist merges each carry an **Undo**, which adds an entry rather than
   erasing one.
 - **Removing a song** shows what goes (the song, its plays) and needs the day's
   date typed to confirm. A backup is taken first (at most one every ten
@@ -470,8 +471,15 @@ What keeps it safe:
   keeps the song's details, so **Put back** under Removed songs restores it
   exactly, plays aside.
 - **A hand-edited title or artist stays**: a late YouTube lookup or a relay
-  re-push won't replace it. A merged artist spelling is remembered, so a song
+  re-push won't replace it, and the same video shared again later takes the
+  corrected details. A merged artist spelling is remembered, so a song
   arriving later with it is respelled as it's stored.
+- **"Release" isn't an artist.** YouTube files some auto-generated music
+  uploads under a channel called "Release - Topic", and that's all its lookup
+  gives back for them. That name is now stored as no artist, so those songs
+  stay out of the artist lists and show up under **Songs with no real
+  artist**, where one form sets them all (one Undo puts them back). On the
+  Pi, yt-dlp's music credits name the artist first, ahead of the channel.
 - **Restoring a backup stays on the command line**, because it needs the
   service stopped; the Backups screen prints the command.
 - **Settings** (`/admin/config`) has switches, sliders and time pickers for

@@ -35,6 +35,19 @@ from . import metadata
 log = logging.getLogger(__name__)
 
 
+def ytdlp_artist(info: dict[str, Any]) -> str | None:
+    """The artist yt-dlp found for a video. Its music fields come from the
+    YouTube Music credits, which name the artist even when the uploading
+    channel is a stand-in like "Release - Topic"; the channel is the last
+    resort (and a stand-in one is dropped when the row is written)."""
+    if info.get("artist"):
+        return info["artist"]
+    artists = info.get("artists")
+    if isinstance(artists, list) and any(artists):
+        return ", ".join(str(a) for a in artists if a)
+    return info.get("creator") or info.get("uploader")
+
+
 class Cacher(Service):
     def __init__(
         self,
@@ -180,7 +193,7 @@ class Cacher(Service):
                 await self.db.update_track_metadata(
                     track_id,
                     title=info.get("title"),
-                    artist=info.get("artist") or info.get("uploader"),
+                    artist=ytdlp_artist(info),
                     duration=info.get("duration"),
                 )
                 await self.db.set_cache_status(track_id, "ready", str(info["_filepath"]))

@@ -1,0 +1,50 @@
+{% extends "admin/base.html" %}
+{% block title %}Fix artists{% endblock %}
+{% block main %}
+<div class="top">
+  <h1>{% if artist %}Songs filed under “{{ artist }}”{% else %}Songs with no real artist{% endif %}</h1>
+  <a class="btn" href="/admin/artists">Back to artist names</a>
+</div>
+{% include "admin/_banner.html" %}
+<form class="panel row" method="get" action="/admin/artists/fix">
+  <label class="grow" for="pick-name">Show the songs filed under
+    <input id="pick-name" name="name" type="text" list="artist-names" value="{{ artist }}" maxlength="256" placeholder="an artist name, like Release">
+  </label>
+  <button class="btn" type="submit">Show</button>
+  {% if artist %}<a class="btn" href="/admin/artists/fix">Songs with no real artist</a>{% endif %}
+</form>
+<datalist id="artist-names">
+  {% for s in spellings[:2000] %}<option value="{{ s.artist }}">{% endfor %}
+</datalist>
+{% if not artist %}
+<p class="small muted">Songs YouTube gave no artist, or only a stand-in channel name such as “Release - Topic” (which the public pages show as “Release”). New songs with a stand-in name are now stored with no artist, so they turn up here.</p>
+{% endif %}
+{% if songs %}
+<form method="post" action="/admin/artists/fix">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="name" value="{{ artist }}">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Song</th><th>Artist</th><th></th></tr></thead>
+      <tbody>
+      {% for s in songs %}
+        <tr>
+          <td><img class="thumb" src="https://i.ytimg.com/vi/{{ s.video_id }}/mqdefault.jpg" alt="" loading="lazy" width="56" height="32"></td>
+          <td>{{ s.title or s.video_id }}{% if s.edited %} <span class="chip dim">edited</span>{% endif %}<br>
+            <span class="muted small">{{ s.artist or "no artist" }} · {{ s.shares }} share{{ "" if s.shares == 1 else "s" }}{% if s.last_day %} · last {{ s.last_day }}{% endif %}
+            · <a href="https://www.youtube.com/watch?v={{ s.video_id }}" rel="noopener">YouTube ↗</a></span></td>
+          <td><input aria-label="Artist for {{ s.title or s.video_id }}" name="{{ field_prefix }}{{ s.video_id }}" type="text" list="artist-names" maxlength="256"
+              value="{{ s.artist if artist else '' }}" placeholder="Artist"></td>
+          <td class="actions"><a class="btn" href="/admin/tracks/{{ s.track_id }}/edit">Title…</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted">Fill in the ones you know and leave the rest blank. Saving sets the artist on every share of each song and keeps it: later details from YouTube or the relay won't replace it, and the song shared again gets it too. One Undo in the banner or the activity log puts them all back.</p>
+  <div class="row"><button class="btn primary" type="submit">Save artists</button></div>
+</form>
+{% else %}
+<p class="panel muted">{% if artist %}No song is filed under that name.{% else %}Every song has an artist.{% endif %}</p>
+{% endif %}
+{% endblock %}

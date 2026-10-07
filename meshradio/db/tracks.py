@@ -15,6 +15,7 @@ from .fields import (
     VIDEO_ID_RE,
     clean_duration,
     clean_text,
+    is_placeholder_artist,
 )
 from .themes import ThemeQueries
 
@@ -60,6 +61,12 @@ class TrackQueries(ThemeQueries):
         # ingest path can slip a repost in between them.
         async with self.transaction():
             artist = await self.canonical_artist(artist)
+            edited_at = None
+            if source != "radio":
+                fixed = await self._hand_edited_details(video_id)
+                if fixed is not None:
+                    title, artist, edited_at = fixed["title"], fixed["artist"], \
+                        fixed["meta_edited_at"]
             if theme_id is not None:
                 already = await self._fetchone(
                     "SELECT 1 FROM tracks WHERE theme_id=? AND video_id=? LIMIT 1",
@@ -77,9 +84,11 @@ class TrackQueries(ThemeQueries):
             try:
                 cur = await self.db.execute(
                     "INSERT INTO tracks(video_id,url,title,artist,theme_id,sender,mesh_ts,"
-                    "ingested_at,source,dedupe_hash) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                    "ingested_at,source,dedupe_hash,meta_edited_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(dedupe_hash) DO NOTHING RETURNING id",
-                    (video_id, url, title, artist, theme_id, sender, mesh_ts, utcnow(), source, dh),
+                    (video_id, url, title, artist, theme_id, sender, mesh_ts, utcnow(), source, dh,
+                     edited_at),
                 )
                 inserted = await cur.fetchone()
             except aiosqlite.IntegrityError:
@@ -197,6 +206,18 @@ class TrackQueries(ThemeQueries):
         duration = clean_duration(duration)
         async with self.transaction():
             artist = await self.canonical_artist(artist)
+            # The same video corrected by hand on another day: this share
+            # takes those details (and their pin) instead of YouTube's.
+            row = await self._fetchone(
+                "SELECT video_id, source, meta_edited_at FROM tracks WHERE id=?", (track_id,)
+            )
+            if row is not None and row["meta_edited_at"] is None and row["source"] != "radio":
+                fixed = await self._hand_edited_details(row["video_id"])
+                if fixed is not None:
+                    await self.db.execute(
+                        "UPDATE tracks SET title=?, artist=?, meta_edited_at=? WHERE id=?",
+                        (fixed["title"], fixed["artist"], fixed["meta_edited_at"], track_id),
+                    )
             # A title or artist the operator corrected by hand (the admin
             # page) outranks whatever oEmbed or a relay re-push says later.
             await self.db.execute(
@@ -208,12 +229,23 @@ class TrackQueries(ThemeQueries):
                 (title, artist, duration, track_id),
             )
 
+    async def _hand_edited_details(self, video_id: str) -> dict[str, Any] | None:
+        """The newest hand-corrected title and artist any channel share of
+        ``video_id`` carries, or None if no share was corrected."""
+        return await self._fetchone(
+            "SELECT title, artist, meta_edited_at FROM tracks WHERE video_id=? "
+            "AND source != 'radio' AND meta_edited_at IS NOT NULL "
+            "ORDER BY meta_edited_at DESC, id DESC LIMIT 1",
+            (video_id,),
+        )
+
     async def canonical_artist(self, artist: str | None) -> str | None:
         """``artist`` as the operator asked for it to be spelled: a spelling
         merged on the admin page's Artists screen maps to the name it was
-        merged into, so a song arriving later joins the merged artist."""
-        if not artist:
-            return artist
+        merged into, so a song arriving later joins the merged artist. A
+        stand-in channel name (``PLACEHOLDER_ARTISTS``) is no artist at all."""
+        if not artist or is_placeholder_artist(artist):
+            return None
         row = await self._fetchone(
             "SELECT canonical FROM artist_aliases WHERE alias=?", (artist,)
         )
