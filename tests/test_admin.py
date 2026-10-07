@@ -641,3 +641,138 @@ def test_config_refuses_a_hash_nobody_could_sign_in_with(tmp_path, monkeypatch):
     path.write_text("")
     monkeypatch.setenv("MESHRADIO_ADMIN_PASSWORD_HASH", good)
     assert load_config(path).web.admin_password_hash == good
+
+
+# -- editable settings --------------------------------------------------------
+
+
+def _playback(**changes):
+    """The playback group's form as the page renders it, with ``changes``."""
+    form = {
+        "group": "playback", "player.live_autoplay": "on",
+        "player.volume": "70", "player.live_window_s": "30", "player.max_queue": "200",
+        "player.station_batch": "10", "player.radio_batch": "10",
+    }
+    for key, value in changes.items():
+        key = key.replace("__", ".")
+        if value is None:
+            form.pop(key, None)
+        else:
+            form[key] = value
+    return form
+
+
+async def test_a_setting_changes_right_away_and_is_kept_and_logged(db, bus, tmp_path):
+    settings = admin_settings(tmp_path)
+    async with client_for(page_app(db, bus, admin=settings), visited=False) as client:
+        await sign_in(client)
+        page = (await client.get("/admin/config")).text
+        assert 'type="range" name="player.live_window_s"' in page
+        assert 'name="player.live_autoplay" value="on" role="switch" checked' in page
+        resp = await admin_post(client, "/admin/config",
+                                **_playback(player__live_window_s="45",
+                                            player__live_autoplay=None))
+        assert resp.status_code == 303 and "saved=" in resp.headers["location"]
+        assert settings.config.player.live_window_s == 45 * 60     # the running config
+        assert settings.config.player.live_autoplay is False
+        page = (await client.get("/admin/config")).text
+        assert "Changed here" in page and "the file says 30 min" in page
+    assert json.loads(await db.get_setting("admin.config_overrides")) == {
+        "player.live_autoplay": False, "player.live_window_s": 2700,
+    }
+    entries = await db.admin_log_entries("changes")
+    assert {(e["target"], e["before"], e["after"]) for e in entries} == {
+        ("Live window", "30 min", "45 min"), ("Auto-play new songs", "on", "off"),
+    }
+
+
+async def test_one_bad_value_saves_nothing(db, bus, tmp_path):
+    settings = admin_settings(tmp_path)
+    async with client_for(page_app(db, bus, admin=settings), visited=False) as client:
+        await sign_in(client)
+        for bad in ("5000", "-1", "lots"):
+            resp = await admin_post(client, "/admin/config",
+                                    **_playback(player__live_window_s="60",
+                                                player__max_queue=bad))
+            assert "error=" in resp.headers["location"]
+        assert (await client.post("/admin/config", data=_playback(
+            player__live_window_s="60"))).status_code == 403          # no CSRF token
+    assert settings.config.player.live_window_s == 1800
+    assert await db.get_setting("admin.config_overrides") is None
+    assert await db.admin_log_entries("changes") == []
+
+
+async def test_quiet_hours_take_two_different_times(db, bus, tmp_path):
+    settings = admin_settings(tmp_path)
+    async with client_for(page_app(db, bus, admin=settings), visited=False) as client:
+        await sign_in(client)
+        quiet = {"player.quiet_hours.on": "on", "player.quiet_hours.start": "22:00"}
+        resp = await admin_post(client, "/admin/config", **_playback(),
+                                **{**quiet, "player.quiet_hours.end": "22:00"})
+        assert "error=" in resp.headers["location"]
+        await admin_post(client, "/admin/config", **_playback(),
+                         **{**quiet, "player.quiet_hours.end": "07:30"})
+        assert settings.config.player.quiet_hours == "22:00-07:30"
+        await admin_post(client, "/admin/config", **_playback())   # switched off
+        assert settings.config.player.quiet_hours == ""
+
+
+async def test_reset_and_undo_put_a_setting_back(db, bus, tmp_path):
+    settings = admin_settings(tmp_path)
+    async with client_for(page_app(db, bus, admin=settings), visited=False) as client:
+        await sign_in(client)
+        await admin_post(client, "/admin/config", **_playback(player__station_batch="25"))
+        assert settings.config.player.station_batch == 25
+        resp = await admin_post(client, "/admin/config/reset", reset="player.station_batch")
+        assert "back+to+the+file" in resp.headers["location"]
+        assert settings.config.player.station_batch == 10
+        assert "player.station_batch" not in settings.overrides
+        reset_entry = (await db.admin_log_entries("changes"))[0]
+        await admin_post(client, f"/admin/log/{reset_entry['id']}/undo")   # undo the reset
+        assert settings.config.player.station_batch == 25
+        assert settings.overrides["player.station_batch"] == 25
+        assert (await admin_post(client, "/admin/config/reset",
+                                 reset="web.trusted_proxies")).status_code == 400
+
+
+async def test_a_restart_setting_says_it_waits_for_one(db, bus, tmp_path):
+    settings = admin_settings(tmp_path)
+    async with client_for(page_app(db, bus, admin=settings), visited=False) as client:
+        await sign_in(client)
+        assert "Waiting for a restart" not in (await client.get("/admin/config")).text
+        await admin_post(client, "/admin/config", **_playback(player__volume="40"))
+        page = (await client.get("/admin/config")).text
+        assert "Waiting for a restart:</strong> Starting volume" in page
+        assert "systemctl restart meshradio" in page
+
+
+async def test_the_public_site_offers_no_device_settings(db, bus, tmp_path):
+    settings = admin_settings(tmp_path)
+    async with client_for(embed_app(db, bus, admin=settings), visited=False) as client:
+        await sign_in(client)
+        page = (await client.get("/admin/config")).text
+        assert 'name="player.volume"' not in page and "Downloads" not in page
+        assert 'name="player.live_window_s"' in page
+        resp = await admin_post(client, "/admin/config", group="downloads",
+                                **{"cache.max_bytes": "1"})
+        assert resp.status_code == 400
+        # A device field slipped into an allowed group is simply not read.
+        await admin_post(client, "/admin/config", **_playback(player__volume="5"))
+        assert settings.config.player.volume == 70
+        assert (await admin_post(client, "/admin/config/reset",
+                                 reset="player.volume")).status_code == 400
+
+
+def test_saved_settings_apply_at_startup_and_bad_ones_are_skipped():
+    from meshradio.config_overrides import apply_saved
+
+    config = Config()
+    applied = apply_saved(config, {
+        "player.max_queue": 300,
+        "player.volume": 500,                 # out of range now: skipped
+        "web.rate_limit": False,              # never editable: skipped
+        "player.timezone": "UTC",             # not on the page: skipped
+    })
+    assert applied == {"player.max_queue": 300}
+    assert config.player.max_queue == 300 and config.player.volume == 70
+    assert config.web.rate_limit is True

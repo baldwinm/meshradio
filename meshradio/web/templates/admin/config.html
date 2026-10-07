@@ -2,18 +2,95 @@
 {% block title %}Config{% endblock %}
 {% block main %}
 <div class="top">
-  <h1>Running config <span class="chip dim">read-only</span></h1>
+  <h1>Settings</h1>
   <span class="chip {{ 'ok' if two_step else 'dim' }}">Two-step sign-in {{ "on" if two_step else "off" }}</span>
 </div>
-<div class="table-wrap">
-  <table>
-    <thead><tr><th>Setting</th><th>Value</th><th>From</th></tr></thead>
-    <tbody>
-    {% for r in rows %}
-      <tr><td class="mono">{{ r.key }}</td><td class="mono">{{ r.value }}</td><td class="muted">{{ r.source }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
+{% if saved %}<div class="notice ok" role="status">{{ saved }}</div>{% endif %}
+{% if error %}<div class="notice bad" role="alert">{{ error }}</div>{% endif %}
+{% if waiting %}
+<div class="notice" role="status">
+  <span><strong>Waiting for a restart:</strong> {{ waiting|join(", ") }}. {% if embed %}Restart the service from the host's dashboard to apply {{ "it" if waiting|length == 1 else "them" }}.{% else %}Run <code>sudo systemctl restart meshradio</code> on the Pi to apply {{ "it" if waiting|length == 1 else "them" }}.{% endif %}</span>
 </div>
-<p class="small muted">Secrets show only their last four characters. {% if embed %}Device settings (the mesh node, the audio cache, quiet hours, volume) only apply on the Pi and aren't shown here. The public site is rebuilt from the repository on each deploy, so a setting changes with a commit.{% else %}Settings change in the config file, then a restart.{% endif %}</p>
+{% endif %}
+
+{% for g in groups %}
+<form class="panel settings" method="post" action="/admin/config" id="group-{{ g.key }}" data-settings-form>
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="group" value="{{ g.key }}">
+  <div class="top">
+    <h2>{{ g.title }}</h2>
+    <span class="row">
+      <span class="small muted" data-dirty-note hidden>Unsaved changes</span>
+      <button class="btn primary" type="submit" data-save>Save {{ g.title|lower }}</button>
+    </span>
+  </div>
+  {% for i in g["items"] %}
+  {% set s = i.s %}
+  <div class="setting">
+    <div class="setting-text">
+      <label class="setting-label" for="{{ s.key }}">{{ s.label }}</label>
+      <p class="small muted">{{ s.help }}</p>
+      <p class="small setting-meta">
+        {% if s.applies == "restart" %}<span class="chip warn">After a restart</span>
+        {% elif s.applies == "wait" %}<span class="chip dim">From the next check</span>
+        {% else %}<span class="chip ok">Right away</span>{% endif %}
+        {% if i.waiting %}<span class="chip warn">Waiting for restart</span>{% endif %}
+        {% if i.overridden %}
+          <span class="muted">Changed here · the file says {{ i.file }}</span>
+          <button class="linkish" type="submit" formaction="/admin/config/reset" name="reset" value="{{ s.key }}" formnovalidate>Use the file's</button>
+        {% endif %}
+      </p>
+    </div>
+    <div class="setting-control">
+      {% if s.control == "toggle" %}
+        <label class="switch">
+          <input id="{{ s.key }}" type="checkbox" name="{{ s.key }}" value="on" role="switch"{% if i.value %} checked{% endif %}>
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-text" data-switch-text>{{ "On" if i.value else "Off" }}</span>
+        </label>
+      {% elif s.control == "slider" %}
+        <div class="slider">
+          <input id="{{ s.key }}" type="range" name="{{ s.key }}" min="{{ i.range[0] }}" max="{{ i.range[1] }}" step="{{ s.step }}" value="{{ i.shown }}" data-unit="{{ s.unit }}" aria-describedby="{{ s.key }}-out">
+          <output id="{{ s.key }}-out" for="{{ s.key }}" class="mono">{{ i.described }}</output>
+        </div>
+      {% elif s.control == "number" %}
+        <span class="row">
+          <input id="{{ s.key }}" class="num" type="number" name="{{ s.key }}" min="{{ i.range[0] }}" max="{{ i.range[1] }}" step="{{ s.step }}" value="{{ i.shown }}" required>
+          <span class="muted small">{{ s.unit }}</span>
+        </span>
+      {% elif s.control == "quiet_hours" %}
+        <div class="quiet" data-quiet>
+          <label class="switch">
+            <input id="{{ s.key }}" type="checkbox" name="{{ s.key }}.on" value="on" role="switch"{% if i.value %} checked{% endif %} data-quiet-toggle>
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="switch-text" data-switch-text>{{ "On" if i.value else "Off" }}</span>
+          </label>
+          <span class="row">
+            <label class="small">From <input type="time" name="{{ s.key }}.start" value="{{ i.start }}" data-quiet-time></label>
+            <label class="small">to <input type="time" name="{{ s.key }}.end" value="{{ i.end }}" data-quiet-time></label>
+          </span>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</form>
+{% endfor %}
+
+<details class="panel">
+  <summary><h2 class="inline">Everything else <span class="chip dim">read-only</span></h2></summary>
+  <p class="small muted">These stay in the config file{% if embed %} (the repository, on the public site){% endif %}: secrets, addresses the server connects to, commands it runs, file paths, and the site's own defences. Changing them should take more than a browser session.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th><th>From</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td class="mono">{{ r.key }}</td><td class="mono">{{ r.value }}</td><td class="muted">{{ r.source }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted">Secrets show only their last four characters.{% if embed %} Device settings (the mesh node, the audio cache, quiet hours, volume) only apply on the Pi and aren't shown here.{% endif %}</p>
+</details>
+<p class="small muted">Changes made here are kept in the archive and laid over the config file at startup; every one is in the <a href="/admin/log">activity log</a> with an Undo.</p>
 {% endblock %}

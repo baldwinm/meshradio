@@ -482,9 +482,19 @@ What keeps it safe:
   Pi, yt-dlp's music credits name the artist first, ahead of the channel.
 - **Restoring a backup stays on the command line**, because it needs the
   service stopped; the Backups screen prints the command.
-- **The config view is read-only**, with secrets cut to their last four
-  characters. On the public site it leaves out the device settings (mesh node,
-  audio cache, quiet hours, volume), and the **Device** screen (yt-dlp, cache
+- **Settings** (`/admin/config`) has switches, sliders and time pickers for
+  the ones that are safe to change from a browser: auto-play, quiet hours,
+  starting volume, the live window, queue and top-up sizes, feed and relay
+  intervals, the audio cache, download retries, and backups. Each says when
+  it takes effect (right away, from the next check, or after a restart, with
+  a banner listing what's waiting). A change is kept in the archive and laid
+  over the config file at startup, so it survives restarts; **Use the
+  file's** drops it again, and every change is in the activity log with an
+  Undo. Secrets, addresses the server connects to, commands it runs, paths,
+  and the site's own defences (security headers, rate limits, proxies,
+  allowed hosts) stay read-only there, with secrets cut to their last four
+  characters. On the public site the device settings (mesh node, audio cache,
+  quiet hours, volume) aren't shown, and the **Device** screen (yt-dlp, cache
   use, failed downloads with Retry, the audio output) exists only on the Pi.
 
 Each instance keeps its own archive and its own admin page: a fix made on the
@@ -618,6 +628,7 @@ meshradio/
 ├── cli.py           # the `meshradio` command: start the radio, or one maintenance task
 ├── bus.py           # tiny pub/sub EventBus + event vocabulary
 ├── config.py        # TOML config over dataclass defaults, checked at load (+ env secrets)
+├── config_overrides.py  # settings the admin page may change, kept in the archive
 ├── db/              # aiosqlite layer behind one Database facade: core.py (connection,
 │                    #   transactions, the migrations.py runner), fields.py (text bounds),
 │                    #   and query mixins — themes, tracks, archive, browse, relay, web_sessions,
