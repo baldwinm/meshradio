@@ -593,8 +593,12 @@ hard crash.
 
 ## Project status
 
-**v0.1 — core software + web player + public hosting working, hardware
+**v0.9 — core software + web player + public hosting working, hardware
 integration pending.**
+
+Versions follow [Semantic Versioning](https://semver.org): new features bump the
+minor number and fixes the patch number. 1.0 is saved for when the radio runs on
+its own hardware (the 🟡 and ⬜ rows below).
 
 | Area | State |
 |---|---|
