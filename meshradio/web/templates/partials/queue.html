@@ -25,6 +25,10 @@
   </li>
   {% endfor %}
 </ol>
+{% set total, partial = state.queue|total_length %}
+<p class="queue-total" title="Total length of the queue{% if partial %} (some songs' lengths aren't known yet){% endif %}">
+  {{ state.queue|length }} song{{ "" if state.queue|length == 1 else "s" }} · {{ total }}{% if partial %}+{% endif %}
+</p>
 {% else %}
 <p class="empty">Queue is empty{% if state.station == "radio" %} — radio is fetching more…{% endif %}.</p>
 {% endif %}

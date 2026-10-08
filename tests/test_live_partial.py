@@ -36,3 +36,14 @@ async def test_live_partial_swaps_all_three_regions_from_one_day_context(db, bus
     assert "bbbbbbbbbbb" in body                               # the queue is in there
     assert 'id="pb-scrub"' in body                             # and the play bar
     assert day_lookups["n"] == 1                               # built once, not per region
+
+
+async def test_queue_shows_its_total_length_under_the_list(db, bus):
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-08-01")
+    await make_ready_on(db, "bbbbbbbbbbb", "2026-08-01", duration=3000)
+    await make_ready_on(db, "ccccccccccc", "2026-08-01", duration=725)
+    async with client_for(page_app(db, bus)) as client:
+        await client.post("/api/play-day/2026-08-01")
+        body = (await client.get("/partials/live")).text
+    total = re.search(r'<p class="queue-total"[^>]*>\s*(.*?)\s*</p>', body, re.S).group(1)
+    assert total == "2 songs · 1:02:05"                        # the playing song isn't counted

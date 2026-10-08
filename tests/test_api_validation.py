@@ -9,7 +9,7 @@ import math
 import time
 
 from meshradio.db import MAX_SENDER, MAX_TITLE
-from meshradio.web.server import _mmss
+from meshradio.web.server import _mmss, _total_length
 
 from .helpers import (
     client_for,
@@ -127,6 +127,11 @@ async def test_a_bad_length_already_in_a_row_cannot_break_a_page(db, bus):
         assert (await client.post("/api/seek/30")).json()["position"] >= 30
     assert _mmss(math.inf) == "" and _mmss(math.nan) == "" and _mmss(-1) == ""
     assert _mmss(None) == "" and _mmss(3725) == "1:02:05"
+    # The queue's total skips them too, and says it's a lower bound.
+    assert _total_length([{"duration": 3600}, {"duration": 125.7}]) == ("1:02:05", False)
+    unknown = [{"duration": 59}, {"duration": math.inf}, {"duration": None}]
+    assert _total_length(unknown) == ("0:00:59", True)
+    assert _total_length([]) == ("0:00:00", False)
 
 
 async def test_output_routes_exist_only_on_the_appliance(db, bus):

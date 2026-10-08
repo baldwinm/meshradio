@@ -550,6 +550,14 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 .queue li .badge, .queue li .sender { order: 7; margin-left: auto; flex: none; }
 .queue li .duration { order: 8; }
 
+.queue-total {
+  margin: 0.3rem 0 0;
+  text-align: right;
+  font-family: "Lucida Console", "Courier New", monospace;
+  font-size: 0.75rem;
+  color: var(--green-dim);
+}
+
 .queue-actions {
   margin: 0.35rem 0;
   display: flex;
