@@ -480,9 +480,14 @@ first (it publishes `duration.wanted` for the ones it has no length for), then
 newly ready tracks, then the rest of the archive newest first, one request at
 a time; each fill is announced as `track.duration` and every session's player
 updates its queue live, so the queue's total is right before anything plays.
-A video YouTube won't describe is retried three times per process, a run of
-failures pauses lookups for ten minutes, and a browser report still fills any
-blank left.
+A video YouTube won't describe is retried three times per process, and a run
+of failures pauses lookups for an hour. YouTube may refuse a datacenter's
+lookups outright, so the browser measures too: `static/js/lengths.js` cues each
+queued song without a length in a hidden, silent IFrame player (starting it
+muted if cueing alone doesn't reveal the length), and reports it through
+`/api/duration`, the route the speaker tab already uses once a song plays. The
+row's blank is filled for every repost and the fill is announced the same way,
+so every session's queue updates.
 
 ### The relay solves (2)
 

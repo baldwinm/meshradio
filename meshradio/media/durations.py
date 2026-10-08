@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 class DurationService(Service):
     MAX_ATTEMPTS = 3           # per video, per process; then it waits for a browser report
     FAILURE_STREAK = 5         # consecutive failures that mean YouTube is refusing us...
-    BACKOFF_S = 600.0          # ...so pause this long before trying again
+    BACKOFF_S = 3600.0         # ...so pause this long (browsers still report lengths)
 
     def __init__(
         self, db: Database, bus: EventBus, pace_s: float = 1.5, sweep_s: float = 300.0

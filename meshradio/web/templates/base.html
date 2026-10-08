@@ -162,6 +162,10 @@
      controls reuse both. #}
   <script src="/static/js/mediasession.js?v={{ asset_v }}"></script>
   <script src="/static/js/queue.js?v={{ asset_v }}"></script>
+  {% if embed_mode %}
+  {# after radio.js (lastState) and embed.js (loadYtApi). #}
+  <script src="/static/js/lengths.js?v={{ asset_v }}"></script>
+  {% endif %}
   <script src="/static/js/fx.js?v={{ asset_v }}"></script>
 </body>
 </html>
