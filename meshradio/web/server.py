@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -98,6 +99,23 @@ def _mmss(value) -> str:
     if value >= 3600:
         return f"{value // 3600}:{value % 3600 // 60:02d}:{value % 60:02d}"
     return f"{value // 60}:{value % 60:02d}"
+
+
+def _total_length(tracks) -> tuple[str, bool]:
+    """A list of tracks' summed length as 'h:mm:ss', and whether any track's
+    length is still unknown (so the total is a lower bound)."""
+    total, unknown = 0, False
+    for track in tracks or ():
+        duration = (track or {}).get("duration")
+        try:
+            seconds = math.nan if duration is None else float(duration)
+        except (TypeError, ValueError, OverflowError):
+            seconds = math.nan
+        if math.isfinite(seconds) and seconds > 0:
+            total += int(seconds)
+        else:
+            unknown = True
+    return f"{total // 3600}:{total % 3600 // 60:02d}:{total % 60:02d}", unknown
 
 
 def _asset_version() -> str:
@@ -357,6 +375,7 @@ def create_app(
     app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
+    templates.env.filters["total_length"] = _total_length
     # base.html builds every page's link-preview tags from the live request.
     templates.env.globals["absolute_url"] = absolute_url
     templates.env.globals["asset_v"] = _asset_version()
