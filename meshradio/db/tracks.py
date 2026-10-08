@@ -269,6 +269,34 @@ class TrackQueries(ThemeQueries):
             )
         return cur.rowcount > 0
 
+    async def fill_video_duration(self, video_id: str, seconds: float) -> bool:
+        """``fill_track_duration`` for every row of a video (reposts share
+        one length). Returns whether any blank was filled."""
+        cleaned = clean_duration(seconds)
+        if cleaned is None:
+            return False
+        async with self.transaction():
+            cur = await self.db.execute(
+                "UPDATE tracks SET duration=? WHERE video_id=? AND duration IS NULL",
+                (cleaned, video_id),
+            )
+        return cur.rowcount > 0
+
+    async def videos_missing_duration(self) -> list[str]:
+        """Videos with a playable row but no length anywhere, newest first."""
+        rows = await self._fetchall(
+            "SELECT video_id FROM tracks WHERE cache_status='ready' "
+            "GROUP BY video_id HAVING MAX(duration) IS NULL ORDER BY MAX(id) DESC"
+        )
+        return [r["video_id"] for r in rows]
+
+    async def known_duration(self, video_id: str) -> float | None:
+        """The length any row of this video already holds, if one does."""
+        row = await self._fetchone(
+            "SELECT MAX(duration) AS d FROM tracks WHERE video_id=?", (video_id,)
+        )
+        return row["d"] if row else None
+
     async def set_cache_status(
         self, track_id: int, status: str, cache_path: str | None = None
     ) -> None:

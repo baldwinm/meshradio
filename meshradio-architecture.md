@@ -473,6 +473,17 @@ server never downloads or serves audio; the cacher runs in metadata-only mode.
 This keeps a public deployment clear of redistributing copyrighted media, and it
 means normal YouTube ad rules apply in the browser (unlike cache-first playback).
 
+oEmbed has no song length, and the speaker tab only reports one once a song
+plays, so `media/durations.py` reads lengths off each video's watch page
+(`metadata.fetch_duration`) and fills the shared rows. Songs a player holds go
+first (it publishes `duration.wanted` for the ones it has no length for), then
+newly ready tracks, then the rest of the archive newest first, one request at
+a time; each fill is announced as `track.duration` and every session's player
+updates its queue live, so the queue's total is right before anything plays.
+A video YouTube won't describe is retried three times per process, a run of
+failures pauses lookups for ten minutes, and a browser report still fills any
+blank left.
+
 ### The relay solves (2)
 
 A node with residential internet — the Pi at home, under systemd — polls the

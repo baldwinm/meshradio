@@ -24,6 +24,7 @@ from .ingest.mesh import MeshIngest
 from .ingest.relay import RelayPusher
 from .ingest.service import IngestService
 from .media.cacher import Cacher, ytdlp_version
+from .media.durations import DurationService
 from .media.player import EmbedBackend, MpvBackend, NullBackend, PlayerService, WebBackend
 from .media.radio import RadioService
 from .runtime import spawn
@@ -134,6 +135,9 @@ async def run(config, demo: bool = False) -> None:
     services = [player, cacher, power]
     if panel is not None:
         services.insert(2, panel)
+    # Embed hosting never downloads, so song lengths are looked up instead.
+    if isinstance(player.backend, EmbedBackend):
+        services.append(DurationService(db, bus))
     if config.mesh.enabled:
         services.append(MeshIngest(config.mesh, ingest, bus))
     if config.corescope.enabled:
