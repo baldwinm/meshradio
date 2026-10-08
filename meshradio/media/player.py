@@ -468,17 +468,20 @@ class PlayerService(Service):
         when the track has none, and the server holds it to the same rule."""
         if not (seconds > 0 and math.isfinite(seconds)):
             return
-        filled = await self.db.fill_track_duration(track_id, seconds)
+        if await self.db.fill_track_duration(track_id, seconds):
+            # Every session holding this song (this one included) fills it in;
+            # reposts share the length.
+            row = await self.db.track_by_id(track_id)
+            if row is not None:
+                await self.db.fill_video_duration(row["video_id"], seconds)
+                self.bus.publish(
+                    TRACK_DURATION, {"video_id": row["video_id"], "duration": seconds}
+                )
         changed = False
         for t in [self.current, *self.queue]:
             if t and t["id"] == track_id and not t.get("duration"):
                 t["duration"] = seconds
                 changed = True
-                if filled:
-                    # Other sessions may hold the same song in their queues.
-                    self.bus.publish(
-                        TRACK_DURATION, {"video_id": t["video_id"], "duration": seconds}
-                    )
         if changed:
             self.publish_state()
 
@@ -569,12 +572,13 @@ class PlayerService(Service):
         """Have the songs this player holds without a length looked up, so
         the queue can show its total before they play (embed only — the
         appliance learns lengths when it downloads)."""
-        missing = {
-            t["video_id"] for t in [self.current, *self.queue] if t and not _duration(t)
-        } - self._lengths_asked
+        missing = list(dict.fromkeys(
+            t["video_id"] for t in [self.current, *self.queue]
+            if t and not _duration(t) and t["video_id"] not in self._lengths_asked
+        ))
         if missing:
-            self._lengths_asked |= missing
-            self.bus.publish(DURATION_WANTED, {"video_ids": sorted(missing)})
+            self._lengths_asked.update(missing)
+            self.bus.publish(DURATION_WANTED, {"video_ids": missing})
 
     # -- session persistence (embed hosting: survive deploys) -------------------
 

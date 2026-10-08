@@ -802,6 +802,18 @@ select option { background: #26262f; color: #d8dce6; }
   border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
   box-shadow: 0 4px 14px rgb(0 0 0 / 50%);
 }
+/* lengths.js's hidden player: in the viewport (browsers stall players they
+   think are off screen) but invisible and out of the way. */
+#yt-probe {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 200px;
+  height: 200px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
 #yt-window iframe, #yt-player {
   display: block;
   width: 100%;

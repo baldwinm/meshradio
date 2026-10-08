@@ -7,7 +7,15 @@ from meshradio.bus import DURATION_WANTED, TRACK_DURATION
 from meshradio.media import metadata
 from meshradio.media.durations import DurationService
 
-from .helpers import make_embed_player, make_player, make_ready_on, share
+from .helpers import (
+    client_for,
+    embed_app,
+    make_embed_player,
+    make_player,
+    make_ready_on,
+    page_app,
+    share,
+)
 
 
 def test_watch_page_lengths_are_read_from_either_marking():
@@ -109,3 +117,33 @@ async def test_queues_fill_in_live_as_lengths_arrive(db, bus, monkeypatch):
     finally:
         await service.stop()
         await player.stop()
+
+
+async def test_a_browser_report_reaches_every_session_holding_the_song(db, bus):
+    """One visitor's tab measures a song; another visitor with the same song
+    queued gets the length too, and so do its reposts."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-08-01", duration=None)
+    await make_ready_on(db, "bbbbbbbbbbb", "2026-08-01", duration=None)
+    mine, theirs = make_embed_player(db, bus), make_embed_player(db, bus)
+    await mine.play_day("2026-08-01")
+    await theirs.play_day("2026-08-01")
+    theirs.start()
+    try:
+        await asyncio.sleep(0)
+        queued = mine.queue[0]
+        await mine.report_duration(queued["id"], 241)
+        for _ in range(100):
+            if theirs.queue[0]["duration"]:
+                break
+            await asyncio.sleep(0.01)
+        assert mine.queue[0]["duration"] == 241
+        assert theirs.queue[0]["duration"] == 241
+    finally:
+        await theirs.stop()
+
+
+async def test_only_the_hosted_site_measures_lengths_in_the_browser(db, bus):
+    async with client_for(embed_app(db, bus)) as client:
+        assert "/static/js/lengths.js" in (await client.get("/")).text
+    async with client_for(page_app(db, bus)) as client:
+        assert "/static/js/lengths.js" not in (await client.get("/")).text
