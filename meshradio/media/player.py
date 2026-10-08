@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ..bus import PLAYER_STATE, TRACK_READY, EventBus
+from ..bus import DURATION_WANTED, PLAYER_STATE, TRACK_DURATION, TRACK_READY, EventBus
 from ..config import PlayerConfig
 from ..db import Database
 from ..runtime import Service, spawn
@@ -108,6 +108,9 @@ class PlayerService(Service):
         # is a close estimate kept in sync by /api/seek.
         self._pos_base: float = 0.0
         self._pos_epoch: float | None = None
+        # Embed tracks can lack a length (see media/durations.py); videos
+        # this player has already asked to have one looked up.
+        self._lengths_asked: set[str] = set()
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -118,10 +121,13 @@ class PlayerService(Service):
     async def _run(self) -> None:
         await self.backend.set_volume(self.volume)
         self.publish_state()
-        sub = self.bus.subscribe(TRACK_READY)
+        sub = self.bus.subscribe(TRACK_READY, TRACK_DURATION)
         try:
-            async for _topic, payload in sub:
-                await self.on_track_ready(payload["track"])
+            async for topic, payload in sub:
+                if topic == TRACK_DURATION:
+                    self.on_duration(payload["video_id"], payload["duration"])
+                else:
+                    await self.on_track_ready(payload["track"])
         finally:
             sub.close()
 
@@ -462,10 +468,28 @@ class PlayerService(Service):
         when the track has none, and the server holds it to the same rule."""
         if not (seconds > 0 and math.isfinite(seconds)):
             return
-        await self.db.fill_track_duration(track_id, seconds)
+        filled = await self.db.fill_track_duration(track_id, seconds)
         changed = False
         for t in [self.current, *self.queue]:
             if t and t["id"] == track_id and not t.get("duration"):
+                t["duration"] = seconds
+                changed = True
+                if filled:
+                    # Other sessions may hold the same song in their queues.
+                    self.bus.publish(
+                        TRACK_DURATION, {"video_id": t["video_id"], "duration": seconds}
+                    )
+        if changed:
+            self.publish_state()
+
+    def on_duration(self, video_id: str, seconds: float) -> None:
+        """A video's length became known (looked up, or reported by another
+        session's tab): fill it into this player's copies that lack one."""
+        if not (isinstance(seconds, int | float) and math.isfinite(seconds) and seconds > 0):
+            return
+        changed = False
+        for t in [self.current, *self.queue]:
+            if t and t["video_id"] == video_id and not _duration(t):
                 t["duration"] = seconds
                 changed = True
         if changed:
@@ -536,8 +560,21 @@ class PlayerService(Service):
 
     def publish_state(self) -> None:
         self.events.publish(PLAYER_STATE, self.state())
+        if self.embed:
+            self._ask_for_lengths()
         if self.on_state is not None:
             self.on_state()
+
+    def _ask_for_lengths(self) -> None:
+        """Have the songs this player holds without a length looked up, so
+        the queue can show its total before they play (embed only — the
+        appliance learns lengths when it downloads)."""
+        missing = {
+            t["video_id"] for t in [self.current, *self.queue] if t and not _duration(t)
+        } - self._lengths_asked
+        if missing:
+            self._lengths_asked |= missing
+            self.bus.publish(DURATION_WANTED, {"video_ids": sorted(missing)})
 
     # -- session persistence (embed hosting: survive deploys) -------------------
 
