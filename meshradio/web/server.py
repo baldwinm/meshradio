@@ -40,7 +40,7 @@ from ..bus import (
 )
 from ..db import Database
 from ..media.player import PlayerService
-from ..runtime import supervise
+from ..runtime import record_error, supervise
 from . import routes_admin, routes_api, routes_ingest, routes_pages, ws
 from .admin_auth import ADMIN_PATH, AdminSettings
 from .context import WebContext, absolute_url, forwarded_scheme
@@ -290,6 +290,23 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+class CountErrors:
+    """Counts a request or socket that raised — a 500 to the visitor — for
+    /healthz (see ``runtime.record_error``). The exception carries on to
+    Starlette's own handler, which logs it and answers."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await self.app(scope, receive, send)
+        except Exception:
+            if scope["type"] in ("http", "websocket"):
+                record_error("request" if scope["type"] == "http" else "websocket")
+            raise
+
+
 class VersionedStatic(StaticFiles):
     """Static files that tell the browser how long to keep them.
 
@@ -365,7 +382,12 @@ def create_app(
         if sessions is not None:
             await sessions.stop()
 
-    app = FastAPI(title="MeshRadio", lifespan=lifespan)
+    # No /docs, /redoc or /openapi.json: nothing outside this app calls its
+    # API except the relay, and FastAPI's defaults would hand every visitor
+    # a map of the routes.
+    app = FastAPI(
+        title="MeshRadio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
+    )
     # HTML, CSS and JS are mostly repeated markup — the archive pages compress
     # better than 10:1. Audio is already compressed, and gzipping it would just
     # burn CPU on the Pi, but it's over the 500-byte floor either way, so the
@@ -516,4 +538,6 @@ def create_app(
         # Before anything reads the client's address or scheme: the rate
         # limits, the admin sign-in throttle, the Secure cookie flag.
         app.add_middleware(ForwardedClient, hops=proxy_hops, trusted=list(trusted_proxies))
+    # Outermost, so a failure anywhere inside — a route or a middleware — counts.
+    app.add_middleware(CountErrors)
     return app

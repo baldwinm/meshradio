@@ -1,7 +1,12 @@
 # Uptime check for the public site: every ten minutes, ask /healthz whether
 # meshradio.co is up and still hearing from the mesh (ingest_age_s: seconds
-# since a relay push or an analyzer poll last succeeded). A failure is
-# checked once more two minutes later, so a deploy's restart doesn't count.
+# since a relay push or an analyzer poll last succeeded), whether the Pi is
+# still pushing (relay_age_s: the site polls the analyzers itself, so a
+# silent Pi never makes ingest stale), and whether anything has been
+# failing (errors_1h: crashed loops, failed background tasks and requests
+# that raised, which otherwise only reach the logs). A failure is checked
+# once more three minutes later, so a deploy's restart doesn't count: the
+# relay pushes every two minutes, and a fresh process has heard nothing yet.
 #
 # Still failing: open an issue labelled `uptime` (GitHub notifies the owner),
 # one per outage. Healthy again: comment and close it.
@@ -25,6 +30,10 @@ env:
   # Analyzers are polled every three minutes; half an hour of nothing means
   # every feed (and the Pi relay) has stopped, not one slow poll.
   MAX_INGEST_AGE_S: 1800
+  # The relay heartbeats every two minutes even with nothing new.
+  MAX_RELAY_AGE_S: 1800
+  # A one-off is in the logs; more than this in an hour is worth a look.
+  MAX_ERRORS_1H: 2
 
 jobs:
   check:
@@ -41,11 +50,22 @@ jobs:
               echo "no ingest for ${age}s (limit ${MAX_INGEST_AGE_S}s): $body"
               return 1
             fi
+            # "absent": a site still on a build from before these fields.
+            relay="$(echo "$body" | jq 'if has("relay_age_s") then .relay_age_s else "absent" end')"
+            if [ "$relay" = "null" ] || { [ "$relay" != '"absent"' ] && [ "${relay%.*}" -gt "$MAX_RELAY_AGE_S" ]; }; then
+              echo "no push from the Pi relay for ${relay}s (limit ${MAX_RELAY_AGE_S}s): $body"
+              return 1
+            fi
+            errors="$(echo "$body" | jq '.errors_1h // 0')"
+            if [ "$errors" -gt "$MAX_ERRORS_1H" ]; then
+              echo "$errors errors in the last hour (limit ${MAX_ERRORS_1H}); see the Render logs: $body"
+              return 1
+            fi
             echo "up: $body"
           }
           if out="$(check)"; then echo "$out"; echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          echo "$out; checking again in two minutes"
-          sleep 120
+          echo "$out; checking again in three minutes"
+          sleep 180
           if out="$(check)"; then echo "$out"; echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           echo "$out"
           echo "ok=false" >> "$GITHUB_OUTPUT"
@@ -68,7 +88,7 @@ jobs:
           fi
           if [ -z "$open" ]; then
             gh label create uptime --color B60205 --description "Opened by the uptime check" --force
-            printf 'The uptime check failed twice, two minutes apart.\n\n```\n%s\n```\n\n[Check run](%s). This issue closes itself when the site is healthy again.\n' \
+            printf 'The uptime check failed twice, three minutes apart.\n\n```\n%s\n```\n\n[Check run](%s). This issue closes itself when the site is healthy again.\n' \
               "$DETAIL" "$RUN" > body.md
             gh issue create --label uptime --title "meshradio.co health check failing" --body-file body.md
           fi

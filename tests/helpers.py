@@ -5,10 +5,13 @@ fixtures live in conftest.py."""
 
 import asyncio
 import json
+import socket
+import threading
 import time
 from contextlib import asynccontextmanager
 
 import httpx
+import uvicorn
 
 from meshradio.audio.routing import make_router
 from meshradio.bus import EventBus
@@ -173,6 +176,53 @@ async def cookie_for(app) -> str:
     """The signed session cookie a first page view hands out."""
     async with client_for(app, visited=False) as client:
         return (await client.get("/")).cookies["mr_sid"]
+
+
+class LiveServer:
+    """An app served over real HTTP on 127.0.0.1, on a thread with its own
+    event loop, for the browser tests. ``build(db, bus)`` is awaited on that
+    loop (the database lives there) and returns the app; the lifespan runs,
+    as it would under ``meshradio``."""
+
+    def __init__(self, build, db_path) -> None:
+        self.build = build
+        self.db_path = db_path
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            self.port = probe.getsockname()[1]
+        self.url = f"http://127.0.0.1:{self.port}"
+        self.server: uvicorn.Server | None = None
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=lambda: asyncio.run(self._serve()), daemon=True)
+
+    async def _serve(self) -> None:
+        db = Database(self.db_path)
+        await db.connect()
+        try:
+            app = await self.build(db, EventBus())
+            self.server = uvicorn.Server(uvicorn.Config(
+                app, host="127.0.0.1", port=self.port, log_level="warning", lifespan="on",
+            ))
+            serving = asyncio.create_task(self.server.serve())
+            while not self.server.started and not serving.done():
+                await asyncio.sleep(0.01)
+            self._ready.set()
+            await serving
+        finally:
+            self._ready.set()
+            await db.close()
+
+    def __enter__(self) -> "LiveServer":
+        self._thread.start()
+        self._ready.wait(15)
+        if self.server is None or not self.server.started:
+            raise RuntimeError("the test server didn't start")
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self.server is not None:
+            self.server.should_exit = True
+        self._thread.join(10)
 
 
 # -- instruments --------------------------------------------------------------

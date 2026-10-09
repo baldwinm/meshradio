@@ -13,6 +13,8 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from .runtime import record_error
+
 log = logging.getLogger(__name__)
 
 Listener = Callable[[str, dict[str, Any]], None]
@@ -100,6 +102,7 @@ class EventBus:
             try:
                 callback(topic, payload)
             except Exception:
+                record_error(f"listener:{topic}")
                 log.exception("listener on %s failed", topic)
         for sub in self._subs:
             if sub.topics and topic not in sub.topics:

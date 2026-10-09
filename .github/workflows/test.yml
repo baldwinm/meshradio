@@ -8,10 +8,10 @@
 # supports; lint and types run once, on the version Render runs.
 #
 # A Dependabot pull request that isn't a major version bump merges itself
-# once the suite and lint pass (the automerge job). A merge made with the
-# workflow's own token starts no push workflows, so the job then runs this
-# workflow on main by hand (workflow_dispatch): that run is what Render's
-# checksPass and the Pi's pi-deploy branch wait on.
+# once the suite, lint and the browser tests pass (the automerge job). A
+# merge made with the workflow's own token starts no push workflows, so the
+# job then runs this workflow on main by hand (workflow_dispatch): that run
+# is what Render's checksPass and the Pi's pi-deploy branch wait on.
 name: tests
 
 on:
@@ -50,8 +50,25 @@ jobs:
       # `python scripts/check_docs.py --fix` updates it.
       - run: uv run python scripts/check_docs.py
 
+  # The pages in headless Chromium (tests/browser): no script errors, and the
+  # player, the equalizer and the admin page still work. Kept out of the main
+  # suite because it needs Playwright and a browser the dev install lacks.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --locked --group dev --group browser
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run pytest -q tests/browser
+        env:
+          MESHRADIO_BROWSER_TESTS: "1"
+
   automerge:
-    needs: [test, lint]
+    needs: [test, lint, browser]
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&

@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from ..ingest.corescope import INGEST_BATCH
+from ..runtime import recent_errors
 from .context import ctx_of
 
 router = APIRouter()
@@ -128,6 +129,11 @@ async def healthz(request: Request):
     """Liveness + basic freshness; Render's health check hits this."""
     ctx = ctx_of(request)
     last = ctx.health["last_ingest"]
+    # Only a receiver hears from a relay; the uptime check reads this to
+    # notice the Pi going quiet, which ingest_age_s can't show while the
+    # analyzer feeds keep the archive fresh.
+    relay = ctx.health.get("feeds", {}).get("relay", {}).get("at")
+    errors = recent_errors(3600)
     return JSONResponse({
         "ok": True,
         "tracks": await ctx.db.channel_track_count(),
@@ -136,4 +142,9 @@ async def healthz(request: Request):
         # None on the embed host (it never runs yt-dlp) and until the
         # startup check has run; otherwise what the update timer left.
         "ytdlp_version": ctx.health.get("ytdlp_version"),
+        "relay_age_s": round(time.time() - relay, 1) if relay else None,
+        # Crashed loops, failed background tasks and requests that raised, by
+        # where they happened; the logs have the tracebacks.
+        "errors_1h": sum(errors.values()),
+        "error_sources": sorted(errors),
     })
