@@ -8,7 +8,7 @@ theme, and plays them — live as they arrive, and from a browsable archive of
 past days and themes. No hardware required: until the appliance kit exists,
 **your browser is the radio** via the built-in web player.
 
-There's a public instance at **[meshradio.onrender.com](https://meshradio.onrender.com)**
+There's a public instance at **[meshradio.co](https://meshradio.co)**
 — open it and press play. Full hardware/software design:
 [meshradio-architecture.md](meshradio-architecture.md).
 
@@ -271,6 +271,10 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   count, and cover art, so a link to `/archive/2026-08-11` says something
   before anyone clicks it. On an iPhone, **Add to Home Screen** names the app
   *MeshRadio* and uses the logo as its icon, not the day's theme.
+- **Install it as an app** — Chrome and Edge (Android and desktop) offer
+  *Install app*, and a home-screen icon opens in its own window without the
+  browser bar. It's still the live site: there's no offline mode, and on an
+  iPhone the music still stops when you switch apps (YouTube's rule).
 - **🎲 Keep playing** — never run out: when the queue empties, this keeps the
   music going with random songs pulled from the archive. Unlike **Start radio**
   it needs no YouTube access, so it's the "don't stop at the end of the day"
@@ -315,7 +319,7 @@ queue order) and each visitor's browser streams every song straight from
 YouTube via the IFrame player. That keeps a public deployment clear of
 redistributing copyrighted media, and each visitor gets **their own session
 player** (queue, position, current day) so nobody can pause or hijack anyone
-else's music. The [live instance](https://meshradio.onrender.com) is deployed
+else's music. The [live instance](https://meshradio.co) is deployed
 this way on Render — see [render.yaml](render.yaml) and
 [meshradio.render.toml](meshradio.render.toml).
 
@@ -509,6 +513,12 @@ What keeps it safe:
   minutes, so a clean-up doesn't rotate the scheduled ones out). The removal
   keeps the song's details, so **Put back** under Removed songs restores it
   exactly, plays aside.
+- **Songs YouTube won't play** (public site, under Removed songs). When a
+  visitor's player hits a video that was removed, made private or can't be
+  embedded, it skips the song and tells the server, which asks YouTube to
+  confirm. A confirmed one is marked unavailable, so it stops coming up in
+  replays and shuffles but stays listed on its day. **Try again** puts it
+  back in play.
 - **A hand-edited title or artist stays**: a late YouTube lookup or a relay
   re-push won't replace it, and the same video shared again later takes the
   corrected details. A merged artist spelling is remembered, so a song
@@ -632,12 +642,14 @@ hard crash.
 
 ## Project status
 
-**v0.9 — core software + web player + public hosting working, hardware
+**v0.10 — core software + web player + public hosting working, hardware
 integration pending.**
 
 Versions follow [Semantic Versioning](https://semver.org): new features bump the
 minor number and fixes the patch number. 1.0 is saved for when the radio runs on
-its own hardware (the 🟡 and ⬜ rows below).
+its own hardware (the 🟡 and ⬜ rows below). Each version is tagged `v<version>` on `main` once its
+CI passes ([release-tag.yml](.github/workflows/release-tag.yml)), so
+`git describe` on any checkout names the release it's running.
 
 | Area | State |
 |---|---|
@@ -708,6 +720,7 @@ deploy/meshradio.service   # systemd unit for the Pi relay
 render.yaml + *.render.toml # public embed-mode deployment
 .github/workflows/test.yml  # CI; Render deploys main only after it's green
 .github/workflows/pi-deploy.yml # moves pi-deploy to each green main commit
+.github/workflows/release-tag.yml # tags v<version> on main once it's green
 .github/workflows/uptime.yml    # ten-minute /healthz check; opens an issue on outage, errors or a quiet Pi
 deploy/auto-update.sh       # Pi updater (meshradio-autoupdate.timer runs it)
 scripts/check_docs.py       # CI: the documented test count matches the suite

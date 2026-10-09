@@ -1,0 +1,49 @@
+# Tags each version that reaches main green: when the test workflow passes on
+# a main commit whose pyproject.toml version has no `v<version>` tag yet, that
+# commit gets the tag. So `git describe` on the Pi (or any checkout) names
+# the release it is running, and a bump is all a release takes.
+#
+# Pushed with GITHUB_TOKEN, so the tag starts no workflows.
+name: release-tag
+
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency: release-tag
+
+jobs:
+  tag:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Tag the version
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "$SHA is not on main; no tag"
+            exit 0
+          fi
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)
+          if [ -z "$version" ]; then
+            echo "::error::no version in pyproject.toml"
+            exit 1
+          fi
+          if git rev-parse --quiet --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already tagged"
+            exit 0
+          fi
+          git tag "v$version" "$SHA"
+          git push origin "v$version"

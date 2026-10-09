@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from fastapi import APIRouter, HTTPException, Request
@@ -346,6 +347,41 @@ async def robots(request: Request):
         "Disallow: /search\n"
         "Disallow: /admin\n"
         f"Sitemap: {sitemap_url}\n"
+    )
+
+
+@router.get("/manifest.webmanifest")
+async def web_manifest(request: Request):
+    """What "Install app" / "Add to Home Screen" reads: the fixed name (not
+    the day's theme, as with the touch icon), the logo at the sizes Android
+    and desktop browsers want, and a window without browser chrome. It adds
+    no offline mode: the radio is live, and a cached page would be stale."""
+    v = ctx_of(request).templates.env.globals.get("asset_v", "")
+
+    def icon(name: str, size: int, purpose: str = "any") -> dict[str, str]:
+        return {"src": f"/static/{name}?v={v}", "sizes": f"{size}x{size}",
+                "type": "image/png", "purpose": purpose}
+
+    manifest = {
+        "id": "/",
+        "name": "MeshRadio",
+        "short_name": "MeshRadio",
+        "description": "Songs shared each day on the Austin MeshCore #music channel.",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#14141c",
+        "theme_color": "#14141c",
+        "icons": [
+            icon("icon-192.png", 192),
+            icon("icon-512.png", 512),
+            icon("icon-maskable-512.png", 512, "maskable"),
+        ],
+    }
+    return Response(
+        json.dumps(manifest, indent=2),
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 

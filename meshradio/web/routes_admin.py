@@ -60,6 +60,7 @@ from .admin_auth import (
     verify_password,
 )
 from .context import ctx_of, forwarded_scheme
+from .routes_api import unplayable_checks
 
 log = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ ACTION_LABELS = {
     "download_backup": "Downloaded a backup",
     "probe_feed": "Probed a feed",
     "relay_resend": "Re-sent everything to the public site",
-    "retry_track": "Retried a download",
+    "retry_track": "Retried a song",
     "change_setting": "Changed a setting",
     "undo": "Undid",
 }
@@ -788,17 +789,23 @@ async def _snapshot_before_removal(settings: AdminSettings) -> None:
 
 @router.post("/tracks/{track_id}/retry")
 async def retry_track(request: Request, track_id: int):
-    """Device panel: send a failed download back through the cacher."""
+    """Send a failed song back through the cacher: a failed download on the
+    device, or (public site) a video the player reported YouTube won't play,
+    with every share of it, so the next failure is checked afresh."""
     _token, _form = await checked_form(request)
     ctx = ctx_of(request)
-    if is_embed(request):
-        raise HTTPException(404)
     track, date = await _track_or_404(request, track_id)
-    await ctx.db.set_cache_status(track_id, "pending")
-    ctx.bus.publish(TRACK_DISCOVERED, {"track": await ctx.db.track_by_id(track_id)})
+    if is_embed(request):
+        rows = await ctx.db.retry_video(track["video_id"])
+        unplayable_checks(request).pop(track["video_id"], None)
+    else:
+        await ctx.db.set_cache_status(track_id, "pending")
+        rows = [{**track, "cache_status": "pending", "cache_path": None}]
+    for row in rows:
+        ctx.bus.publish(TRACK_DISCOVERED, {"track": row})
     await ctx.db.log_admin("retry_track", ip=client_ip(request), target=date,
                            before=_song_label(track))
-    return go(f"{ADMIN_PATH}/device")
+    return go(f"{ADMIN_PATH}/removed" if is_embed(request) else f"{ADMIN_PATH}/device")
 
 
 # -- removed songs ------------------------------------------------------------
@@ -809,8 +816,12 @@ async def removed_page(request: Request, done: int | None = None):
     token = await require_admin(request)
     ctx = ctx_of(request)
     banner = await ctx.db.admin_log_entry(done) if done else None
+    # On the public site a "failed" song is one YouTube won't play (the
+    # device lists its failed downloads on its own page instead).
+    unplayable = await ctx.db.failed_tracks() if is_embed(request) else []
     return render(request, "removed.html", token, section="removed",
-                  removed=await ctx.db.removed_tracks(), banner=banner, labels=ACTION_LABELS)
+                  removed=await ctx.db.removed_tracks(), unplayable=unplayable,
+                  banner=banner, labels=ACTION_LABELS)
 
 
 async def _put_back(request: Request, date: str, video_id: str) -> tuple[str, str]:
