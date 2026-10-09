@@ -1,0 +1,12 @@
+# Runs meshradio-autoupdate.service every ten minutes; see that file to install.
+
+[Unit]
+Description=Check for a new CI-passed MeshRadio commit
+
+[Timer]
+OnBootSec=5min
+OnCalendar=*:0/10
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target

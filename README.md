@@ -367,6 +367,20 @@ go in `/etc/meshradio/env` (`MESHRADIO_RELAY_TOKEN`, and
 `MESHRADIO_INGEST_TOKEN` if the node is itself a receiver), mode 0600, which
 the unit reads as an `EnvironmentFile`.
 
+The Pi can keep itself up to date: once CI passes on `main`, a timer
+([deploy/meshradio-autoupdate.timer](deploy/meshradio-autoupdate.service), the
+comments there say how to install it) pulls the new commit, reinstalls the
+package, restarts the service and checks `/healthz`, rolling back to the
+previous commit if the radio doesn't come up healthy. `journalctl -u
+meshradio-autoupdate` shows what it did. Without it, update by hand with `git
+pull`, `.venv/bin/pip install -e ".[media,hw]"` and `sudo systemctl restart
+meshradio`.
+
+GitHub also merges Dependabot's non-major updates once CI passes, and checks
+`https://meshradio.co/healthz` every ten minutes, opening an issue labelled
+`uptime` when the site is down or has stopped ingesting and closing it on
+recovery.
+
 ### Hardening
 
 The player has no login, so the web layer assumes no other site's page should be
@@ -683,6 +697,10 @@ meshradio/
 deploy/meshradio.service   # systemd unit for the Pi relay
 render.yaml + *.render.toml # public embed-mode deployment
 .github/workflows/test.yml  # CI; Render deploys main only after it's green
+.github/workflows/pi-deploy.yml # moves pi-deploy to each green main commit
+.github/workflows/uptime.yml    # ten-minute /healthz check; opens an issue on outage
+deploy/auto-update.sh       # Pi updater (meshradio-autoupdate.timer runs it)
+scripts/check_docs.py       # CI: the documented test count matches the suite
 ```
 
 Dev without media tooling: `pip install -e .` and run with `--demo` for

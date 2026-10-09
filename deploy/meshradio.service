@@ -23,7 +23,8 @@
 # Day-to-day:
 #   journalctl -u meshradio -f            # follow logs
 #   sudo systemctl restart meshradio      # apply config or code changes
-#   cd ~/meshradio && git pull && sudo systemctl restart meshradio   # update
+#   # update by hand (or let meshradio-autoupdate.timer do it):
+#   cd ~/meshradio && git pull && .venv/bin/pip install -e ".[media,hw]" && sudo systemctl restart meshradio
 
 [Unit]
 Description=MeshRadio — plays the mesh #music channel

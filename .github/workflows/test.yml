@@ -6,11 +6,18 @@
 # what CI tests is the pinned set the project resolved, not whatever the
 # index serves that day. The suite runs on every Python the project
 # supports; lint and types run once, on the version Render runs.
+#
+# A Dependabot pull request that isn't a major version bump merges itself
+# once the suite and lint pass (the automerge job). A merge made with the
+# workflow's own token starts no push workflows, so the job then runs this
+# workflow on main by hand (workflow_dispatch): that run is what Render's
+# checksPass and the Pi's pi-deploy branch wait on.
 name: tests
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -39,3 +46,33 @@ jobs:
       - run: uv sync --locked --group dev
       - run: uv run ruff check .
       - run: uv run mypy
+      # The test count in meshradio-architecture.md matches the suite;
+      # `python scripts/check_docs.py --fix` updates it.
+      - run: uv run python scripts/check_docs.py
+
+  automerge:
+    needs: [test, lint]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # A grouped pull request reports its largest bump; a major one waits
+      # for a person.
+      - if: steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr merge --merge "$PR_URL"
+          gh workflow run test.yml --ref main
