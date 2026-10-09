@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.9 — the core software is built, tested (476 tests), and running:
+*Status: v0.9 — the core software is built, tested (492 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -609,7 +609,18 @@ are caught up from the furthest song they still hold.
   an advisory against a library on a path the radio never touches shouldn't
   hold a deploy. The test job runs the suite on Python 3.11, 3.12 and 3.13,
   and a lint job runs `ruff check` and `mypy` (configured in `pyproject.toml`),
-  so a style or type regression holds a deploy the way a red suite does.
+  so a style or type regression holds a deploy the way a red suite does. The
+  lint job also runs `scripts/check_docs.py`, which fails when the test count
+  in this document's status line stops matching the suite (`--fix` rewrites
+  it). A Dependabot PR that isn't a major bump merges itself once the suite and
+  lint pass (the `automerge` job); a merge made with the workflow's token starts
+  no push workflows, so the job then dispatches the test workflow on `main`,
+  which is the run Render's `checksPass` and the Pi's `pi-deploy` branch wait on.
+- **Uptime check** ([uptime.yml](.github/workflows/uptime.yml)) — every ten
+  minutes GitHub asks `https://meshradio.co/healthz` whether the site is up and
+  has ingested within half an hour; a failure is retried once two minutes later
+  (so a deploy's restart doesn't count), then opens one issue labelled `uptime`,
+  which the next healthy check comments on and closes.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
   session count); Render's health check hits it, and a stale age means *every*
   ingest source (relay, CoreScope) went quiet.
@@ -629,6 +640,20 @@ are caught up from the furthest song they still hold.
   come from `/etc/meshradio/env` (`MESHRADIO_RELAY_TOKEN`, and
   `MESHRADIO_INGEST_TOKEN` for a node that is itself a receiver), read as an
   `EnvironmentFile`, instead of sitting in `config.toml`.
+- **Pi updates** follow CI the way Render does. When the test workflow passes on
+  `main`, [pi-deploy.yml](.github/workflows/pi-deploy.yml) moves a `pi-deploy`
+  branch to that commit (only forward). A timer on the Pi
+  ([deploy/meshradio-autoupdate.timer](deploy/meshradio-autoupdate.timer)) runs
+  [deploy/auto-update.sh](deploy/auto-update.sh) every ten minutes: it
+  fast-forwards the clone to `pi-deploy`, reinstalls the package into the venv
+  every time (a bare `git pull` once left a stale launcher that crash-looped
+  the service), restarts the service and waits for `/healthz` to say ok. If it
+  doesn't, the script puts the previous commit back, reinstalls, restarts, and
+  skips that commit from then on. A change touching nothing the Pi runs (docs,
+  tests, CI, the Render files, `uv.lock`) fast-forwards without a restart, and a
+  clone with local edits, local commits or another branch checked out is left
+  alone. It runs as root to restart the service, with git and pip run as the
+  clone's owner.
 - **Hardening config** — a public host should also set `[web] public_url` (canonical
   links and previews from config, not the `Host` header); a LAN appliance may set
   `[web] allowed_hosts`. The origin guard and security headers are on by default
