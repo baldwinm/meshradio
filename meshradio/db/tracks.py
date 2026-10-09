@@ -306,6 +306,35 @@ class TrackQueries(ThemeQueries):
                 (status, cache_path, track_id),
             )
 
+    async def mark_video_failed(self, video_id: str) -> list[dict[str, Any]]:
+        """Mark every share of a video unplayable (YouTube removed it or
+        turned embedding off); returns the rows that changed."""
+        async with self.transaction():
+            rows = await self._fetchall(
+                "SELECT id FROM tracks WHERE video_id=? AND cache_status!='failed'",
+                (video_id,),
+            )
+            await self.db.execute(
+                "UPDATE tracks SET cache_status='failed' "
+                "WHERE video_id=? AND cache_status!='failed'",
+                (video_id,),
+            )
+        return [t for r in rows if (t := await self.track_by_id(r["id"])) is not None]
+
+    async def retry_video(self, video_id: str) -> list[dict[str, Any]]:
+        """Send every failed share of a video back to pending; returns them."""
+        async with self.transaction():
+            rows = await self._fetchall(
+                "SELECT id FROM tracks WHERE video_id=? AND cache_status='failed'",
+                (video_id,),
+            )
+            await self.db.execute(
+                "UPDATE tracks SET cache_status='pending' "
+                "WHERE video_id=? AND cache_status='failed'",
+                (video_id,),
+            )
+        return [t for r in rows if (t := await self.track_by_id(r["id"])) is not None]
+
     async def pending_tracks(self) -> list[dict[str, Any]]:
         return await self._fetchall(
             "SELECT * FROM tracks WHERE cache_status='pending' ORDER BY ingested_at"

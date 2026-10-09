@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, BackgroundTasks, Path, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from ..bus import TRACK_FAILED
+from ..media import metadata
 from .context import ctx_of
 
+log = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# YouTube player errors that are about the video itself rather than this
+# browser: 2 = bad id, 100 = removed or private, 101/150 = the owner turned
+# embedding off. 5 (an HTML5 player hiccup) is left out.
+DEAD_VIDEO_CODES = frozenset({2, 100, 101, 150})
+# How long one video's report stays answered: a song is checked with YouTube
+# at most this often, however many tabs (or scripts) report it.
+UNPLAYABLE_RECHECK_S = 3600.0
 
 # A position or a length in seconds. Anything past a day is a mistake, and
 # ``inf``/``nan`` parse as floats too: a seek to infinity leaves the player's
@@ -122,6 +136,57 @@ async def api_ended(request: Request, track_id: int):
     ctx = ctx_of(request)
     advanced = await (await ctx.get_player(request)).notify_ended(track_id)
     return JSONResponse({"advanced": advanced})
+
+
+@router.post("/api/unplayable/{track_id}/{code}")
+async def api_unplayable(
+    request: Request, track_id: int, code: int, background: BackgroundTasks
+):
+    """The embed speaker tab's YouTube player refused the current song.
+
+    The report is unauthenticated and the tracks table is shared, so it is
+    only a hint: it counts for the song this visitor is playing right now,
+    and the song is marked unplayable only when YouTube's own oEmbed lookup
+    agrees it can't be embedded (a removed, private or embed-disabled video
+    gets no answer there). A region or age block, which oEmbed still
+    describes, leaves the song alone. The check runs after the response, so
+    the tab's skip to the next song isn't held up by it."""
+    ctx = ctx_of(request)
+    p = await ctx.get_player(request)
+    cur = p.current
+    if not p.embed or code not in DEAD_VIDEO_CODES or not cur or cur["id"] != track_id:
+        return JSONResponse({"checking": False})
+    checked = unplayable_checks(request)
+    now = time.monotonic()
+    video_id = cur["video_id"]
+    last = checked.get(video_id)
+    if last is not None and now - last < UNPLAYABLE_RECHECK_S:
+        return JSONResponse({"checking": False})
+    checked[video_id] = now
+    background.add_task(_confirm_unplayable, ctx, video_id, code)
+    return JSONResponse({"checking": True})
+
+
+def unplayable_checks(request: Request) -> dict[str, float]:
+    """Video id -> when it was last checked, per app (admin's Try again
+    clears an entry so a fresh failure is looked at again)."""
+    state = request.app.state
+    if not hasattr(state, "unplayable_checks"):
+        state.unplayable_checks = {}
+    return state.unplayable_checks
+
+
+async def _confirm_unplayable(ctx: Any, video_id: str, code: int) -> None:
+    if await metadata.fetch_oembed(video_id) is not None:
+        return
+    changed = await ctx.db.mark_video_failed(video_id)
+    if changed:
+        log.warning(
+            "YouTube won't play %s (player error %d); marked %d share(s) unplayable",
+            video_id, code, len(changed),
+        )
+    for row in changed:
+        ctx.bus.publish(TRACK_FAILED, {"track": row})
 
 
 @router.post("/api/duration/{track_id}/{seconds}")

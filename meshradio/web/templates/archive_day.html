@@ -46,7 +46,7 @@
       {% if track.cache_status == "ready" %}
         <button hx-post="/api/queue/{{ track.id }}" hx-swap="none">+ queue</button>
       {% elif track.cache_status == "failed" %}
-        <span class="badge failed">couldn't fetch audio</span>
+        <span class="badge failed">{{ "unavailable on YouTube" if embed_mode else "couldn't fetch audio" }}</span>
       {% else %}
         <span class="badge">caching…</span>
       {% endif %}

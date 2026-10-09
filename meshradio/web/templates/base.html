@@ -51,6 +51,10 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v={{ asset_v }}">
   <meta name="apple-mobile-web-app-title" content="MeshRadio">
   <meta name="application-name" content="MeshRadio">
+  {# Installable on Android and desktop (and a standalone window on iOS):
+     the manifest names the app and carries the larger icons. #}
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#14141c">
   <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
   {# defer: htmx only needs the DOM at DOMContentLoaded, and nothing calls its
      API at parse time, so there's no reason to block first paint on 48KB. #}

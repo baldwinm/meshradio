@@ -51,3 +51,31 @@ def test_the_icon_is_the_180px_opaque_png_ios_wants():
     width, height, _depth, color_type = struct.unpack(">IIBB", data[16:26])
     assert (width, height) == (180, 180)
     assert color_type in (0, 2, 3)                 # grey, RGB or palette — not 4/6 (alpha)
+
+
+async def test_the_manifest_makes_the_site_installable(db, bus):
+    """Chrome's install prompt needs a name, start URL, standalone display and
+    192 and 512 px icons; every page links it."""
+    async with client_for(page_app(db, bus)) as client:
+        assert '<link rel="manifest" href="/manifest.webmanifest">' in (await client.get("/")).text
+        resp = await client.get("/manifest.webmanifest")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/manifest+json")
+        manifest = resp.json()
+        assert manifest["name"] == "MeshRadio" and manifest["start_url"] == "/"
+        assert manifest["display"] == "standalone"
+        for icon in manifest["icons"]:
+            got = await client.get(icon["src"])
+            assert got.status_code == 200 and got.headers["content-type"] == "image/png"
+    sizes = {(i["sizes"], i["purpose"]) for i in manifest["icons"]}
+    assert sizes == {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")}
+
+
+def test_the_app_icons_are_opaque_pngs_of_their_stated_size():
+    for name, size in [("icon-192.png", 192), ("icon-512.png", 512),
+                       ("icon-maskable-512.png", 512)]:
+        data = (STATIC / name).read_bytes()
+        assert data[:8] == b"\x89PNG\r\n\x1a\n"
+        width, height, _depth, color_type = struct.unpack(">IIBB", data[16:26])
+        assert (width, height) == (size, size), name
+        assert color_type in (0, 2, 3), name

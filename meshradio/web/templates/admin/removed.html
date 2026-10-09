@@ -1,5 +1,34 @@
 {% extends "admin/base.html" %}
-{% block title %}Removed songs{% endblock %}
+{% block title %}Removed songs{% if embed %}
+<section>
+  <h2>Songs YouTube won't play</h2>
+  <p class="small muted">When a song's video is removed, made private or can't be embedded, the player skips it and YouTube confirms it, so it stops coming up in replays and shuffles. It stays listed on its day.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Day</th><th>Song</th><th>Shared by</th><th></th></tr></thead>
+      <tbody>
+      {% for t in unplayable %}
+        <tr>
+          <td class="mono">{{ t.date }}</td>
+          <td><a href="https://www.youtube.com/watch?v={{ t.video_id }}" rel="noopener noreferrer" target="_blank">{{ t.title or t.video_id }}</a></td>
+          <td>{{ t.sender }}</td>
+          <td class="actions">
+            <form method="post" action="/admin/tracks/{{ t.id }}/retry">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="btn" type="submit">Try again</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">Every song plays.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted"><b>Try again</b> puts the song (and any reposts of it) back in play. If YouTube still refuses it, the next listener's player reports it again.</p>
+</section>
+{% endif %}
+{% endblock %}
 {% block main %}
 <div class="top">
   <h1>Removed songs</h1>
@@ -30,4 +59,33 @@
   </table>
 </div>
 <p class="small muted"><b>Put back</b> returns the song to its day straight away, with its title and artist; its plays aren't restored. <b>Allow back</b> is for older removals that didn't keep the song's details: it lifts the block, and the song returns the next time the channel's whole history is read.</p>
+{% if embed %}
+<section>
+  <h2>Songs YouTube won't play</h2>
+  <p class="small muted">When a song's video is removed, made private or can't be embedded, the player skips it and YouTube confirms it, so it stops coming up in replays and shuffles. It stays listed on its day.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Day</th><th>Song</th><th>Shared by</th><th></th></tr></thead>
+      <tbody>
+      {% for t in unplayable %}
+        <tr>
+          <td class="mono">{{ t.date }}</td>
+          <td><a href="https://www.youtube.com/watch?v={{ t.video_id }}" rel="noopener noreferrer" target="_blank">{{ t.title or t.video_id }}</a></td>
+          <td>{{ t.sender }}</td>
+          <td class="actions">
+            <form method="post" action="/admin/tracks/{{ t.id }}/retry">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="btn" type="submit">Try again</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">Every song plays.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted"><b>Try again</b> puts the song (and any reposts of it) back in play. If YouTube still refuses it, the next listener's player reports it again.</p>
+</section>
+{% endif %}
 {% endblock %}

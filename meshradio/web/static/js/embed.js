@@ -27,9 +27,14 @@ function ytNudgePlay() {
 function onYtError(e) {
   // 101/150 = embedding disabled, 100 = removed, 2/5 = bad id/HTML5 error.
   // Whatever it is, this video won't play here — skip instead of stalling
-  // the session until someone presses next.
+  // the session until someone presses next. Report it first, while it is
+  // still this session's current song, so the server can check with YouTube
+  // and stop offering a video that is gone for good.
   if (embedTrackId !== null) {
-    fetch("/api/ended/" + embedTrackId, { method: "POST" });
+    const id = embedTrackId;
+    const ended = () => fetch("/api/ended/" + id, { method: "POST" });
+    fetch("/api/unplayable/" + id + "/" + e.data, { method: "POST" })
+      .then(ended, ended);
   }
 }
 
