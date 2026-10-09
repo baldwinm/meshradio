@@ -2,7 +2,8 @@
 //
 // These files are plain classic scripts sharing top-level bindings — no
 // build chain (architecture §9). Load order (radio → embed → eq → playbar)
-// matters only for top-level code; cross-file calls all happen after load.
+// matters only for top-level code; cross-file calls all happen after load,
+// which is why the socket waits for DOMContentLoaded.
 //
 // Web playback: exactly ONE connected page is the "speaker" (the server
 // elects the newest connection; the button below claims the role). The
@@ -79,7 +80,10 @@ function applyState(s) {
 }
 
 // Live state: drive the audio element and nudge htmx containers to re-fetch.
-(function connect() {
+// Opened once every script has run, not here: a state push can arrive while
+// the later files are still loading, and the handler calls into them
+// (trackPos is in playbar.js).
+function connectSocket() {
   const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
   socket = ws;
   ws.onmessage = (event) => {
@@ -87,5 +91,6 @@ function applyState(s) {
     if (msg.topic === "player.state") { trackPos(msg.data); applyState(msg.data); }
     document.body.dispatchEvent(new Event("meshradio:state"));
   };
-  ws.onclose = () => { socket = null; setTimeout(connect, 3000); };
-})();
+  ws.onclose = () => { socket = null; setTimeout(connectSocket, 3000); };
+}
+document.addEventListener("DOMContentLoaded", connectSocket);

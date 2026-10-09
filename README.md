@@ -108,7 +108,10 @@ CoreScope — themes, songs, senders — then polls every 3 minutes for new
 posts. Audio downloads into `data/cache/` in the background, two tracks at a
 time (`[cache] concurrency`), so a fresh backfill takes a few minutes. Run
 `pytest` if you want to check the install (CI does the same from the lockfile:
-`uv sync --locked --group dev && uv run pytest`).
+`uv sync --locked --group dev && uv run pytest`). The browser tests, which
+load the pages in headless Chromium, run on their own: `uv sync --group dev
+--group browser`, `uv run playwright install chromium` once, then
+`MESHRADIO_BROWSER_TESTS=1 uv run pytest tests/browser`.
 
 Verify it's working: the log shows `corescope poll: N new tracks`, and the
 Archive page fills with real days and themes. `meshradio --probe-feed` asks
@@ -344,7 +347,11 @@ history survives deploys, restarts, and spin-downs on its own, and the host
 also polls CoreScope directly. The relay going down
 no longer costs the archive. `/healthz` exposes liveness plus ingest freshness
 (Render's health check hits it; a stale `ingest_age_s` means every ingest
-source stopped).
+source stopped), how long since the relay last pushed (`relay_age_s`, since
+the host's own polling hides a quiet Pi), and how many unexpected failures
+the last hour saw (`errors_1h`: crashed loops, failed background tasks and
+requests that raised, with `error_sources` naming where; the log has the
+tracebacks).
 
 The DB is also snapshotted on a rotation (`[backup]` config): a copy is taken
 before migrations on each boot and every few hours after, so a bad migration or
@@ -378,8 +385,9 @@ meshradio`.
 
 GitHub also merges Dependabot's non-major updates once CI passes, and checks
 `https://meshradio.co/healthz` every ten minutes, opening an issue labelled
-`uptime` when the site is down or has stopped ingesting and closing it on
-recovery.
+`uptime` when the site is down, has stopped ingesting, hasn't heard from the
+Pi relay in half an hour, or logged more than two errors in the last hour,
+and closing it on recovery.
 
 ### Hardening
 
@@ -698,7 +706,7 @@ deploy/meshradio.service   # systemd unit for the Pi relay
 render.yaml + *.render.toml # public embed-mode deployment
 .github/workflows/test.yml  # CI; Render deploys main only after it's green
 .github/workflows/pi-deploy.yml # moves pi-deploy to each green main commit
-.github/workflows/uptime.yml    # ten-minute /healthz check; opens an issue on outage
+.github/workflows/uptime.yml    # ten-minute /healthz check; opens an issue on outage, errors or a quiet Pi
 deploy/auto-update.sh       # Pi updater (meshradio-autoupdate.timer runs it)
 scripts/check_docs.py       # CI: the documented test count matches the suite
 ```

@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.9 — the core software is built, tested (492 tests), and running:
+*Status: v0.9 — the core software is built, tested (499 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -186,6 +186,7 @@ meshradio/
 │   ├── power.py        # fuel gauge polling, safe shutdown
 │   └── provision.py    # first-boot AP-mode WiFi setup (nmcli)
 tests/                  # top-level; pytest-asyncio, shared builders in tests/helpers.py
+└── browser/            # the pages in headless Chromium (Playwright), run in their own CI job
 ```
 
 **Key dependency choices** (all boring on purpose): `meshcore`, `yt-dlp`, `python-mpv`, `FastAPI`+`uvicorn`, `httpx`, `htmx` (vendored single JS file), `luma.oled`, `gpiozero`, `aiosqlite`. No Redis, no Docker, no Node. Only the web/ingest core is a hard dependency: yt-dlp and python-mpv sit behind the `media` extra and the Pi hardware libraries (`meshcore`, `luma.oled`, `gpiozero`) behind `hw`, so a public embed host or a dev box installs neither. yt-dlp's YouTube extractor also needs a JavaScript runtime (deno) on the machine to solve YouTube's challenge.
@@ -612,18 +613,35 @@ are caught up from the furthest song they still hold.
   so a style or type regression holds a deploy the way a red suite does. The
   lint job also runs `scripts/check_docs.py`, which fails when the test count
   in this document's status line stops matching the suite (`--fix` rewrites
-  it). A Dependabot PR that isn't a major bump merges itself once the suite and
-  lint pass (the `automerge` job); a merge made with the workflow's token starts
+  it). A third job, `browser`, loads every public page on both an appliance and
+  an embed-mode server in headless Chromium (Playwright, its own `browser`
+  dependency group) and fails on any script or console error; it also plays,
+  skips and finishes a song through a stand-in YouTube player, flips the
+  equalizer, and signs in to the admin page to retitle a day. Those tests live
+  in `tests/browser` and only collect with `MESHRADIO_BROWSER_TESTS=1`, so the
+  main suite and its documented count stay as they were. A Dependabot PR that
+  isn't a major bump merges itself once the suite, lint and the browser tests
+  pass (the `automerge` job); a merge made with the workflow's token starts
   no push workflows, so the job then dispatches the test workflow on `main`,
   which is the run Render's `checksPass` and the Pi's `pi-deploy` branch wait on.
 - **Uptime check** ([uptime.yml](.github/workflows/uptime.yml)) — every ten
-  minutes GitHub asks `https://meshradio.co/healthz` whether the site is up and
-  has ingested within half an hour; a failure is retried once two minutes later
-  (so a deploy's restart doesn't count), then opens one issue labelled `uptime`,
-  which the next healthy check comments on and closes.
+  minutes GitHub asks `https://meshradio.co/healthz` whether the site is up,
+  has ingested within half an hour, has had a relay push within half an hour
+  (the host polls the analyzers itself, so ingest stays fresh while the Pi is
+  down), and has seen no more than two unexpected errors in the last hour. A
+  failure is retried once three minutes later (so a deploy's restart, which
+  hasn't heard from the relay yet, doesn't count), then opens one issue
+  labelled `uptime`, which the next healthy check comments on and closes.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
   session count); Render's health check hits it, and a stale age means *every*
-  ingest source (relay, CoreScope) went quiet.
+  ingest source (relay, CoreScope) went quiet. `relay_age_s` is the time since
+  the last relay push. `errors_1h` counts the last hour's unexpected failures,
+  which used to reach only the log: a supervised loop that crashed, a
+  background task that failed, a bus listener that raised, or a request that
+  raised (a 500). `error_sources` names where (a service or task name,
+  `request`), never what, since the endpoint is public. FastAPI's generated
+  `/docs`, `/redoc` and `/openapi.json` are switched off, so the route list
+  isn't published.
 - **DB backups** (`backup.py`) — rotating whole-DB snapshots (before migrations on
   each boot, then on an interval) for rollback from a bad migration or corruption,
   independent of host disk snapshots. Restore with `meshradio --list-backups` /
