@@ -387,7 +387,9 @@ GitHub also merges Dependabot's non-major updates once CI passes, and checks
 `https://meshradio.co/healthz` every ten minutes, opening an issue labelled
 `uptime` when the site is down, has stopped ingesting, hasn't heard from the
 Pi relay in half an hour, or logged more than two errors in the last hour,
-and closing it on recovery.
+and closing it on recovery. The issue is assigned to `baldwinm` (or the
+`UPTIME_ASSIGNEE` repository variable), so GitHub Mobile sends a push
+notification.
 
 ### Hardening
 
