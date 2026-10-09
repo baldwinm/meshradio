@@ -632,6 +632,9 @@ are caught up from the furthest song they still hold.
   failure is retried once three minutes later (so a deploy's restart, which
   hasn't heard from the relay yet, doesn't count), then opens one issue
   labelled `uptime`, which the next healthy check comments on and closes.
+  The issue is assigned to the `UPTIME_ASSIGNEE` repository variable
+  (default `baldwinm`), re-added on each failing check, because GitHub Mobile
+  pushes assignments but not every new issue on a watched repository.
 - **`/healthz`** — liveness plus ingest freshness (`ingest_age_s`, track count,
   session count); Render's health check hits it, and a stale age means *every*
   ingest source (relay, CoreScope) went quiet. `relay_age_s` is the time since

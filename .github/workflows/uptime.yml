@@ -8,8 +8,12 @@
 # once more three minutes later, so a deploy's restart doesn't count: the
 # relay pushes every two minutes, and a fresh process has heard nothing yet.
 #
-# Still failing: open an issue labelled `uptime` (GitHub notifies the owner),
-# one per outage. Healthy again: comment and close it.
+# Still failing: open an issue labelled `uptime`, one per outage, assigned to
+# UPTIME_ASSIGNEE (a repository variable, defaulting to the owner) so GitHub
+# Mobile sends a push notification; it only pushes for things like
+# assignments, not every new issue on a watched repository. Later failures
+# re-add the assignee if someone took it off. Healthy again: comment and
+# close it.
 #
 # GitHub turns scheduled workflows off after 60 days without a commit to the
 # repository; the Actions tab has the button to turn this back on.
@@ -34,6 +38,9 @@ env:
   MAX_RELAY_AGE_S: 1800
   # A one-off is in the logs; more than this in an hour is worth a look.
   MAX_ERRORS_1H: 2
+  # Who each outage issue is assigned to (Settings → Secrets and variables →
+  # Actions → Variables overrides it).
+  ASSIGNEE: ${{ vars.UPTIME_ASSIGNEE || 'baldwinm' }}
 
 jobs:
   check:
@@ -90,6 +97,11 @@ jobs:
             gh label create uptime --color B60205 --description "Opened by the uptime check" --force
             printf 'The uptime check failed twice, three minutes apart.\n\n```\n%s\n```\n\n[Check run](%s). This issue closes itself when the site is healthy again.\n' \
               "$DETAIL" "$RUN" > body.md
-            gh issue create --label uptime --title "meshradio.co health check failing" --body-file body.md
+            open="$(gh issue create --label uptime --title "meshradio.co health check failing" --body-file body.md)"
+            open="${open##*/}"
           fi
+          # Separate from the create, so a bad assignee still leaves the issue
+          # open; adding someone already assigned is a no-op.
+          gh issue edit "$open" --add-assignee "$ASSIGNEE" \
+            || echo "::warning::couldn't assign #$open to $ASSIGNEE"
           exit 0   # the issue is the alert; a red run every ten minutes would email too
