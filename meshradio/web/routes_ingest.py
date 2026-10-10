@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from .. import __version__
-from ..deployinfo import clean_node, health_view, read_status, running_commit
+from ..deployinfo import clean_node, health_view, read_status, running_commit, track_mismatch
 from ..ingest.corescope import INGEST_BATCH
 from ..runtime import recent_errors
 from .context import ctx_of
@@ -95,7 +95,8 @@ async def api_ingest(request: Request):
     ctx.health.setdefault("feeds", {})["relay"] = {"status": "ok", "at": time.time()}
     node = clean_node(payload.get("node"))
     if node is not None:
-        ctx.health["node"] = {**node, "at": time.time()}
+        ctx.health["node"] = {**node, "at": time.time(),
+                              "mismatch_since": await note_mismatch(ctx, node)}
     # Total lets the pusher detect a wiped DB (ephemeral hosting) and reset
     # its cursor for a full re-backfill.
     return JSONResponse({
@@ -157,14 +158,34 @@ async def healthz(request: Request):
         "error_sources": sorted(errors),
         # The Pi's auto-updater: on the Pi from its own report, on a relay
         # receiver from what the Pi last pushed; null where neither exists.
-        "pi_update": health_view(pi_update_status(ctx), now),
+        "pi_update": pi_update_view(ctx, now),
     })
 
 
-def pi_update_status(ctx) -> dict | None:
+# Since when the Pi has been on another commit (deployinfo.track_mismatch),
+# in the database: in memory, every deploy of this site would restart it.
+MISMATCH_KEY = "relay.pi_mismatch"
+
+
+async def note_mismatch(ctx, node: dict) -> float | None:
+    raw = await ctx.db.get_setting(MISMATCH_KEY, "") or ""
+    try:
+        previous = json.loads(raw) if raw else None
+    except ValueError:
+        previous = None
+    record = track_mismatch(previous if isinstance(previous, dict) else None,
+                            node, running_commit(), time.time())
+    if record != previous:
+        await ctx.db.set_setting(MISMATCH_KEY, json.dumps(record) if record else "")
+    return float(record["since"]) if record else None
+
+
+def pi_update_view(ctx, now: float) -> dict | None:
     """The Pi auto-updater's last report as this instance knows it: its own
-    file on the Pi, the relayed copy on the hosted site."""
+    file on the Pi; on the hosted site, the relayed copy, and how long the
+    Pi has been on a different commit from this site."""
     local = read_status()
     if local is not None:
-        return local
-    return (ctx.health.get("node") or {}).get("autoupdate")
+        return health_view(local, now)
+    node = ctx.health.get("node") or {}
+    return health_view(node.get("autoupdate"), now, node.get("mismatch_since"))

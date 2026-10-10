@@ -66,8 +66,23 @@
   <p class="small">{{ "This site" if updates.receiver else "This radio" }} runs <strong>v{{ updates.version }}</strong>{% if updates.commit %} · <a href="{{ updates.repo }}/commit/{{ updates.commit }}"><code>{{ updates.commit[:7] }}</code></a>{% endif %}</p>
   {% if updates.receiver %}
   {% if updates.pi %}
-  <p class="small">The Pi runs <strong>v{{ updates.pi.version or "?" }}</strong>{% if updates.pi.commit %} · <a href="{{ updates.repo }}/commit/{{ updates.pi.commit }}"><code>{{ updates.pi.commit[:7] }}</code></a>{% if updates.commit %} <span class="muted">· {{ "same as this site" if updates.pi.commit == updates.commit else "not the same as this site" }}</span>{% endif %}{% endif %}
+  <p class="small">The Pi runs <strong>v{{ updates.pi.version or "?" }}</strong>{% if updates.pi.commit %} · <a href="{{ updates.repo }}/commit/{{ updates.pi.commit }}"><code>{{ updates.pi.commit[:7] }}</code></a>{% endif %}
     <span class="muted">· reported {{ updates.pi.age|ago }} ago</span></p>
+  {% if updates.commit and updates.pi.commit %}
+  {% if updates.pi.mismatch_age is none %}
+  <p class="small muted">Same commit as this site.</p>
+  {% elif updates.pi.lagging %}
+  <p class="small"><span class="chip warn">Out of step</span> On a different commit from this site for {{ updates.pi.mismatch_age|ago }}. Both follow main once CI passes, so one of them isn't updating: see the auto-update line below, and this site's deploys on Render.</p>
+  {% else %}
+  {% if updates.pi.self_updating and au and au.state == "ok" %}
+  <p class="small muted">On a different commit from this site for {{ updates.pi.mismatch_age|ago }}. Normal right after a merge: this site redeploys on Render and the Pi updates at its next check (every ten minutes), each in its own time.</p>
+  {% elif updates.pi.self_updating %}
+  <p class="small">On a different commit from this site, and its auto-updater isn't moving it: see below.</p>
+  {% else %}
+  <p class="small muted">On a different commit from this site.</p>
+  {% endif %}
+  {% endif %}
+  {% endif %}
   {% else %}
   <p class="small muted">No word from the Pi since this site started (or it runs a version from before it reported itself). Its relay pushes every couple of minutes.</p>
   {% endif %}

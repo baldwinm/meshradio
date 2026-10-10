@@ -39,7 +39,7 @@ from .. import config_overrides as overrides_mod
 from ..bus import TRACK_DISCOVERED
 from ..config import ConfigError
 from ..db.fields import VIDEO_ID_RE
-from ..deployinfo import REPO_URL, describe, read_status, running_commit
+from ..deployinfo import LAG_S, REPO_URL, deployed_commit, describe, read_status, running_commit
 from ..ingest.corescope import format_probe, probe
 from ..ingest.parse import untitled_theme
 from ..ingest.relay import CURSOR_KEY
@@ -577,6 +577,13 @@ async def overview(request: Request):
             "href": "#updates",
             "action": "See why",
         })
+    if updates["pi"] and updates["pi"]["lagging"]:
+        attention.append({
+            "text": "The Pi has been on a different commit from this site for "
+                    f"{fmt_ago(updates['pi']['mismatch_age'])}",
+            "href": "#updates",
+            "action": "See why",
+        })
 
     return render(
         request, "overview.html", token, section="overview",
@@ -605,8 +612,14 @@ def update_info(ctx: Any, now: float) -> dict[str, Any]:
     if receiver:
         node = ctx.health.get("node")
         if node is not None:
-            pi = {"version": node["version"], "commit": node["commit"],
-                  "age": now - node["at"]}
+            since = node.get("mismatch_since")
+            mismatch_age = now - since if since is not None else None
+            pi = {"version": node["version"], "commit": deployed_commit(node, now),
+                  "age": now - node["at"], "mismatch_age": mismatch_age,
+                  # Only a Pi that updates itself is expected to keep up.
+                  "self_updating": node["autoupdate"] is not None,
+                  "lagging": node["autoupdate"] is not None
+                  and mismatch_age is not None and mismatch_age > LAG_S}
             status = status or node["autoupdate"]
     autoupdate = None
     # A receiver with no word from the Pi yet has nothing to say about it;
