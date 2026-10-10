@@ -33,18 +33,68 @@ body {
   padding: 0 1rem 3rem;
 }
 
-/* -- footer (the coffee link, public host only) --------------------------- */
+/* -- site footer ------------------------------------------------------------ */
 #site-footer {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
+  margin-top: 2rem;
+  padding: 1.25rem 1rem 0.9rem;
+  background: linear-gradient(#24242f, #1a1a23);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+#site-footer a { color: var(--text); text-decoration: none; }
+#site-footer a:hover, #site-footer a:focus-visible { color: var(--amber); text-decoration: underline; }
+.footer-top { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.footer-brand { flex: 1 1 11rem; }
+.footer-brand p { margin: 0.5rem 0 0; line-height: 1.45; }
+#site-footer .footer-logo {
+  font-family: "Lucida Console", "Courier New", monospace;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--green);
+}
+.footer-cols { flex: 2 1 22rem; display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.footer-cols > div { flex: 1 1 7rem; }
+/* #site-footer: outranks the skins' window-titlebar h2. */
+#site-footer .footer-cols h2 {
+  margin: 0 0 0.45rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-shadow: none;
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.footer-cols ul { list-style: none; margin: 0; padding: 0; }
+.footer-cols li { margin: 0.3rem 0; }
+.footer-note {
+  margin: 1.1rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
   border-top: 1px solid var(--face-lo);
-  text-align: center;
+  box-shadow: 0 1px 0 var(--face) inset;
+  font-size: 0.75rem;
 }
 /* Our own button in the donation site's colours, so the policy needs no
    third-party script, style or font for it. */
 #site-footer .coffee {
   display: inline-block;
-  padding: 0.4rem 1rem;
+  padding: 0.35rem 0.9rem;
   border: 1px solid #000;
   border-radius: 6px;
   background: #ffdd00;
@@ -52,7 +102,7 @@ body {
   font-weight: 600;
   text-decoration: none;
 }
-#site-footer .coffee:hover { filter: brightness(1.06); }
+#site-footer .coffee:hover { color: #000; filter: brightness(1.06); text-decoration: none; }
 
 /* -- help (? button + dialog) --------------------------------------------- */
 .help-btn {
@@ -110,6 +160,8 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .about { padding: 1rem 1.1rem; line-height: 1.65; }
 .about p { margin: 0 0 0.8rem; }
 .about strong { color: #cfd3dd; }
+/* the light skin's text is dark, so the dark skins' near-white bold vanished */
+html[data-skin="itunes"] .about strong { color: var(--text); }
 .about-links { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .btn-link {
   display: inline-block;
@@ -124,6 +176,22 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .btn-link:hover { color: var(--amber); filter: brightness(1.12); }
 .btn-link:active { border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo); }
 .about-version { margin-top: 1rem; color: var(--muted); font-size: 0.75rem; }
+/* privacy page: plain section headings inside the card, not titlebars */
+.about .privacy-h {
+  margin: 1.2rem 0 0.4rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-shadow: none;
+  text-align: left;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+}
+.privacy ul { margin: 0 0 0.8rem; padding-left: 1.1rem; }
+.privacy li { margin-bottom: 0.4rem; }
+.privacy .k { color: var(--green); font-family: "Lucida Console", "Courier New", monospace; }
+.privacy-updated { color: var(--muted); font-size: 0.75rem; }
 
 /* archive day: Play this day + Export to YouTube side by side */
 .day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
@@ -896,6 +964,7 @@ html[data-skin="itunes"] .btn-link:hover { color: #2a67d6; filter: brightness(1.
 html[data-skin="itunes"] .card,
 html[data-skin="itunes"] .eq-body,
 html[data-skin="itunes"] #yt-window,
+html[data-skin="itunes"] #site-footer,
 html[data-skin="itunes"] dialog#help,
 html[data-skin="itunes"] .stat {
   background: linear-gradient(#ffffff, #eef0f3);
@@ -974,6 +1043,7 @@ html[data-skin="wmp"] .btn-link:hover { color: #ff9b2f; filter: brightness(1.08)
 html[data-skin="wmp"] .card,
 html[data-skin="wmp"] .eq-body,
 html[data-skin="wmp"] #yt-window,
+html[data-skin="wmp"] #site-footer,
 html[data-skin="wmp"] dialog#help,
 html[data-skin="wmp"] .stat {
   background: linear-gradient(#17335a, #0b1c33);
@@ -1046,6 +1116,7 @@ html[data-skin="aurora"] .btn-link:hover { color: #29ffe3; filter: brightness(1.
 html[data-skin="aurora"] .card,
 html[data-skin="aurora"] .eq-body,
 html[data-skin="aurora"] #yt-window,
+html[data-skin="aurora"] #site-footer,
 html[data-skin="aurora"] dialog#help,
 html[data-skin="aurora"] .stat {
   background: linear-gradient(#2a1550, #190a30);

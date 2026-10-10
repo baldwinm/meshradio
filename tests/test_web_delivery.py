@@ -115,7 +115,7 @@ async def test_pages_have_their_own_titles(db, bus):
     async with client_for(page_app(db, bus)) as client:
         titles = {}
         for path in ("/", "/archive", "/archive/themes", "/archive/2026-08-01",
-                     "/search?q=x", "/stats", "/about"):
+                     "/search?q=x", "/stats", "/about", "/privacy"):
             body = (await client.get(path)).text
             titles[path] = body[body.index("<title>") + 7:body.index("</title>")]
     assert len(set(titles.values())) == len(titles), titles

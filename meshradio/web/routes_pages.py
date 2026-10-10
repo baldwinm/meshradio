@@ -334,6 +334,17 @@ async def about(request: Request):
     )
 
 
+# Bump when privacy.html changes what it says.
+PRIVACY_UPDATED = "October 10, 2026"
+
+
+@router.get("/privacy", response_class=HTMLResponse)
+async def privacy(request: Request):
+    return ctx_of(request).templates.TemplateResponse(
+        request, "privacy.html", {"privacy_updated": PRIVACY_UPDATED}
+    )
+
+
 @router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots(request: Request):
     """Crawlers: pages yes, machinery no. The API, partials and audio are not
@@ -391,7 +402,7 @@ async def sitemap(request: Request):
     and so is every week's recap."""
     ctx = ctx_of(request)
     days = await ctx.archive_days()
-    paths = ["/", "/archive", "/archive/themes", "/week", "/stats", "/about"]
+    paths = ["/", "/archive", "/archive/themes", "/week", "/stats", "/about", "/privacy"]
     paths += [f"/archive/{d['date']}" for d in days]
     paths += [f"/week/{s}" for s in week_starts(days)]
     urls = "".join(f"<url><loc>{absolute_url(request, p)}</loc></url>" for p in paths)

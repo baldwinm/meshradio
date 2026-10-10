@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Privacy · MeshRadio{% endblock %}
+{% block content %}
+<h2>Privacy</h2>
+{# Keep this in step with the code: the cookies (sessions.SESSION_COOKIE,
+   skin.js, admin_auth), what the server stores, and what the page loads
+   from YouTube. tests/test_privacy.py pins the parts that can drift. #}
+<div class="card about privacy">
+  <p class="privacy-updated">Last updated {{ privacy_updated }}</p>
+
+  <p><strong>The short version.</strong> MeshRadio has no accounts, no ads and
+    no analytics or tracking scripts. It doesn't sell or share anything about
+    you, and it only remembers what it needs to keep your music playing.</p>
+
+  <h3 class="privacy-h">Cookies and browser storage</h3>
+  <ul>
+    {% if embed_mode %}
+    <li><span class="k">mr_sid</span> keeps your own queue and player across
+      visits. It holds a random ID and nothing else, lasts a year, and can't be
+      read by scripts. Your queue is kept on the server under that ID and
+      deleted a week after it last changed.</li>
+    {% endif %}
+    <li><span class="k">skin</span> remembers which skin you picked, for a year.</li>
+    <li>Your equalizer settings and a couple of display choices are saved in
+      your browser's local storage. They never leave your device.</li>
+    <li>The site's admin gets a sign-in cookie. Visitors never do.</li>
+  </ul>
+  <p>All of these are first-party and needed for the site to work, so there's
+    no consent banner. Clearing this site's data in your browser removes them.</p>
+
+  <h3 class="privacy-h">YouTube</h3>
+  {% if embed_mode %}
+  <p>Songs play through YouTube's embedded player, and song thumbnails load
+    from YouTube's image servers. That means YouTube sees your IP address and
+    can set its own cookies while you listen, under
+    <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's privacy policy</a>.
+    MeshRadio doesn't control or receive any of that data.</p>
+  {% else %}
+  <p>This radio plays audio it has saved itself, but song thumbnails still
+    load from YouTube's image servers, so YouTube sees your IP address when
+    your browser fetches them, under
+    <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's privacy policy</a>.</p>
+  {% endif %}
+
+  <h3 class="privacy-h">Your IP address</h3>
+  <p>MeshRadio uses your address for a short time, in memory only, to stop any
+    one visitor from flooding the site with requests. It doesn't write visitor
+    addresses to disk or keep access logs.
+    {% if embed_mode %}The site is hosted on
+    <a href="https://render.com/privacy" target="_blank" rel="noopener">Render</a>,
+    which may keep its own standard request logs.{% endif %}
+    Attempts to sign in to the admin page, and changes made there, are logged
+    with the address they came from.</p>
+
+  <h3 class="privacy-h">Songs and names</h3>
+  <p>The songs, themes and names you see here come from the Austin MeshCore
+    <strong>#music</strong> channel, which is public to anyone on the mesh.
+    Each song is shown with the name its sharer used on the channel. If you
+    shared a song and want your name or the song taken down,
+    <a href="{{ github_url }}/issues/new" target="_blank" rel="noopener">open an issue on GitHub</a>
+    and it will be removed.</p>
+
+  <h3 class="privacy-h">Changes and questions</h3>
+  <p>Changes to this page show up here with a new date, and every past version
+    is in the <a href="{{ github_url }}" target="_blank" rel="noopener">project's
+    history on GitHub</a>. Questions go to the same
+    <a href="{{ github_url }}/issues" target="_blank" rel="noopener">issue tracker</a>.</p>
+</div>
+{% endblock %}
