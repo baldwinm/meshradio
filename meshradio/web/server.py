@@ -30,6 +30,7 @@ from starlette.datastructures import Headers
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 
+from .. import __version__
 from ..bus import (
     INGEST_STATUS,
     THEME_CREATED,
@@ -405,6 +406,9 @@ def create_app(
     # base.html builds every page's link-preview tags from the live request.
     templates.env.globals["absolute_url"] = absolute_url
     templates.env.globals["asset_v"] = _asset_version()
+    # The site footer (base.html) shows both on every page.
+    templates.env.globals["version"] = __version__
+    templates.env.globals["github_url"] = routes_pages.GITHUB_URL
     # Public embed hosting only: the Buy-Me-a-Coffee button pulls an external
     # CDN script, so keep it off the offline LAN/appliance skin. player_factory
     # is set exactly when we're in embed mode (see app.py).

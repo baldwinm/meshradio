@@ -141,16 +141,64 @@
     {% block content %}{% endblock %}
   </main>
   <button id="audio-ctl" hidden></button>
-  {% if embed_mode %}
-  <!-- Public host only. A plain link, not the donation site's button script:
-       that script styled itself inline and pulled a font from a third CDN,
-       which were the only reasons the Content-Security-Policy allowed either.
-       Kept outside <main> so htmx partial swaps never destroy it. -->
+  {# Site footer, on every public page (the admin pages have their own base).
+     Outside <main> so htmx partial swaps never destroy it; its own links are
+     boosted like the header's so following one doesn't stop the song. #}
   <footer id="site-footer">
-    <a class="coffee" href="https://www.buymeacoffee.com/meshradio" target="_blank"
-       rel="noopener">☕ Buy me a coffee</a>
+    <div class="footer-top">
+      <div class="footer-brand">
+        <a class="footer-logo" href="/">📻 MeshRadio</a>
+        <p>Songs shared each day on the Austin MeshCore <strong>#music</strong>
+           channel, played against that day's theme.</p>
+      </div>
+      <div class="footer-cols" role="navigation" aria-label="Site">
+        <div hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
+          <h2>Listen</h2>
+          <ul>
+            <li><a href="/">Now Playing</a></li>
+            <li><a href="/archive">Archive</a></li>
+            <li><a href="/archive/themes">All themes</a></li>
+            <li><a href="/week">This week</a></li>
+            <li><a href="/stats">Stats</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>Community</h2>
+          <ul>
+            <li><a href="/about" hx-boost="true" hx-target="main" hx-select="main"
+                   hx-swap="outerHTML show:window:top">About</a></li>
+            <li><a href="https://austinmesh.org" target="_blank" rel="noopener">Austin Mesh&nbsp;↗</a></li>
+            <li><a href="{{ github_url }}" target="_blank" rel="noopener">GitHub&nbsp;↗</a></li>
+            <li><a href="{{ github_url }}/issues/new" target="_blank" rel="noopener">Report a bug&nbsp;↗</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>Follow</h2>
+          <ul>
+            <li><a href="/feed.xml">Daily themes (RSS)</a></li>
+            <li><a href="/weekly.xml">Weekly recap (RSS)</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    {% if embed_mode %}
+    {# Public host only: the site streams YouTube's player rather than serving
+       audio, and the donation link is a plain link, not the donation site's
+       button script (that script styled itself inline and pulled a font from
+       a third CDN, which were the only reasons the Content-Security-Policy
+       allowed either). #}
+    <p class="footer-note">Songs play through YouTube's player and belong to
+      their artists and rights holders. MeshRadio stores no audio.</p>
+    {% endif %}
+    <div class="footer-bottom">
+      <span>© 2026 MeshRadio · <a href="{{ github_url }}/blob/main/LICENSE"
+        target="_blank" rel="noopener">MIT License</a> · v{{ version }}</span>
+      {% if embed_mode %}
+      <a class="coffee" href="https://www.buymeacoffee.com/meshradio" target="_blank"
+         rel="noopener">☕ Buy me a coffee</a>
+      {% endif %}
+    </div>
   </footer>
-  {% endif %}
   <!-- Classic scripts sharing top-level bindings; order matters (see radio.js).
        No build chain, ever (architecture §9). -->
   <script src="/static/js/radio.js?v={{ asset_v }}"></script>
