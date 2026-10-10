@@ -104,8 +104,14 @@ function applyEmbed(s) {
     if (ytCurrentVid !== s.current.video_id) {
       ytCurrentVid = s.current.video_id;
       embedTrackId = s.current.id;
-      ytPlayer.loadVideoById(ytCurrentVid, s.position || 0);
-      if (s.status === "playing") ytNudgePlay();
+      // loadVideoById starts playing on its own; a paused session (a tab
+      // rolled onto a newer day, or a song swapped while paused) only cues.
+      if (s.status === "playing") {
+        ytPlayer.loadVideoById(ytCurrentVid, s.position || 0);
+        ytNudgePlay();
+      } else {
+        ytPlayer.cueVideoById(ytCurrentVid, s.position || 0);
+      }
     } else if (s.status === "paused") {
       embedTrackId = s.current.id;
       ytPlayer.pauseVideo();

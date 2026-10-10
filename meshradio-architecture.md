@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.10 — the core software is built, tested (509 tests), and running:
+*Status: v0.10 — the core software is built, tested (511 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -574,11 +574,16 @@ loses nothing a visitor did in the last flush interval.
 
 The manager keeps every session's landing view current. It cues the newest
 day-with-songs when a session is opened or restored, re-checks on each visit for
-an idle/paused session parked on an older day, and — via a `track.ready` watcher —
-rolls idle sessions forward the moment a newer day's first song lands, pushing
-state to open tabs so they update with no reload. A session that's *actually*
-playing is always left alone; a restored "playing" flag is treated as stale
-(a page load has no audio going yet in embed mode), so it advances too.
+an idle or still-cued session parked on an older day, and — via a `track.ready` watcher —
+rolls those sessions forward the moment a newer day's first song lands, pushing
+state to open tabs so they update with no reload. "Still cued" is the player's
+`cued` flag: set by `cue_day`, cleared by any play or pause press. A session that's
+*actually* playing is always left alone, and so is one the visitor paused — a day
+picked from the Archive and paused used to be swapped for the newest day on the
+next request. A restored "playing" flag is treated as stale (a page load has no
+audio going yet in embed mode), so it advances too. In the tab, `embed.js` only
+*cues* a new video while the state says paused (`loadVideoById` would start it),
+so a roll-forward never starts music on its own.
 
 A session with no live player hears no `track.ready`, so a restored one would
 miss every song posted while it was away — one saved with a single song up would

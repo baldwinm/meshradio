@@ -101,6 +101,11 @@ class PlayerService(Service):
         # the day above it is a song the player never saw; a restored session
         # (it had no live player while the channel went on posting) queues those.
         self.seen_track_id: int = 0
+        # True while the player sits where cue_day parked it and nobody has
+        # pressed play since. Only such a player may be moved to a newer day
+        # behind the visitor's back (web/sessions.py): a day they chose and
+        # then paused is theirs to come back to.
+        self.cued: bool = False
         self.on_state: Callable[[], None] | None = None  # session persistence hook
         self._play_id: int | None = None
         # Playback position clock: base seconds + wall time since epoch while
@@ -231,6 +236,7 @@ class PlayerService(Service):
             return
         self.current = track
         self.status = "playing"
+        self.cued = False
         self._pos_base = 0.0
         self._pos_epoch = time.monotonic()
         self._play_id = await self.db.record_play(track["id"], self.output_getter())
@@ -242,6 +248,7 @@ class PlayerService(Service):
         await self._advance(completed=False)
 
     async def toggle_pause(self) -> None:
+        self.cued = False
         if self.status == "playing":
             self._pos_base = self.position()
             self._pos_epoch = None
@@ -330,6 +337,7 @@ class PlayerService(Service):
         self.current = tracks[0]
         self.queue = tracks[1:]
         self.status = "paused"
+        self.cued = True
         self._pos_base = 0.0
         self._pos_epoch = None
         self.publish_state()
