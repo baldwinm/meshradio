@@ -31,3 +31,10 @@ def _no_carried_errors():
     clear_errors()
     yield
     clear_errors()
+
+
+@pytest.fixture(autouse=True)
+def _no_autoupdate_report(tmp_path, monkeypatch):
+    """Point the Pi auto-updater's report at a file no test has written, so
+    a machine that happens to run the timer can't leak its own into a test."""
+    monkeypatch.setenv("MESHRADIO_AUTOUPDATE_STATUS", str(tmp_path / "autoupdate-status.json"))

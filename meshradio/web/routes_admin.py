@@ -33,11 +33,13 @@ from urllib.parse import parse_qs, urlencode
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
+from .. import __version__
 from .. import backup as backup_mod
 from .. import config_overrides as overrides_mod
 from ..bus import TRACK_DISCOVERED
 from ..config import ConfigError
 from ..db.fields import VIDEO_ID_RE
+from ..deployinfo import REPO_URL, describe, read_status, running_commit
 from ..ingest.corescope import format_probe, probe
 from ..ingest.parse import untitled_theme
 from ..ingest.relay import CURSOR_KEY
@@ -568,6 +570,13 @@ async def overview(request: Request):
             "href": f"{ADMIN_PATH}/backups",
             "action": "Open backups",
         })
+    updates = update_info(ctx, now)
+    if updates["autoupdate"] and updates["autoupdate"]["state"] == "bad":
+        attention.append({
+            "text": f"Pi auto-update: {updates['autoupdate']['text']}",
+            "href": "#updates",
+            "action": "See why",
+        })
 
     return render(
         request, "overview.html", token, section="overview",
@@ -582,7 +591,40 @@ async def overview(request: Request):
         labels=ACTION_LABELS,
         all_ok=not any(f["state"] == "bad" for f in feeds),
         connection=connection_info(request),
+        updates=updates,
     )
+
+
+def update_info(ctx: Any, now: float) -> dict[str, Any]:
+    """The overview's Updates panel: what this server runs, and — on the Pi
+    from its own report, on the hosted site from what the Pi relays — what
+    the Pi runs and whether its auto-updater is keeping it current."""
+    receiver = bool(ctx.ingest_token)
+    status = read_status()
+    pi = None
+    if receiver:
+        node = ctx.health.get("node")
+        if node is not None:
+            pi = {"version": node["version"], "commit": node["commit"],
+                  "age": now - node["at"]}
+            status = status or node["autoupdate"]
+    autoupdate = None
+    # A receiver with no word from the Pi yet has nothing to say about it;
+    # everywhere else a missing report is worth showing.
+    if status is not None or not receiver or pi is not None:
+        autoupdate = describe(status, now)
+        if status is not None:
+            autoupdate.update(commit=status["commit"], target=status["target"],
+                              updated_age=now - status["updated_at"]
+                              if status["updated_at"] else None)
+    return {
+        "version": __version__,
+        "commit": running_commit(),
+        "receiver": receiver,
+        "pi": pi,
+        "autoupdate": autoupdate,
+        "repo": REPO_URL,
+    }
 
 
 # Headers a proxy may use to say who the visitor is, shown as they arrived

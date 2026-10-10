@@ -11,6 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from .. import __version__
+from ..deployinfo import clean_node, health_view, read_status, running_commit
 from ..ingest.corescope import INGEST_BATCH
 from ..runtime import recent_errors
 from .context import ctx_of
@@ -91,6 +93,9 @@ async def api_ingest(request: Request):
                     continue  # skip malformed entries, keep the batch going
     ctx.health["last_ingest"] = time.time()
     ctx.health.setdefault("feeds", {})["relay"] = {"status": "ok", "at": time.time()}
+    node = clean_node(payload.get("node"))
+    if node is not None:
+        ctx.health["node"] = {**node, "at": time.time()}
     # Total lets the pusher detect a wiped DB (ephemeral hosting) and reset
     # its cursor for a full re-backfill.
     return JSONResponse({
@@ -134,8 +139,11 @@ async def healthz(request: Request):
     # analyzer feeds keep the archive fresh.
     relay = ctx.health.get("feeds", {}).get("relay", {}).get("at")
     errors = recent_errors(3600)
+    now = time.time()
     return JSONResponse({
         "ok": True,
+        "version": __version__,
+        "commit": running_commit(),
         "tracks": await ctx.db.channel_track_count(),
         "sessions": ctx.sessions.count() if ctx.sessions else None,
         "ingest_age_s": round(time.time() - last, 1) if last else None,
@@ -147,4 +155,16 @@ async def healthz(request: Request):
         # where they happened; the logs have the tracebacks.
         "errors_1h": sum(errors.values()),
         "error_sources": sorted(errors),
+        # The Pi's auto-updater: on the Pi from its own report, on a relay
+        # receiver from what the Pi last pushed; null where neither exists.
+        "pi_update": health_view(pi_update_status(ctx), now),
     })
+
+
+def pi_update_status(ctx) -> dict | None:
+    """The Pi auto-updater's last report as this instance knows it: its own
+    file on the Pi, the relayed copy on the hosted site."""
+    local = read_status()
+    if local is not None:
+        return local
+    return (ctx.health.get("node") or {}).get("autoupdate")

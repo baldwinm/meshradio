@@ -2,10 +2,12 @@
 stubbed: `systemctl` and `pip` only log what they were asked, and `curl`
 answers /healthz ok unless the checked-out tree contains meshradio/broken."""
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -94,6 +96,9 @@ class Pi:
     def log(self) -> str:
         return self.calls.read_text() if self.calls.exists() else ""
 
+    def report(self) -> dict:
+        return json.loads((self.state / "status.json").read_text())
+
 
 @pytest.fixture
 def pi(tmp_path):
@@ -105,6 +110,7 @@ def test_no_deploy_branch_yet_is_quiet(pi):
     assert result.returncode == 0
     assert "no pi-deploy branch" in result.stdout
     assert pi.log() == ""
+    assert pi.report()["result"] == "no-branch"
 
 
 def test_a_green_commit_is_installed_and_restarted(pi):
@@ -162,6 +168,65 @@ def test_local_edits_are_left_alone(pi):
     pi.ci_passes()
     result = pi.run()
     assert result.returncode == 1
-    assert "local edits" in result.stdout
+    assert "local edits to meshradio/app.py" in result.stdout
     assert pi.head() == before
     assert pi.log() == ""
+    assert pi.report()["result"] == "blocked"
+    assert "meshradio/app.py" in pi.report()["message"]
+
+
+def test_local_edits_elsewhere_ride_along(pi):
+    """A unit file adjusted in the clone (a different user, another path)
+    used to stop every update; only edits the update would overwrite do."""
+    unit = pi.clone / "deploy" / "meshradio-autoupdate.service"
+    pi.commit("deploy/meshradio-autoupdate.service", "User=pi")
+    pi.ci_passes()
+    assert pi.run().returncode == 0
+    unit.write_text("User=jembancroft")
+    target = pi.commit("meshradio/app.py", "v2")
+    pi.ci_passes()
+    result = pi.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pi.head() == target
+    assert unit.read_text() == "User=jembancroft"
+    assert pi.report()["result"] == "updated"
+
+
+def test_every_run_leaves_a_report(pi):
+    target = pi.commit("meshradio/app.py", "v2")
+    pi.ci_passes()
+    assert pi.run().returncode == 0
+    first = pi.report()
+    assert first["result"] == "updated"
+    assert first["commit"] == first["target"] == target
+    assert "now on" in first["message"]
+    assert abs(first["checked_at"] - time.time()) < 60
+    assert first["updated_at"] == first["checked_at"]
+    # A quiet run says so, and keeps the time of the last real update.
+    time.sleep(1.1)
+    assert pi.run().returncode == 0
+    second = pi.report()
+    assert second["result"] == "current"
+    assert second["checked_at"] > first["checked_at"]
+    assert second["updated_at"] == first["updated_at"]
+
+
+def test_a_rollback_and_the_holdback_after_it_are_reported(pi):
+    before = pi.head()
+    bad = pi.commit("meshradio/broken", "boom")
+    pi.ci_passes()
+    assert pi.run().returncode == 1
+    report = pi.report()
+    assert report["result"] == "rolled-back"
+    assert (report["commit"], report["target"]) == (before, bad)
+    assert report["updated_at"] is None
+    assert pi.run().returncode == 0
+    assert pi.report()["result"] == "skipped-bad"
+
+
+def test_a_run_that_dies_part_way_reports_failed(pi):
+    pi.commit("meshradio/app.py", "v2")
+    pi.ci_passes()
+    shutil.rmtree(pi.clone / ".git" / "refs" / "heads")   # HEAD names nothing now
+    assert pi.run().returncode != 0
+    assert pi.report()["result"] == "failed"
