@@ -267,6 +267,11 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   day: the theme, the songs (each linked), and the day's first cover. Subscribe
   in any feed reader to hear the day's theme without opening the site; every
   page advertises it, so most readers find it from the site's address alone.
+- **Footer and privacy page** — every page ends with a footer: links to the
+  main pages, the Austin mesh, the source and a bug report, both feeds, the
+  running version, and `/privacy`, which says plainly which cookies the site
+  sets and what it keeps. The public site adds a note that songs play through
+  YouTube, and the Buy me a coffee link.
 - **Shareable links** — a day pasted into a chat unfurls with its theme, song
   count, and cover art, so a link to `/archive/2026-08-11` says something
   before anyone clicks it. On an iPhone, **Add to Home Screen** names the app
@@ -648,7 +653,7 @@ hard crash.
 
 ## Project status
 
-**v0.11 — core software + web player + public hosting working, hardware
+**v0.12 — core software + web player + public hosting working, hardware
 integration pending.**
 
 Versions follow [Semantic Versioning](https://semver.org): new features bump the

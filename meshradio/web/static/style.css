@@ -160,6 +160,8 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .about { padding: 1rem 1.1rem; line-height: 1.65; }
 .about p { margin: 0 0 0.8rem; }
 .about strong { color: #cfd3dd; }
+/* the light skin's text is dark, so the dark skins' near-white bold vanished */
+html[data-skin="itunes"] .about strong { color: var(--text); }
 .about-links { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .btn-link {
   display: inline-block;
@@ -174,6 +176,22 @@ dialog#help::backdrop { background: rgb(0 0 0 / 60%); }
 .btn-link:hover { color: var(--amber); filter: brightness(1.12); }
 .btn-link:active { border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo); }
 .about-version { margin-top: 1rem; color: var(--muted); font-size: 0.75rem; }
+/* privacy page: plain section headings inside the card, not titlebars */
+.about .privacy-h {
+  margin: 1.2rem 0 0.4rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-shadow: none;
+  text-align: left;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+}
+.privacy ul { margin: 0 0 0.8rem; padding-left: 1.1rem; }
+.privacy li { margin-bottom: 0.4rem; }
+.privacy .k { color: var(--green); font-family: "Lucida Console", "Courier New", monospace; }
+.privacy-updated { color: var(--muted); font-size: 0.75rem; }
 
 /* archive day: Play this day + Export to YouTube side by side */
 .day-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }

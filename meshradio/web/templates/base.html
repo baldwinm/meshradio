@@ -191,7 +191,9 @@
       their artists and rights holders. MeshRadio stores no audio.</p>
     {% endif %}
     <div class="footer-bottom">
-      <span>© 2026 MeshRadio · <a href="{{ github_url }}/blob/main/LICENSE"
+      <span>© 2026 MeshRadio · <a href="/privacy" hx-boost="true" hx-target="main"
+        hx-select="main" hx-swap="outerHTML show:window:top">Privacy</a> ·
+        <a href="{{ github_url }}/blob/main/LICENSE"
         target="_blank" rel="noopener">MIT License</a> · v{{ version }}</span>
       {% if embed_mode %}
       <a class="coffee" href="https://www.buymeacoffee.com/meshradio" target="_blank"

@@ -16,7 +16,7 @@ from meshradio.web.server import content_security_policy
 from .helpers import client_for, embed_app, make_ready_on, page_app, seed_day
 
 PAGES = ["/", "/archive", "/archive/themes", "/archive/2026-08-01", "/search?q=a",
-         "/stats", "/about", "/member/alice", "/nope",
+         "/stats", "/about", "/privacy", "/member/alice", "/nope",
          "/partials/now-playing", "/partials/queue", "/partials/day-nav"]
 
 

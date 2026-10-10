@@ -20,6 +20,7 @@ PAGES = [
     "/artist/Artist%20A",
     "/week",
     "/about",
+    "/privacy",
 ]
 
 

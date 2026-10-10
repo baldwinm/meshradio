@@ -1,3 +1,3 @@
 """MeshRadio — a standalone internet radio for the Austin MeshCore #music channel."""
 
-__version__ = "0.11.1"
+__version__ = "0.12.0"
