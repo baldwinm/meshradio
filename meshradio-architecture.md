@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.12 — the core software is built, tested (529 tests), and running:
+*Status: v0.12 — the core software is built, tested (532 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -636,7 +636,8 @@ are caught up from the furthest song they still hold.
   has ingested within half an hour, has had a relay push within half an hour
   (the host polls the analyzers itself, so ingest stays fresh while the Pi is
   down), has seen no more than two unexpected errors in the last hour, and
-  hasn't heard from the Pi that its auto-updater is failing (`pi_update.ok`). A
+  hasn't heard from the Pi that its auto-updater is failing or that it has
+  fallen out of step with the site (`pi_update.ok`). A
   failure is retried once three minutes later (so a deploy's restart, which
   hasn't heard from the relay yet, doesn't count), then opens one issue
   labelled `uptime`, which the next healthy check comments on and closes.
@@ -655,9 +656,14 @@ are caught up from the furthest song they still hold.
   isn't published. `version` and `commit` name the running code (`commit`
   from `RENDER_GIT_COMMIT` on Render, from the clone's `.git` on the Pi), and
   `pi_update` is the Pi auto-updater's last report in brief (`ok`, `result`,
-  `checked_age_s`, `commit`; no messages, since the endpoint is public): read
-  from the updater's file on the Pi, and from what the relay last pushed on
-  the hosted site; `null` when there is none.
+  `checked_age_s`, `commit`, `site_mismatch_s`; no messages, since the
+  endpoint is public): read from the updater's file on the Pi, and from what
+  the relay last pushed on the hosted site; `null` when there is none.
+  `site_mismatch_s` (hosted site only) is how long the Pi's deployed commit
+  has differed from the site's: both follow main once CI passes, so past
+  half an hour (`deployinfo.LAG_S`) `ok` turns false even while the updater
+  reports "current" (the deploy branch may have stopped moving, or the
+  site's deploys have).
 - **DB backups** (`backup.py`) — rotating whole-DB snapshots (before migrations on
   each boot, then on an interval) for rollback from a bad migration or corruption,
   independent of host disk snapshots. Restore with `meshradio --list-backups` /
@@ -701,7 +707,13 @@ are caught up from the furthest song they still hold.
   [deployinfo.py](meshradio/deployinfo.py) reads it; the relay sends it with
   each push as `node` (with the Pi's version and commit), and Admin →
   Overview → Updates shows it on both sides, flagging a run that was blocked,
-  rolled back or failed, or none for half an hour. With `[web] allowed_hosts`
+  rolled back or failed, or none for half an hour. The hosted side also
+  compares the Pi's deployed commit (its clone's, from the report, since a
+  docs-only update moves the clone without a restart; a stale report's
+  commit is ignored) with its own and keeps, in its database so a deploy of
+  the site doesn't restart it, since when the Pi has sat on a commit other
+  than the site's; the clock restarts only when the Pi moves. Right after a
+  merge that reads as normal, past half an hour as out of step. With `[web] allowed_hosts`
   pinned, `127.0.0.1` and `localhost` are allowed as well, since the updater's
   health check arrives under them and was otherwise refused, rolling every
   update back.

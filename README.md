@@ -390,7 +390,10 @@ package, restarts the service and checks `/healthz`, rolling back to the
 previous commit if the radio doesn't come up healthy. Each run leaves a
 report that **Admin → Overview → Updates** shows (on the Pi, and on the
 hosted site, which the Pi relays it to): the version and commit each side
-runs, when the updater last checked, and what happened. `journalctl -u
+runs, when the updater last checked, and what happened. A Pi briefly on a
+different commit from the site is normal right after a merge (the site
+redeploys on Render, the Pi checks every ten minutes); half an hour out of
+step is flagged. `journalctl -u
 meshradio-autoupdate` has the detail. Local edits to a file an update
 changes stop it (the overview says which); edits elsewhere, such as a unit
 file adjusted in the clone, ride along. Without it, update by hand with `git

@@ -2,9 +2,11 @@
 deploy/auto-update.sh, see test_auto_update.py) read on the Pi, relayed to
 the hosted site, and shown on the admin overview and in /healthz."""
 
+import json
 import time
 
 import httpx
+import pytest
 
 from meshradio import __version__, deployinfo
 from meshradio.config import RelayConfig
@@ -20,7 +22,24 @@ from .helpers import (
 )
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
+SITE = "c" * 40
 AUTH = {"Authorization": "Bearer s3cret"}
+
+
+@pytest.fixture
+def site_commit(monkeypatch):
+    """Pin the commit this process reports as running (it's cached, and would
+    otherwise be whatever the test checkout has)."""
+    monkeypatch.setenv("MESHRADIO_COMMIT", SITE)
+    deployinfo.running_commit.cache_clear()
+    yield SITE
+    deployinfo.running_commit.cache_clear()
+
+
+def _node(commit, result="current", clone=None, autoupdate=True):
+    report = {"checked_at": time.time() - 60, "result": result, "commit": clone or commit,
+              "target": clone or commit, "message": "up to date", "updated_at": None}
+    return {"version": "0.11.1", "commit": commit, "autoupdate": report if autoupdate else None}
 
 
 def test_a_report_is_checked_field_by_field():
@@ -88,7 +107,7 @@ async def test_the_relay_sends_the_pis_state_along(db, bus):
     assert sent["node"]["autoupdate"]["result"] == "updated"
 
 
-async def test_the_hosted_overview_shows_what_the_pi_relayed(db, bus, tmp_path):
+async def test_the_hosted_overview_shows_what_the_pi_relayed(db, bus, tmp_path, site_commit):
     app = relay_embed_app(db, bus, admin=admin_settings(tmp_path))
     async with client_for(app, visited=False) as client:
         await sign_in(client)
@@ -102,7 +121,8 @@ async def test_the_hosted_overview_shows_what_the_pi_relayed(db, bus, tmp_path):
         assert resp.status_code == 200
         page = (await client.get("/admin")).text
         assert "The Pi runs <strong>v0.9.0</strong>" in page and SHA[:7] in page
-        assert "not the same as this site" in page or deployinfo.running_commit() is None
+        assert "its auto-updater isn't moving it" in page
+        assert "Normal right after a merge" not in page
         assert "Pi auto-update: The new commit didn&#39;t come up healthy" in page   # Needs a look
         assert "bbbbbbb didn&#39;t come up healthy" in page
         health = (await client.get("/healthz")).json()["pi_update"]
@@ -127,3 +147,91 @@ async def test_the_pi_overview_shows_its_own_updater(db, bus, tmp_path):
         assert "Hasn&#39;t checked for updates lately" in page
         assert "Pi auto-update: Hasn&#39;t checked" in page
         assert "journalctl -u meshradio-autoupdate" in page
+
+
+def test_the_mismatch_clock_restarts_only_when_the_pi_moves():
+    now = time.time()
+    first = deployinfo.track_mismatch(None, _node(SHA), SITE, now)
+    assert first == {"pi": SHA, "since": now}
+    # Still on the same commit, whatever the site did meanwhile: keeps running.
+    assert deployinfo.track_mismatch(first, _node(SHA), "e" * 40, now + 600) == first
+    # The Pi moved (it is updating), just not onto this site's commit yet.
+    moved = deployinfo.track_mismatch(first, _node("d" * 40), SITE, now + 600)
+    assert moved == {"pi": "d" * 40, "since": now + 600}
+    assert deployinfo.track_mismatch(first, _node(SITE), SITE, now) is None
+    assert deployinfo.track_mismatch(None, _node(SITE[:7]), SITE, now) is None   # short form
+    assert deployinfo.track_mismatch(None, _node(SHA), None, now) is None        # site unknown
+    # A docs-only update moves the clone without a restart: the clone counts...
+    assert deployinfo.track_mismatch(None, _node(SHA, clone=SITE), SITE, now) is None
+    # ...while its report is fresh. One left behind by a stopped timer says
+    # nothing about a later update by hand.
+    stale = _node(SITE, clone=SHA)
+    stale["autoupdate"]["checked_at"] = now - 2 * 3600
+    assert deployinfo.track_mismatch(None, stale, SITE, now) is None
+
+
+async def _push(client, node):
+    resp = await client.post("/api/ingest", json={"messages": [], "node": node}, headers=AUTH)
+    assert resp.status_code == 200
+
+
+async def _backdate_mismatch(db, seconds):
+    """Pretend the Pi has been on its commit ``seconds`` longer."""
+    from meshradio.web.routes_ingest import MISMATCH_KEY
+    record = json.loads(await db.get_setting(MISMATCH_KEY))
+    record["since"] -= seconds
+    await db.set_setting(MISMATCH_KEY, json.dumps(record))
+
+
+async def test_a_pi_catching_up_is_normal_until_it_falls_out_of_step(
+        db, bus, tmp_path, site_commit):
+    app = relay_embed_app(db, bus, admin=admin_settings(tmp_path))
+    async with client_for(app, visited=False) as client:
+        await sign_in(client)
+        # Just after a merge: the site has deployed, the Pi hasn't checked yet.
+        await _push(client, _node(SHA))
+        page = (await client.get("/admin")).text
+        assert "Normal right after a merge" in page and "every ten minutes" in page
+        assert "Out of step" not in page and "different commit from this site for 0" in page
+        view = (await client.get("/healthz")).json()["pi_update"]
+        assert view["ok"] is True and view["site_mismatch_s"] < 60
+
+        # Still on it half an hour on, while its updater keeps saying "current"
+        # (the deploy branch stopped moving, say): out of step, and an alert.
+        await _backdate_mismatch(db, deployinfo.LAG_S + 60)
+        await _push(client, _node(SHA))
+        page = (await client.get("/admin")).text
+        assert "Out of step" in page
+        assert "The Pi has been on a different commit from this site for 31 min" in page
+        view = (await client.get("/healthz")).json()["pi_update"]
+        assert view["ok"] is False and view["result"] == "current"
+
+    # The site redeploys (a new process, nothing in memory): the Pi is still
+    # stuck, and the clock says so rather than starting again.
+    app = relay_embed_app(db, bus, admin=admin_settings(tmp_path))
+    async with client_for(app, visited=False) as client:
+        await sign_in(client)
+        await _push(client, _node(SHA))
+        view = (await client.get("/healthz")).json()["pi_update"]
+        assert view["ok"] is False and view["site_mismatch_s"] > deployinfo.LAG_S
+
+        # Caught up: the clock stops and the warning goes.
+        await _push(client, _node(SITE))
+        page = (await client.get("/admin")).text
+        assert "Same commit as this site." in page and "Out of step" not in page
+        view = (await client.get("/healthz")).json()["pi_update"]
+        assert view["ok"] is True and view["site_mismatch_s"] is None
+
+
+async def test_a_pi_without_the_updater_is_not_expected_to_keep_up(
+        db, bus, tmp_path, site_commit):
+    app = relay_embed_app(db, bus, admin=admin_settings(tmp_path))
+    async with client_for(app, visited=False) as client:
+        await sign_in(client)
+        await _push(client, _node(SHA, autoupdate=False))
+        await _backdate_mismatch(db, 10 * deployinfo.LAG_S)
+        await _push(client, _node(SHA, autoupdate=False))
+        page = (await client.get("/admin")).text
+        assert "On a different commit from this site.</p>" in page
+        assert "Out of step" not in page and "Normal right after a merge" not in page
+        assert (await client.get("/healthz")).json()["pi_update"] is None

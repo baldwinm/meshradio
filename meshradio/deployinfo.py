@@ -28,9 +28,14 @@ REPO_URL = "https://github.com/baldwinm/meshradio"
 # running (disabled, removed, or the Pi's clock or systemd in trouble).
 STALE_S = 30 * 60
 
+# Both the site and the Pi follow main once CI passes, so after a merge they
+# should match within one of the Pi's ten-minute checks plus a restart. On
+# a different commit for longer than this, one of them isn't keeping up.
+LAG_S = 30 * 60
+
 # What auto-update.sh reports, and what each means for "is it working".
 _RESULTS = {
-    "current": ("ok", "Up to date"),
+    "current": ("ok", "Up to date as of its last check"),
     "updated": ("ok", "Updated and healthy"),
     "fast-forwarded": ("ok", "Updated (nothing the radio runs changed, so no restart)"),
     "no-branch": ("ok", "Waiting for CI to publish the first deploy commit"),
@@ -134,6 +139,38 @@ def clean_node(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def deployed_commit(node: dict[str, Any], now: float) -> str | None:
+    """The commit a relayed node has deployed: its clone's, from a fresh
+    updater report (an update touching nothing the radio runs moves the
+    clone without a restart), else the one it started from — a report left
+    behind by a timer that stopped says nothing about a later update by
+    hand."""
+    report = node.get("autoupdate")
+    if report and report.get("commit") and now - report["checked_at"] <= STALE_S:
+        return report["commit"]
+    return node.get("commit")
+
+
+def _same_commit(a: str, b: str) -> bool:
+    return a.startswith(b) or b.startswith(a)
+
+
+def track_mismatch(previous: dict[str, Any] | None, node: dict[str, Any],
+                   site_commit: str | None, now: float) -> dict[str, Any] | None:
+    """Since when the Pi has sat on a commit other than this site's, as
+    ``{"pi": commit, "since": time}``; None while they match or either is
+    unknown. The clock restarts only when the Pi moves (a Pi that moved is
+    updating, however many merges came in between) — never because this
+    site redeployed, which a stuck Pi would otherwise hide behind every
+    merge. The caller keeps the record across restarts."""
+    pi = deployed_commit(node, now)
+    if not pi or not site_commit or _same_commit(pi, site_commit):
+        return None
+    if previous and previous.get("pi") == pi and isinstance(previous.get("since"), (int, float)):
+        return previous
+    return {"pi": pi, "since": now}
+
+
 def describe(status: dict[str, Any] | None, now: float) -> dict[str, Any]:
     """The overview's line for an auto-update report: ``state`` is ok, bad or
     none (no report at all), ``text`` says what happened, ``detail`` is the
@@ -149,14 +186,21 @@ def describe(status: dict[str, Any] | None, now: float) -> dict[str, Any]:
             "detail": status["message"]}
 
 
-def health_view(status: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
-    """The part of a report /healthz shows (it's public: no messages)."""
+def health_view(status: dict[str, Any] | None, now: float,
+                mismatch_since: float | None = None) -> dict[str, Any] | None:
+    """The part of a report /healthz shows (it's public: no messages).
+    ``mismatch_since`` comes from a relay receiver (see track_mismatch): a
+    Pi on a different commit from this site for longer than LAG_S isn't ok
+    either, whatever its updater says (the deploy branch may have stopped
+    moving, or this site's deploys have)."""
     if status is None:
         return None
     view = describe(status, now)
+    mismatch = round(now - mismatch_since, 1) if mismatch_since is not None else None
     return {
-        "ok": view["ok"],
+        "ok": bool(view["ok"]) and not (mismatch is not None and mismatch > LAG_S),
         "result": status["result"],
         "checked_age_s": round(view["age"], 1),
         "commit": status["commit"][:7] if status["commit"] else None,
+        "site_mismatch_s": mismatch,
     }
