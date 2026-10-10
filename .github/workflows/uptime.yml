@@ -4,7 +4,10 @@
 # still pushing (relay_age_s: the site polls the analyzers itself, so a
 # silent Pi never makes ingest stale), and whether anything has been
 # failing (errors_1h: crashed loops, failed background tasks and requests
-# that raised, which otherwise only reach the logs). A failure is checked
+# that raised, which otherwise only reach the logs), and whether the Pi's
+# auto-updater is keeping it current (pi_update.ok: false once a run is
+# blocked, rolled back or failed, or none has run for half an hour; the Pi
+# relays this with each push). A failure is checked
 # once more three minutes later, so a deploy's restart doesn't count: the
 # relay pushes every two minutes, and a fresh process has heard nothing yet.
 #
@@ -61,6 +64,11 @@ jobs:
             relay="$(echo "$body" | jq 'if has("relay_age_s") then .relay_age_s else "absent" end')"
             if [ "$relay" = "null" ] || { [ "$relay" != '"absent"' ] && [ "${relay%.*}" -gt "$MAX_RELAY_AGE_S" ]; }; then
               echo "no push from the Pi relay for ${relay}s (limit ${MAX_RELAY_AGE_S}s): $body"
+              return 1
+            fi
+            # null: no report yet (a Pi from before it relayed one, or no timer).
+            if [ "$(echo "$body" | jq '.pi_update.ok')" = "false" ]; then
+              echo "the Pi's auto-update isn't working (Admin → Overview → Updates says why): $body"
               return 1
             fi
             errors="$(echo "$body" | jq '.errors_1h // 0')"

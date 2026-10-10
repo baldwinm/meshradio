@@ -78,6 +78,10 @@ _NO_SESSION_PATHS = frozenset(
 )
 
 
+# Always allowed when [web] allowed_hosts is pinned (see create_app).
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost")
+
+
 def _sessionless(path: str) -> bool:
     return (
         path in _NO_SESSION_PATHS or path == ADMIN_PATH or path.startswith(_NO_SESSION_PREFIXES)
@@ -523,8 +527,14 @@ def create_app(
     # middleware either (each add_middleware wraps everything before it).
     app.add_middleware(OriginGuard)
     if allowed_hosts:
+        # Plus the machine's own names: the Pi's auto-updater checks
+        # http://127.0.0.1:8080/healthz after each update, and a pinned list
+        # without them answered it 400 and rolled every update back. A
+        # DNS-rebinding page arrives under its own host name, never these.
         app.add_middleware(
-            TrustedHostMiddleware, allowed_hosts=list(allowed_hosts), www_redirect=False
+            TrustedHostMiddleware,
+            allowed_hosts=[*allowed_hosts, *_LOOPBACK_HOSTS],
+            www_redirect=False,
         )
     if security_headers:
         # Outermost of all: the guards' own 403/400 answers get them too.

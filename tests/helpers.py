@@ -5,6 +5,7 @@ fixtures live in conftest.py."""
 
 import asyncio
 import json
+import os
 import socket
 import threading
 import time
@@ -139,11 +140,11 @@ def embed_app(db, bus, **kwargs):
     )
 
 
-def relay_embed_app(db, bus, token="s3cret"):
+def relay_embed_app(db, bus, token="s3cret", **kwargs):
     """The hosted deployment with the relay receiver on, so a push lands in
     the rows every visitor is cued onto."""
     ingest = IngestService(db, bus, channel="#music")
-    return embed_app(db, bus, ingest=ingest, ingest_token=token)
+    return embed_app(db, bus, ingest=ingest, ingest_token=token, **kwargs)
 
 
 @asynccontextmanager
@@ -340,3 +341,13 @@ def csrf_for(client) -> str:
 async def admin_post(client, path, **data):
     """A signed-in admin's form post, CSRF token included."""
     return await client.post(path, data={"csrf": csrf_for(client), **data})
+
+
+def write_autoupdate_report(**fields) -> dict:
+    """Leave a Pi auto-updater report where this test's app reads it (the
+    conftest points MESHRADIO_AUTOUPDATE_STATUS at a per-test file)."""
+    report = {"checked_at": time.time(), "result": "current", "message": "up to date",
+              "commit": "a" * 40, "target": "a" * 40, "updated_at": None, **fields}
+    with open(os.environ["MESHRADIO_AUTOUPDATE_STATUS"], "w") as f:
+        json.dump(report, f)
+    return report

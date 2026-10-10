@@ -382,15 +382,21 @@ The Pi can keep itself up to date: once CI passes on `main`, a timer
 ([deploy/meshradio-autoupdate.timer](deploy/meshradio-autoupdate.service), the
 comments there say how to install it) pulls the new commit, reinstalls the
 package, restarts the service and checks `/healthz`, rolling back to the
-previous commit if the radio doesn't come up healthy. `journalctl -u
-meshradio-autoupdate` shows what it did. Without it, update by hand with `git
+previous commit if the radio doesn't come up healthy. Each run leaves a
+report that **Admin → Overview → Updates** shows (on the Pi, and on the
+hosted site, which the Pi relays it to): the version and commit each side
+runs, when the updater last checked, and what happened. `journalctl -u
+meshradio-autoupdate` has the detail. Local edits to a file an update
+changes stop it (the overview says which); edits elsewhere, such as a unit
+file adjusted in the clone, ride along. Without it, update by hand with `git
 pull`, `.venv/bin/pip install -e ".[media,hw]"` and `sudo systemctl restart
 meshradio`.
 
 GitHub also merges Dependabot's non-major updates once CI passes, and checks
 `https://meshradio.co/healthz` every ten minutes, opening an issue labelled
 `uptime` when the site is down, has stopped ingesting, hasn't heard from the
-Pi relay in half an hour, or logged more than two errors in the last hour,
+Pi relay in half an hour, logged more than two errors in the last hour, or
+hears from the Pi that its auto-updater is stuck or hasn't run in half an hour,
 and closing it on recovery. The issue is assigned to `baldwinm` (or the
 `UPTIME_ASSIGNEE` repository variable), so GitHub Mobile sends a push
 notification.
@@ -642,7 +648,7 @@ hard crash.
 
 ## Project status
 
-**v0.10 — core software + web player + public hosting working, hardware
+**v0.11 — core software + web player + public hosting working, hardware
 integration pending.**
 
 Versions follow [Semantic Versioning](https://semver.org): new features bump the

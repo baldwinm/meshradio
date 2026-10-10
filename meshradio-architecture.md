@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.10 — the core software is built, tested (511 tests), and running:
+*Status: v0.11 — the core software is built, tested (522 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -633,7 +633,8 @@ are caught up from the furthest song they still hold.
   minutes GitHub asks `https://meshradio.co/healthz` whether the site is up,
   has ingested within half an hour, has had a relay push within half an hour
   (the host polls the analyzers itself, so ingest stays fresh while the Pi is
-  down), and has seen no more than two unexpected errors in the last hour. A
+  down), has seen no more than two unexpected errors in the last hour, and
+  hasn't heard from the Pi that its auto-updater is failing (`pi_update.ok`). A
   failure is retried once three minutes later (so a deploy's restart, which
   hasn't heard from the relay yet, doesn't count), then opens one issue
   labelled `uptime`, which the next healthy check comments on and closes.
@@ -649,7 +650,12 @@ are caught up from the furthest song they still hold.
   raised (a 500). `error_sources` names where (a service or task name,
   `request`), never what, since the endpoint is public. FastAPI's generated
   `/docs`, `/redoc` and `/openapi.json` are switched off, so the route list
-  isn't published.
+  isn't published. `version` and `commit` name the running code (`commit`
+  from `RENDER_GIT_COMMIT` on Render, from the clone's `.git` on the Pi), and
+  `pi_update` is the Pi auto-updater's last report in brief (`ok`, `result`,
+  `checked_age_s`, `commit`; no messages, since the endpoint is public): read
+  from the updater's file on the Pi, and from what the relay last pushed on
+  the hosted site; `null` when there is none.
 - **DB backups** (`backup.py`) — rotating whole-DB snapshots (before migrations on
   each boot, then on an interval) for rollback from a bad migration or corruption,
   independent of host disk snapshots. Restore with `meshradio --list-backups` /
@@ -677,10 +683,23 @@ are caught up from the furthest song they still hold.
   the service), restarts the service and waits for `/healthz` to say ok. If it
   doesn't, the script puts the previous commit back, reinstalls, restarts, and
   skips that commit from then on. A change touching nothing the Pi runs (docs,
-  tests, CI, the Render files, `uv.lock`) fast-forwards without a restart, and a
-  clone with local edits, local commits or another branch checked out is left
-  alone. It runs as root to restart the service, with git and pip run as the
-  clone's owner.
+  tests, CI, the Render files, `uv.lock`) fast-forwards without a restart. A
+  clone with local commits, another branch checked out, or local edits to a
+  file the update changes is left alone; edits to other files ride along (a
+  unit file adjusted in the clone used to stop every update, silently). It
+  runs as root to restart the service, with git and pip run as the clone's
+  owner. Every run, quiet ones included, writes
+  `/var/lib/meshradio-autoupdate/status.json` (`checked_at`, `result`:
+  current, updated, fast-forwarded, no-branch, skipped-bad, rolled-back,
+  blocked or failed, `message`, `commit`, `target`, `updated_at`), from an
+  exit trap so a run that dies part-way still reports `failed`.
+  [deployinfo.py](meshradio/deployinfo.py) reads it; the relay sends it with
+  each push as `node` (with the Pi's version and commit), and Admin →
+  Overview → Updates shows it on both sides, flagging a run that was blocked,
+  rolled back or failed, or none for half an hour. With `[web] allowed_hosts`
+  pinned, `127.0.0.1` and `localhost` are allowed as well, since the updater's
+  health check arrives under them and was otherwise refused, rolling every
+  update back.
 - **Hardening config** — a public host should also set `[web] public_url` (canonical
   links and previews from config, not the `Host` header); a LAN appliance may set
   `[web] allowed_hosts`. The origin guard and security headers are on by default

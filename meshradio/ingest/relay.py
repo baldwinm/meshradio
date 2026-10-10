@@ -24,6 +24,7 @@ import httpx
 
 from ..config import RelayConfig
 from ..db import Database
+from ..deployinfo import node_info
 from ..net import http_client
 from ..runtime import Service
 
@@ -95,7 +96,9 @@ class RelayPusher(Service):
         messages, newest = await self.collect(cursor)
         resp = await client.post(
             self.config.push_url.rstrip("/") + "/api/ingest",
-            json={"messages": messages},
+            # What this node runs and what its auto-updater last did, so the
+            # hosted admin page can show the Pi's state from anywhere.
+            json={"messages": messages, "node": node_info()},
         )
         resp.raise_for_status()
         data = resp.json()

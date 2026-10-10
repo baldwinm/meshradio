@@ -103,6 +103,11 @@ async def test_allowed_hosts_pin_the_instance(db, bus):
     async with client_for(app) as client:
         assert (await client.get("/api/state", headers={"host": "radio.local"})).status_code == 200
         assert (await client.get("/api/state", headers={"host": "evil.example"})).status_code == 400
+        # The machine's own names still answer: the auto-updater's health
+        # check after each update comes in as 127.0.0.1.
+        local = await client.get("/healthz", headers={"host": "127.0.0.1:8080"})
+        assert local.status_code == 200
+        assert (await client.get("/healthz", headers={"host": "localhost"})).status_code == 200
     # Unset (the default): any host, as a LAN box reached by IP needs.
     async with client_for(page_app(db, bus)) as client:
         by_ip = await client.get("/api/state", headers={"host": "192.168.1.20:8080"})

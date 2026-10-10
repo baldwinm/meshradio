@@ -60,6 +60,30 @@
     <a class="small" href="/admin/log">Whole activity log</a>
   </section>
 </div>
+{% set au = updates.autoupdate %}
+<section class="panel" id="updates">
+  <h2>Updates</h2>
+  <p class="small">{{ "This site" if updates.receiver else "This radio" }} runs <strong>v{{ updates.version }}</strong>{% if updates.commit %} · <a href="{{ updates.repo }}/commit/{{ updates.commit }}"><code>{{ updates.commit[:7] }}</code></a>{% endif %}</p>
+  {% if updates.receiver %}
+  {% if updates.pi %}
+  <p class="small">The Pi runs <strong>v{{ updates.pi.version or "?" }}</strong>{% if updates.pi.commit %} · <a href="{{ updates.repo }}/commit/{{ updates.pi.commit }}"><code>{{ updates.pi.commit[:7] }}</code></a>{% if updates.commit %} <span class="muted">· {{ "same as this site" if updates.pi.commit == updates.commit else "not the same as this site" }}</span>{% endif %}{% endif %}
+    <span class="muted">· reported {{ updates.pi.age|ago }} ago</span></p>
+  {% else %}
+  <p class="small muted">No word from the Pi since this site started (or it runs a version from before it reported itself). Its relay pushes every couple of minutes.</p>
+  {% endif %}
+  {% endif %}
+  {% if au %}
+  <p class="small"><span class="chip {{ {'ok': 'ok', 'bad': 'bad'}.get(au.state, 'dim') }}">Pi auto-update</span>
+    {% if au.state == "none" %}No report from the auto-updater{% if not updates.receiver %} on this machine{% endif %}.
+    {% else %}{{ au.text }} <span class="muted">· checked {{ au.age|ago }} ago{% if au.updated_age is not none %} · last updated {{ au.updated_age|ago }} ago{% endif %}</span>{% endif %}</p>
+  {% if au.detail %}<p class="small muted">{{ au.detail }}</p>{% endif %}
+  {% if au.state == "none" and not updates.receiver %}
+  <p class="small muted">Install <code>meshradio-autoupdate.timer</code> (deploy/meshradio-autoupdate.service says how), or wait for its next run: it reports every ten minutes.</p>
+  {% elif au.state == "bad" %}
+  <p class="small muted">On the Pi: <code>journalctl -u meshradio-autoupdate -n 30</code> and <code>systemctl list-timers meshradio-autoupdate</code>.</p>
+  {% endif %}
+  {% endif %}
+</section>
 <section class="panel conn">
   <h2>This connection</h2>
   <p class="small">{% if connection.https %}<span class="chip ok">https</span> Encrypted from your browser to the radio's front door.{% else %}<span class="chip bad">plain http</span> Not encrypted: your password and session cross the network readable. Use this page only on your own network or a VPN.{% endif %}</p>
