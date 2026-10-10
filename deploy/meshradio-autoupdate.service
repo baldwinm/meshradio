@@ -8,8 +8,10 @@
 #   journalctl -u meshradio-autoupdate                  # what it did
 #
 # Adjust MESHRADIO_DIR, MESHRADIO_USER and the ExecStart path if your
-# username or clone location differ, and MESHRADIO_HEALTH_URL if the radio
-# isn't on port 8080. It runs as root because it restarts meshradio.service;
+# username or clone location differ. The health check finds the radio's
+# port in /etc/meshradio/config.toml ([web] port; MESHRADIO_CONFIG names
+# another file, MESHRADIO_HEALTH_URL overrides the whole URL). It runs as
+# root because it restarts meshradio.service;
 # git and pip run as MESHRADIO_USER. That means root runs a script from that
 # user's clone, so only use it where that user is trusted with sudo anyway
 # (the default Pi user is). To stop updates, disable the timer.
@@ -23,6 +25,5 @@ Wants=network-online.target
 Type=oneshot
 Environment=MESHRADIO_DIR=/home/pi/meshradio
 Environment=MESHRADIO_USER=pi
-Environment=MESHRADIO_HEALTH_URL=http://127.0.0.1:8080/healthz
 StateDirectory=meshradio-autoupdate
 ExecStart=/home/pi/meshradio/deploy/auto-update.sh

@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.11 — the core software is built, tested (522 tests), and running:
+*Status: v0.11 — the core software is built, tested (524 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -680,7 +680,10 @@ are caught up from the furthest song they still hold.
   [deploy/auto-update.sh](deploy/auto-update.sh) every ten minutes: it
   fast-forwards the clone to `pi-deploy`, reinstalls the package into the venv
   every time (a bare `git pull` once left a stale launcher that crash-looped
-  the service), restarts the service and waits for `/healthz` to say ok. If it
+  the service), restarts the service and waits for `/healthz` to say ok (on
+  the `[web] port` it reads from `/etc/meshradio/config.toml`; a fixed 8080
+  once met another server on a Pi whose radio was on 8087, and rolled every
+  update back). If it
   doesn't, the script puts the previous commit back, reinstalls, restarts, and
   skips that commit from then on. A change touching nothing the Pi runs (docs,
   tests, CI, the Render files, `uv.lock`) fast-forwards without a restart. A

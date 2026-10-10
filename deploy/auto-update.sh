@@ -31,7 +31,9 @@
 #   MESHRADIO_DIR          the clone                  (/home/pi/meshradio)
 #   MESHRADIO_USER         who owns it                (the clone's owner)
 #   MESHRADIO_SERVICE      the unit to restart        (meshradio)
-#   MESHRADIO_HEALTH_URL   where to check             (http://127.0.0.1:8080/healthz)
+#   MESHRADIO_CONFIG       the radio's config file    (/etc/meshradio/config.toml)
+#   MESHRADIO_HEALTH_URL   where to check             (http://127.0.0.1:<port>/healthz,
+#                          with [web] port from MESHRADIO_CONFIG, else 8080)
 #   MESHRADIO_EXTRAS       pip extras                 (media,hw)
 #   MESHRADIO_DEPLOY_BRANCH                           (pi-deploy)
 #   MESHRADIO_HEALTH_WAIT  seconds to wait for ok     (90)
@@ -42,7 +44,23 @@ set -eu
 DIR="${MESHRADIO_DIR:-/home/pi/meshradio}"
 OWNER="${MESHRADIO_USER:-$(stat -c %U "$DIR")}"
 SERVICE="${MESHRADIO_SERVICE:-meshradio}"
-HEALTH_URL="${MESHRADIO_HEALTH_URL:-http://127.0.0.1:8080/healthz}"
+CONFIG="${MESHRADIO_CONFIG:-/etc/meshradio/config.toml}"
+
+# [web] port from the radio's own config, so the health check asks the port
+# the radio actually listens on. A fixed 8080 once met another server on a
+# Pi whose radio was on 8087: every update read as unhealthy and was rolled
+# back.
+config_port() {
+    [ -r "$CONFIG" ] || return 0
+    awk '
+        /^[[:space:]]*\[/ { web = ($0 ~ /^[[:space:]]*\[web\][[:space:]]*(#.*)?$/) ; next }
+        web && /^[[:space:]]*port[[:space:]]*=/ {
+            sub(/^[^=]*=[[:space:]]*/, ""); sub(/[^0-9].*$/, ""); print; exit
+        }
+    ' "$CONFIG"
+}
+PORT="$(config_port)"
+HEALTH_URL="${MESHRADIO_HEALTH_URL:-http://127.0.0.1:${PORT:-8080}/healthz}"
 EXTRAS="${MESHRADIO_EXTRAS:-media,hw}"
 BRANCH="${MESHRADIO_DEPLOY_BRANCH:-pi-deploy}"
 WAIT="${MESHRADIO_HEALTH_WAIT:-90}"
