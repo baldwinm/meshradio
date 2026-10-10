@@ -537,3 +537,40 @@ async def test_forwarding_headers_are_believed_only_from_a_trusted_proxy(db, bus
         resp = await client.get("/", headers=headers)
         assert 'rel="canonical" href="https://test/"' in resp.text
         assert "secure" in resp.headers["set-cookie"].lower()
+
+
+async def test_pausing_an_archive_day_keeps_it(db, bus):
+    """Play an older day from the Archive, then pause: the next request must
+    leave the session on that day. Rolling a paused session forward is only
+    for one parked on the day it landed on, not one the visitor picked."""
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")
+        await client.post("/api/pause")
+        state = (await client.get("/api/state")).json()
+        assert state["status"] == "paused"
+        assert state["day"] == "2026-07-06"                    # not yanked to the newest day
+        assert state["current"]["video_id"] == "aaaaaaaaaaa"
+        await client.post("/api/pause")                        # and resumes where it was
+        state = (await client.get("/api/state")).json()
+        assert state["status"] == "playing" and state["day"] == "2026-07-06"
+
+
+async def test_paused_archive_day_not_moved_by_new_day_song(db, bus):
+    """The day-watcher spares a day the visitor picked and paused, too."""
+    from meshradio.bus import TRACK_READY
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-07-06")
+    app = embed_app(db, bus)
+    async with client_for(app) as client:
+        await client.post("/api/play-day/2026-07-06")
+        await client.post("/api/pause")
+        sid = sid_of(client)
+        await asyncio.sleep(0.05)
+        track = await make_ready_on(db, "bbbbbbbbbbb", "2026-07-07")
+        bus.publish(TRACK_READY, {"track": track})
+        await asyncio.sleep(0.1)
+        player = app.state.sessions._sessions[sid].player
+        assert player.day == "2026-07-06"
+        assert player.status == "paused"

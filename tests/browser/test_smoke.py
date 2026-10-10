@@ -7,7 +7,7 @@ import pytest
 from playwright.sync_api import expect
 
 from ..helpers import ADMIN_PASSWORD
-from .conftest import DAY, SONGS
+from .conftest import DAY, EARLIER, SONGS
 
 PAGES = [
     "/",
@@ -94,3 +94,20 @@ def test_admin_signs_in_retitles_a_day_and_guards_a_removal(appliance, page):
     expect(remove).to_be_disabled()
     page.get_by_label(re.compile("to confirm")).fill(DAY)
     expect(remove).to_be_enabled()
+
+
+def test_pausing_a_day_played_from_the_archive_stays_on_it(hosted, page):
+    """Archive → an earlier day → ▶ Play this day, then pause: the player
+    pauses that day's song instead of swapping in the newest day's first
+    song and playing it."""
+    page.goto(hosted.url + f"/archive/{EARLIER}")
+    page.get_by_role("button", name="Play this day").click()
+    page.wait_for_url(hosted.url + "/")
+    assert wait_for_video(page, 1)[-1] == "ddddddddddd"
+
+    page.get_by_title("Play/Pause").click()
+    expect(page.get_by_title("Play/Pause")).to_have_text("▶")
+    page.wait_for_load_state("networkidle")
+    assert page.evaluate("window.__yt.loads") == ["ddddddddddd"]
+    assert page.evaluate("window.__yt.getPlayerState()") == 2          # paused
+    expect(page.locator("#now-playing")).to_contain_text("Song D")

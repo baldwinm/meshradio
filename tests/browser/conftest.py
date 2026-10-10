@@ -32,9 +32,10 @@ SONGS = [
     ("ccccccccccc", "Song C", "Artist A"),
 ]
 
-# Enough of YT.Player for embed.js: it builds the player, loads, plays and
-# pauses videos, and listens for state changes. ``window.__yt`` keeps every
-# video id the page loaded, in order, for the tests to read.
+# Enough of YT.Player for embed.js: it builds the player, loads, cues, plays
+# and pauses videos (loadVideoById starts playing, as YouTube's does;
+# cueVideoById doesn't), and listens for state changes. ``window.__yt`` keeps
+# every video id the page loaded, in order, for the tests to read.
 FAKE_IFRAME_API = """
 window.YT = {
   PlayerState: {UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5},
@@ -47,7 +48,8 @@ window.YT = {
     playVideo() { this.state = 1; this.opts.events.onStateChange({data: 1}); }
     pauseVideo() { this.state = 2; }
     stopVideo() { this.state = 5; }
-    loadVideoById(id) { this.loads.push(id); }
+    loadVideoById(id) { this.loads.push(id); this.state = 1; }
+    cueVideoById(id) { this.loads.push(id); this.state = 5; }
     getPlayerState() { return this.state; }
     getDuration() { return 60; }
     getCurrentTime() { return 0; }

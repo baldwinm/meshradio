@@ -119,6 +119,13 @@ class Session:
     last_seen: float = field(default_factory=time.monotonic)
 
 
+def _parked(player: PlayerService) -> bool:
+    """Nothing the visitor chose is loaded: the player is idle, or still sits
+    where a cue left it. Pausing a day picked from the Archive is not parked —
+    rolling that forward swapped their day for today's mid-listen."""
+    return player.status == "idle" or (player.status == "paused" and player.cued)
+
+
 class SessionManager:
     """Per-visitor sessions for public embed hosting.
 
@@ -255,12 +262,13 @@ class SessionManager:
             log.info("flushed and stopped %d session(s)", len(sessions))
 
     async def _refresh(self, session: Session) -> None:
-        """A warm session that isn't mid-playback and is parked on an older
+        """A warm session that is only parked (see ``_parked``) on an older
         day rolls forward if a newer day has appeared since (e.g. overnight),
         so "Now Playing" always shows the latest day. A session that's
-        genuinely playing is left alone — never yank a listener."""
+        playing, or that the visitor paused, is left alone — never yank a
+        listener."""
         player = session.player
-        if player.status != "playing" and player.day != self._local_today(player):
+        if _parked(player) and player.day != self._local_today(player):
             await self._cue_latest(player)
 
     def _local_today(self, player: PlayerService) -> str:
@@ -344,7 +352,7 @@ class SessionManager:
         moved = 0
         for session in list(self._sessions.values()):
             player = session.player
-            if player.status != "playing" and player.day != newest:
+            if _parked(player) and player.day != newest:
                 await self._cue_latest(player)   # publishes state → tab updates live
                 moved += 1
         if moved:
