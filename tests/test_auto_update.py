@@ -45,7 +45,9 @@ class Pi:
         bin_.mkdir()
         stub(bin_ / "systemctl", f'echo "systemctl $*" >> {self.calls}\n')
         stub(bin_ / "sleep", "exec /bin/sleep 0.1\n")
+        self.asked = root / "health-urls.log"
         stub(bin_ / "curl", (
+            f'echo "$*" >> {self.asked}\n'
             f'[ -e {self.clone}/meshradio/broken ] && exit 22\n'
             'echo \'{"ok":true,"tracks":1}\'\n'
         ))
@@ -56,6 +58,7 @@ class Pi:
             "MESHRADIO_USER": subprocess.check_output(["id", "-un"], text=True).strip(),
             "MESHRADIO_HEALTH_WAIT": "1",
             "STATE_DIRECTORY": str(self.state),
+            "MESHRADIO_CONFIG": str(root / "config.toml"),
         }
         self.git(root, "init", "--quiet", "--bare", "--initial-branch=main", str(self.origin))
         self.git(root, "init", "--quiet", "--initial-branch=main", str(self.work))
@@ -230,3 +233,22 @@ def test_a_run_that_dies_part_way_reports_failed(pi):
     shutil.rmtree(pi.clone / ".git" / "refs" / "heads")   # HEAD names nothing now
     assert pi.run().returncode != 0
     assert pi.report()["result"] == "failed"
+
+
+def test_the_health_check_asks_the_port_the_radio_listens_on(pi):
+    """A Pi whose radio was on 8087 had every update rolled back: the check
+    asked 8080, where something else answered 404."""
+    (pi.root / "config.toml").write_text(
+        '[player]\nport = 1\n\n[web]  # the web UI\nhost = "0.0.0.0"\nport = 8087  # LAN\n'
+    )
+    pi.commit("meshradio/app.py", "v2")
+    pi.ci_passes()
+    assert pi.run().returncode == 0
+    assert "http://127.0.0.1:8087/healthz" in pi.asked.read_text()
+
+
+def test_the_health_check_defaults_to_8080_without_a_port(pi):
+    pi.commit("meshradio/app.py", "v2")
+    pi.ci_passes()
+    assert pi.run().returncode == 0
+    assert "http://127.0.0.1:8080/healthz" in pi.asked.read_text()
