@@ -270,7 +270,7 @@ async def test_the_now_playing_card_asks_once_then_shows_the_nearest_show(db, bu
     assert "🎟 Dallas, TX" in again
     # It scrolls like the title, since a phone is too narrow for the line.
     line = again[again.index('class="shows-line marquee"'):]
-    assert line[:line.index("</div>")].count("🎟 Dallas, TX") == 2
+    assert line[:line.index("</div>")].count("🎟 Dallas, TX") == 1
     assert len(seen) == 2
 
 

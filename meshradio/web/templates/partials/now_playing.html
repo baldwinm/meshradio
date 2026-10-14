@@ -13,7 +13,7 @@
     <img class="art" src="https://i.ytimg.com/vi/{{ current.video_id }}/mqdefault.jpg" alt="">
     <div class="meta">
       {% set t = current.title or current.video_id %}
-      <div class="title marquee"><span>{{ t }} ✱ {{ t }} ✱ </span></div>
+      <div class="title marquee"><span>{{ t }}</span></div>
       {% if current.artist and current.source != "radio" %}
       <div class="artist"><a href="/artist/{{ current.artist|urlencode }}" hx-boost="true"
          hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">{{ current.artist }}</a></div>

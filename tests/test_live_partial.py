@@ -47,3 +47,12 @@ async def test_queue_shows_its_total_length_under_the_list(db, bus):
         body = (await client.get("/partials/live")).text
     total = re.search(r'<p class="queue-total"[^>]*>\s*(.*?)\s*</p>', body, re.S).group(1)
     assert total == "2 songs · 1:02:05"                        # the playing song isn't counted
+
+
+async def test_the_scrolling_title_shows_the_song_once(db, bus):
+    await make_ready_on(db, "aaaaaaaaaaa", "2026-08-01", title="Bad Bad News")
+    async with client_for(page_app(db, bus)) as client:
+        await client.post("/api/play-day/2026-08-01")
+        body = (await client.get("/partials/live")).text
+    title = re.search(r'<div class="title marquee"><span>(.*?)</span></div>', body).group(1)
+    assert title == "Bad Bad News"

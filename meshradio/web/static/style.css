@@ -396,12 +396,16 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
 .meta .sender { color: var(--amber); font-size: 0.72rem; }
 
 .marquee { overflow: hidden; }
+/* One copy of the text, entering at the right edge and leaving at the left:
+   the left padding is the box's width, so -100% carries the text all the
+   way out before the loop starts it again. */
 .marquee span {
   display: inline-block;
   white-space: nowrap;
+  padding-left: 100%;
   animation: marquee 14s linear infinite;
 }
-@keyframes marquee { to { transform: translateX(-50%); } }
+@keyframes marquee { to { transform: translateX(-100%); } }
 
 /* spectrum analyzer canvas (drawn from real FFT data in the speaker tab) */
 .vis-canvas {
