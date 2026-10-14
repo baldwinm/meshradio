@@ -59,7 +59,7 @@ async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
 
 
 @router.websocket("/ws")
-async def ws(websocket: WebSocket):
+async def ws(websocket: WebSocket):  # noqa: C901
     ctx = ctx_of(websocket)
     if ctx.sessions is not None:
         # Per-visitor session: this browser's own player/bus/speakers. The

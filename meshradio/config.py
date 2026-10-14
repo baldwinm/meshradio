@@ -291,7 +291,7 @@ def _quiet_hours_ok(spec: str) -> bool:
     return True
 
 
-def validate_config(cfg: Config) -> None:
+def validate_config(cfg: Config) -> None:  # noqa: C901
     """Raise ConfigError naming every key whose value the radio can't run on."""
     problems: list[str] = []
 
@@ -378,7 +378,7 @@ def validate_config(cfg: Config) -> None:
         raise ConfigError("config:\n  " + "\n  ".join(problems))
 
 
-def load_config(path: str | Path | None = None) -> Config:
+def load_config(path: str | Path | None = None) -> Config:  # noqa: C901
     cfg = Config()
     candidates = [
         path,

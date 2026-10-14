@@ -1,0 +1,39 @@
+# CodeQL: GitHub's static analysis over our own Python and JavaScript, for
+# injection, XSS, path traversal and similar patterns. pip-audit (audit.yml)
+# covers the dependencies; this covers the code we write. Free on a public
+# repository; findings land under Security → Code scanning.
+#
+# Runs on pull requests and pushes to main, weekly (new queries catch old
+# code), and by hand. Vendored minified files (htmx) are skipped via
+# .github/codeql/codeql-config.yml.
+name: codeql
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 6 * * 1"   # Mondays, 06:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

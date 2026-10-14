@@ -605,7 +605,7 @@ class PlayerService(Service):
             "queue_track_ids": [t["id"] for t in self.queue],
         }
 
-    async def restore(self, snap: dict[str, Any]) -> None:
+    async def restore(self, snap: dict[str, Any]) -> None:  # noqa: C901
         """Rebuild from a snapshot. Tracks that vanished or lost readiness
         since the save are skipped; a playing position advances by the wall
         time since the save, clamped inside the track."""

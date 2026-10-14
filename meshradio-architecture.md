@@ -619,9 +619,14 @@ are caught up from the furthest song they still hold.
   requests, weekly and on demand, and Dependabot opens a weekly grouped PR for
   the lock and the pinned actions. The audit deliberately doesn't run on push:
   an advisory against a library on a path the radio never touches shouldn't
-  hold a deploy. The test job runs the suite on Python 3.11, 3.12 and 3.13,
+  hold a deploy. [codeql.yml](.github/workflows/codeql.yml) runs
+  GitHub's CodeQL analysis over our own Python and JavaScript (vendored
+  `*.min.js` and the tests skipped) on pull requests, pushes to `main` and
+  weekly; findings show under Security → Code scanning. The test job runs the suite on Python 3.11, 3.12 and 3.13,
   and a lint job runs `ruff check` and `mypy` (configured in `pyproject.toml`),
-  so a style or type regression holds a deploy the way a red suite does. The
+  so a style or type regression holds a deploy the way a red suite does. Ruff
+  also caps function complexity (mccabe, `max-complexity = 10`); functions
+  already over it carry `# noqa: C901`, and that list is the refactor backlog. The
   lint job also runs `scripts/check_docs.py`, which fails when the test count
   in this document's status line stops matching the suite (`--fix` rewrites
   it). A third job, `browser`, loads every public page on both an appliance and

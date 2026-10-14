@@ -412,7 +412,8 @@ file adjusted in the clone, ride along. Without it, update by hand with `git
 pull`, `.venv/bin/pip install -e ".[media,hw]"` and `sudo systemctl restart
 meshradio`.
 
-GitHub also merges Dependabot's non-major updates once CI passes, and checks
+GitHub also runs CodeQL security analysis on every pull request and weekly,
+merges Dependabot's non-major updates once CI passes, and checks
 `https://meshradio.co/healthz` every ten minutes, opening an issue labelled
 `uptime` when the site is down, has stopped ingesting, hasn't heard from the
 Pi relay in half an hour, logged more than two errors in the last hour, or

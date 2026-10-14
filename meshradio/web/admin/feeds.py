@@ -29,7 +29,7 @@ RELAY_QUIET_S = 3 * 120
 RELAY_STOPPED_S = 1800
 
 
-def feed_rows(request: Request, now: float) -> list[dict[str, Any]]:
+def feed_rows(request: Request, now: float) -> list[dict[str, Any]]:  # noqa: C901
     """One row per ingest path this server runs, with a plain-words status
     and a state for its chip: ok, warn, bad, or off."""
     ctx = ctx_of(request)

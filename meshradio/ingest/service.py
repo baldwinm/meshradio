@@ -28,7 +28,7 @@ class IngestService:
     def local_date(self, ts: float) -> str:
         return datetime.fromtimestamp(ts, tz=UTC).astimezone(self.tz).strftime("%Y-%m-%d")
 
-    async def handle_message(
+    async def handle_message(  # noqa: C901
         self,
         *,
         sender: str,

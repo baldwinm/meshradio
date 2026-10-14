@@ -133,7 +133,7 @@ class Cacher(Service):
         except Exception:
             log.exception("cacher: unexpected error on %s", track.get("video_id"))
 
-    async def process_track(self, track: dict[str, Any]) -> None:
+    async def process_track(self, track: dict[str, Any]) -> None:  # noqa: C901
         track_id = track["id"]
         video_id = track["video_id"]
 

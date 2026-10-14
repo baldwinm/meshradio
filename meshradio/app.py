@@ -83,7 +83,7 @@ async def seed_demo(config, ingest: IngestService) -> None:
     log.info("demo seed complete")
 
 
-async def run(config, demo: bool = False) -> None:
+async def run(config, demo: bool = False) -> None:  # noqa: C901
     log.info("meshradio %s starting (profile=%s)", __version__, config.hardware_profile)
     config.data_dir.mkdir(parents=True, exist_ok=True)
 

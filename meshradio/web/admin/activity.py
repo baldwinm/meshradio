@@ -42,7 +42,7 @@ UNDOABLE = {
 
 
 @router.post("/log/{entry_id}/undo")
-async def undo(request: Request, entry_id: int):
+async def undo(request: Request, entry_id: int):  # noqa: C901
     _token, form = await checked_form(request)
     ctx = ctx_of(request)
     db = ctx.db

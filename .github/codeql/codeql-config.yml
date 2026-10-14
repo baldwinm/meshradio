@@ -1,0 +1,4 @@
+name: meshradio
+paths-ignore:
+  - "**/*.min.js"
+  - tests

@@ -27,7 +27,7 @@ from .web.admin_auth import hash_password, new_totp_secret, otpauth_uri
 log = logging.getLogger("meshradio")
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901
     parser = argparse.ArgumentParser(prog="meshradio", description="MeshRadio appliance")
     parser.add_argument("--config", help="path to config.toml")
     parser.add_argument("--profile", choices=("dev", "pi4", "lite"),
