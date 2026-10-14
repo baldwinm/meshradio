@@ -17,7 +17,7 @@ from ...bus import TRACK_DISCOVERED
 from ...ingest.parse import untitled_theme
 from ...media.cacher import drop_cache_file
 from ..admin_auth import ADMIN_PATH, AdminSettings
-from ..context import ctx_of
+from ..context import client_host, ctx_of
 from ..routes_api import unplayable_checks
 from .backups import snapshot_rows
 from .common import (
@@ -25,7 +25,6 @@ from .common import (
     ISO_DATE,
     ISO_MONTH,
     checked_form,
-    client_ip,
     field,
     go,
     is_embed,
@@ -110,7 +109,7 @@ async def rename_day(request: Request, date: str):
     except ValueError:
         return go(f"{ADMIN_PATH}/days/{date}", error="A theme needs a title.")
     entry = await ctx.db.log_admin(
-        "rename_theme", ip=client_ip(request), target=date,
+        "rename_theme", ip=client_host(request), target=date,
         before=theme["title"], after=renamed["title"],
         undo={"theme_id": theme["id"], "title": theme["title"]},
     )
@@ -150,7 +149,7 @@ async def edit_track(request: Request, track_id: int):
         return render(request, "track_edit.html", token, section="days", track=track,
                       date=date, error=f"{str(exc).capitalize()}.", status_code=400)
     entry = await ctx.db.log_admin(
-        "edit_track", ip=client_ip(request), target=date,
+        "edit_track", ip=client_host(request), target=date,
         before=_song_label(before), after=_song_label(after),
         undo={"track_id": track_id, "title": before["title"], "artist": before["artist"],
               "edited_at": before.get("meta_edited_at")},
@@ -196,7 +195,7 @@ async def remove_track(request: Request, track_id: int):
     if deleted["theme_id"] is not None:
         await ctx.db.delete_empty_placeholder(deleted["theme_id"])
     entry = await ctx.db.log_admin(
-        "remove_track", ip=client_ip(request), target=date,
+        "remove_track", ip=client_host(request), target=date,
         before=_song_label(deleted), after="removed",
         undo={"date": date, "video_id": deleted["video_id"]},
     )
@@ -239,7 +238,7 @@ async def retry_track(request: Request, track_id: int):
         rows = [{**track, "cache_status": "pending", "cache_path": None}]
     for row in rows:
         ctx.bus.publish(TRACK_DISCOVERED, {"track": row})
-    await ctx.db.log_admin("retry_track", ip=client_ip(request), target=date,
+    await ctx.db.log_admin("retry_track", ip=client_host(request), target=date,
                            before=_song_label(track))
     return go(f"{ADMIN_PATH}/removed" if is_embed(request) else f"{ADMIN_PATH}/device")
 
@@ -281,7 +280,7 @@ async def restore_removed(request: Request, date: str, video_id: str):
     if outcome == "gone":
         return go(f"{ADMIN_PATH}/removed")
     entry = await ctx_of(request).db.log_admin(
-        "restore_track", ip=client_ip(request), target=date, before="removed",
+        "restore_track", ip=client_host(request), target=date, before="removed",
         after=label if outcome == "restored" else f"{label} (allowed back)",
     )
     return go(f"{ADMIN_PATH}/removed", done=entry)

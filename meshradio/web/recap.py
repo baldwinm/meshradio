@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape as html_escape
 from typing import Any
 
 from ..db.browse import artist_name
 from ..ingest.parse import untitled_theme
-from .feed import _attr, _stamp, _text
+from .feed import atom_entry, atom_feed, atom_stamp
 
 # How many finished weeks the weekly feed carries — about a quarter.
 WEEKLY_FEED_WEEKS = 12
@@ -196,30 +196,13 @@ def build_weekly_feed(
     for week in weeks:
         link = week_url(week["start"])
         # Stamped at the week's close: the entry appears once, when it's done.
-        updated = _stamp(None, (date.fromisoformat(week["end"]) + timedelta(days=1)).isoformat())
+        closed = date.fromisoformat(week["end"]) + timedelta(days=1)
+        updated = atom_stamp(None, closed.isoformat())
         newest = max(newest, updated)
-        entries.append(
-            "<entry>"
-            f"<id>{_text(link)}</id>"
-            f"<title>{_text('Week of ' + week['label'])}</title>"
-            f"<link rel=\"alternate\" type=\"text/html\" href={_attr(link)}/>"
-            f"<updated>{updated}</updated>"
-            f"<summary>{_text(week_summary_line(week))}</summary>"
-            f"<content type=\"html\">{_text(_entry_html(week, day_url))}</content>"
-            "</entry>"
-        )
-    if not newest:
-        newest = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<feed xmlns="http://www.w3.org/2005/Atom">'
-        f"<id>{_text(feed_url)}</id>"
-        f"<title>{_text(WEEKLY_FEED_TITLE)}</title>"
-        f"<subtitle>{_text(WEEKLY_FEED_SUBTITLE)}</subtitle>"
-        f"<updated>{newest}</updated>"
-        f"<link rel=\"self\" type=\"application/atom+xml\" href={_attr(feed_url)}/>"
-        f"<link rel=\"alternate\" type=\"text/html\" href={_attr(site_url)}/>"
-        "<author><name>MeshRadio</name></author>"
-        + "".join(entries)
-        + "</feed>"
+        entries.append(atom_entry(
+            link, "Week of " + week["label"], updated, week_summary_line(week),
+            _entry_html(week, day_url),
+        ))
+    return atom_feed(
+        feed_url, site_url, WEEKLY_FEED_TITLE, WEEKLY_FEED_SUBTITLE, newest, entries, now
     )

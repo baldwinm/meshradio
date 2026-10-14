@@ -49,17 +49,17 @@ def _clean(value: Any) -> str:
     return _XML_INVALID.sub("", str(value))
 
 
-def _text(value: Any) -> str:
+def xml_text(value: Any) -> str:
     """Character data for an element body."""
     return xml_escape(_clean(value))
 
 
-def _attr(value: Any) -> str:
+def xml_attr(value: Any) -> str:
     """A quoted attribute value, quotes included."""
     return quoteattr(_clean(value))
 
 
-def _stamp(ts: float | None, fallback_date: str) -> str:
+def atom_stamp(ts: float | None, fallback_date: str) -> str:
     """RFC 3339 UTC. A track with no usable time falls back to its day's
     midnight rather than taking the feed down: mesh clocks are not trusted."""
     try:
@@ -70,6 +70,48 @@ def _stamp(ts: float | None, fallback_date: str) -> str:
     except (OverflowError, OSError, ValueError):
         pass
     return f"{fallback_date}T00:00:00Z"
+
+
+def atom_entry(link: str, title: str, updated: str, summary: str, content_html: str) -> str:
+    """One ``<entry>``, with its page (``link``) as its id too."""
+    return (
+        "<entry>"
+        f"<id>{xml_text(link)}</id>"
+        f"<title>{xml_text(title)}</title>"
+        f"<link rel=\"alternate\" type=\"text/html\" href={xml_attr(link)}/>"
+        f"<updated>{updated}</updated>"
+        f"<summary>{xml_text(summary)}</summary>"
+        f"<content type=\"html\">{xml_text(content_html)}</content>"
+        "</entry>"
+    )
+
+
+def atom_feed(
+    feed_url: str,
+    site_url: str,
+    title: str,
+    subtitle: str,
+    newest: str,
+    entries: list[str],
+    now: datetime | None = None,
+) -> str:
+    """The Atom document around ``entries``, updated as of the newest one
+    (``newest``), or as of now when there are none."""
+    if not newest:
+        newest = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        f"<id>{xml_text(feed_url)}</id>"
+        f"<title>{xml_text(title)}</title>"
+        f"<subtitle>{xml_text(subtitle)}</subtitle>"
+        f"<updated>{newest}</updated>"
+        f"<link rel=\"self\" type=\"application/atom+xml\" href={xml_attr(feed_url)}/>"
+        f"<link rel=\"alternate\" type=\"text/html\" href={xml_attr(site_url)}/>"
+        "<author><name>MeshRadio</name></author>"
+        + "".join(entries)
+        + "</feed>"
+    )
 
 
 def _days(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -135,35 +177,15 @@ def build_feed(
         themes = [t for t in day["themes"] if t != untitled_theme(date)]
         titles = " · ".join(themes)
         n = len(day["songs"])
-        updated = _stamp(day["last"], date)
+        updated = atom_stamp(day["last"], date)
         newest = max(newest, updated)
         summary = (
             f"{n} {'song' if n == 1 else 'songs'} shared on {date}"
             + (f" for the theme “{titles}”" if titles else "")
             + " on the Austin mesh #music channel."
         )
-        entries.append(
-            "<entry>"
-            f"<id>{_text(link)}</id>"
-            f"<title>{_text(f'{date} — {titles}' if titles else date)}</title>"
-            f"<link rel=\"alternate\" type=\"text/html\" href={_attr(link)}/>"
-            f"<updated>{updated}</updated>"
-            f"<summary>{_text(summary)}</summary>"
-            f"<content type=\"html\">{_text(_entry_html(day, link))}</content>"
-            "</entry>"
-        )
-    if not newest:
-        newest = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<feed xmlns="http://www.w3.org/2005/Atom">'
-        f"<id>{_text(feed_url)}</id>"
-        f"<title>{_text(FEED_TITLE)}</title>"
-        f"<subtitle>{_text(FEED_SUBTITLE)}</subtitle>"
-        f"<updated>{newest}</updated>"
-        f"<link rel=\"self\" type=\"application/atom+xml\" href={_attr(feed_url)}/>"
-        f"<link rel=\"alternate\" type=\"text/html\" href={_attr(site_url)}/>"
-        "<author><name>MeshRadio</name></author>"
-        + "".join(entries)
-        + "</feed>"
-    )
+        entries.append(atom_entry(
+            link, f"{date} — {titles}" if titles else date, updated, summary,
+            _entry_html(day, link),
+        ))
+    return atom_feed(feed_url, site_url, FEED_TITLE, FEED_SUBTITLE, newest, entries, now)

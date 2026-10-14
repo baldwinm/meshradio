@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from ... import backup as backup_mod
 from ..admin_auth import ADMIN_PATH
-from ..context import ctx_of
-from .common import checked_form, client_ip, go, render, require_admin, settings_of
+from ..context import client_host, ctx_of
+from .common import checked_form, go, render, require_admin, settings_of
 
 router = APIRouter(prefix=ADMIN_PATH)
 
@@ -75,7 +75,7 @@ async def take_backup(request: Request):
                                    "manual")
     await asyncio.to_thread(backup_mod.rotate, config.backup_dir, config.backup.keep)
     await ctx_of(request).db.log_admin(
-        "backup", ip=client_ip(request), after=dest.name if dest else None
+        "backup", ip=client_host(request), after=dest.name if dest else None
     )
     return go(f"{ADMIN_PATH}/backups")
 
@@ -90,7 +90,7 @@ async def download_backup(request: Request, name: str):
     )
     if match is None:
         raise HTTPException(404, "no such backup")
-    await ctx_of(request).db.log_admin("download_backup", ip=client_ip(request), target=name)
+    await ctx_of(request).db.log_admin("download_backup", ip=client_host(request), target=name)
     return FileResponse(
         match, media_type="application/vnd.sqlite3", filename=name,
         headers={"content-encoding": "identity"},

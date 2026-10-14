@@ -12,9 +12,9 @@ from fastapi.responses import HTMLResponse
 from ... import __version__
 from ...deployinfo import LAG_S, REPO_URL, deployed_commit, describe, read_status, running_commit
 from ..admin_auth import ADMIN_PATH
-from ..context import ctx_of
+from ..context import client_host, ctx_of, is_https
 from .backups import snapshot_rows
-from .common import ACTION_LABELS, client_ip, https, render, require_admin, settings_of
+from .common import ACTION_LABELS, render, require_admin, settings_of
 from .feeds import feed_rows
 from .filters import fmt_ago
 
@@ -154,9 +154,9 @@ def connection_info(request: Request) -> dict[str, Any]:
     said. Your own address is the check — it should be the one shown."""
     peer = getattr(request.state, "peer", None)
     return {
-        "address": client_ip(request),
-        "peer": peer if peer is not None else client_ip(request),
-        "https": https(request),
+        "address": client_host(request),
+        "peer": peer if peer is not None else client_host(request),
+        "https": is_https(request),
         "headers": [(name, request.headers[name]) for name in _CLIENT_HEADERS
                     if name in request.headers],
     }

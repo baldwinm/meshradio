@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
 from meshradio.ingest.parse import untitled_theme
-from meshradio.web.feed import FEED_DAYS, SONGS_PER_ENTRY, _stamp, build_feed
+from meshradio.web.feed import FEED_DAYS, SONGS_PER_ENTRY, atom_stamp, build_feed
 
 from .helpers import client_for, page_app
 
@@ -158,10 +158,10 @@ async def test_a_huge_day_is_cut_off_and_says_so(db, bus):
 
 def test_a_nonsense_mesh_clock_falls_back_to_the_day():
     """Mesh nodes have bad clocks; one must not take the feed down."""
-    assert _stamp(None, "2026-08-01") == "2026-08-01T00:00:00Z"
-    assert _stamp(1e300, "2026-08-01") == "2026-08-01T00:00:00Z"
-    assert _stamp(float("nan"), "2026-08-01") == "2026-08-01T00:00:00Z"
-    assert _stamp(0, "2026-08-01") == "1970-01-01T00:00:00Z"
+    assert atom_stamp(None, "2026-08-01") == "2026-08-01T00:00:00Z"
+    assert atom_stamp(1e300, "2026-08-01") == "2026-08-01T00:00:00Z"
+    assert atom_stamp(float("nan"), "2026-08-01") == "2026-08-01T00:00:00Z"
+    assert atom_stamp(0, "2026-08-01") == "1970-01-01T00:00:00Z"
 
 
 def test_build_feed_needs_no_server():

@@ -14,8 +14,8 @@ from fastapi.responses import HTMLResponse
 
 from ...db.fields import VIDEO_ID_RE
 from ..admin_auth import ADMIN_PATH
-from ..context import ctx_of
-from .common import ACTION_LABELS, checked_form, client_ip, field, go, render, require_admin
+from ..context import client_host, ctx_of
+from .common import ACTION_LABELS, checked_form, field, go, render, require_admin
 
 router = APIRouter(prefix=ADMIN_PATH)
 
@@ -108,7 +108,7 @@ async def merge_artists(request: Request):
     except ValueError:
         return go(f"{ADMIN_PATH}/artists", error="Give the name to show.")
     entry = await ctx.db.log_admin(
-        "merge_artists", ip=client_ip(request), target=canonical,
+        "merge_artists", ip=client_host(request), target=canonical,
         before=" · ".join(folded), after=f"{canonical} ({len(changed)} songs)",
         undo={"spellings": folded, "canonical": canonical, "changed": changed},
     )
@@ -125,7 +125,7 @@ async def ignore_artists(request: Request):
         ignored = await _ignored_artists(request)
         ignored.add(key)
         await db.set_setting(IGNORED_ARTISTS_KEY, json.dumps(sorted(ignored)))
-        await db.log_admin("ignore_artists", ip=client_ip(request), target=key)
+        await db.log_admin("ignore_artists", ip=client_host(request), target=key)
     return go(f"{ADMIN_PATH}/artists")
 
 
@@ -177,7 +177,7 @@ async def fix_artists(request: Request):
     names = sorted(set(wanted.values()), key=str.lower)
     shown = " · ".join(names[:5]) + (f" and {len(names) - 5} more" if len(names) > 5 else "")
     entry = await ctx.db.log_admin(
-        "fix_artists", ip=client_ip(request), target=name or None,
+        "fix_artists", ip=client_host(request), target=name or None,
         before=f"{len(changed)} song{'' if len(changed) == 1 else 's'}", after=shown,
         undo={"rows": changed},
     )
