@@ -7,8 +7,10 @@
 {%- endmacro %}
 {% if compact %}
   {% if rows %}{% set r = rows[0] %}
-  <div class="shows-line"><a href="{{ r.show.url }}" target="_blank" rel="noopener"
-     title="{{ artist }}{% if place %}'s nearest show to {{ place.label }}{% if not place.home %} (location by DB-IP){% endif %}{% else %}'s next show{% endif %}, on Ticketmaster">🎟 {{ r.show.city }} · {{ r.show.day|show_date }}{{ away(r) }}</a></div>
+  {# Scrolls like the title above it (.marquee): a phone cuts it off otherwise. #}
+  {% set line %}🎟 {{ r.show.city }} · {{ r.show.day|show_date }}{{ away(r) }}{% endset %}
+  <div class="shows-line marquee"><a href="{{ r.show.url }}" target="_blank" rel="noopener"
+     title="{{ artist }}{% if place %}'s nearest show to {{ place.label }}{% if not place.home %} (location by DB-IP){% endif %}{% else %}'s next show{% endif %}, on Ticketmaster"><span>{{ line }}</span></a></div>
   {% endif %}
 {% else %}
 <h3>Upcoming shows</h3>
