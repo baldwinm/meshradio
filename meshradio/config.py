@@ -168,6 +168,8 @@ class ConcertsConfig:
     geoip_download: bool = False
     # Where listeners on the radio's own network are (no database knows a
     # LAN address). Defaults to Austin, where the channel is.
+    # Only shows this close to the listener are listed.
+    radius_miles: int = 100
     home_label: str = "Austin, Texas"
     home_lat: float = 30.2672
     home_lon: float = -97.7431
@@ -245,6 +247,7 @@ _INTS: list[tuple[str, str, int | None, int | None]] = [
     ("relay", "interval_s", 1, None),
     ("backup", "interval_s", 1, None),
     ("backup", "keep", 0, None),
+    ("concerts", "radius_miles", 1, None),
 ]
 _BOOLS = [
     ("mesh", "enabled"), ("corescope", "enabled"), ("comchan", "enabled"),

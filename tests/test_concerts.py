@@ -30,8 +30,11 @@ from .helpers import (
 AUSTIN = Place("Austin, Texas", 30.27, -97.74, "US", home=True)
 SOON = (date.today() + timedelta(days=20)).isoformat()
 LATER = (date.today() + timedelta(days=40)).isoformat()
-DALLAS = (32.78, -96.80)
+DALLAS = (32.78, -96.80)                # about 180 miles from Austin
+SAN_ANTONIO = (29.42, -98.49)           # about 75 miles from Austin
 LONDON = (51.51, -0.13)
+BRIGHTON = (50.82, -0.14)               # about 48 miles from London
+PARIS = (48.86, 2.35)
 
 
 def finder_with(attractions=(), events=None, status=200):
@@ -144,6 +147,15 @@ def test_without_a_location_shows_go_soonest_first_and_past_ones_drop():
     assert [r["show"].name for r in nearest(shows(), None, 3, since=LATER)] == ["B"]
 
 
+def test_a_radius_keeps_only_shows_that_close_and_needs_a_place():
+    within = 100 * 1.609344
+    near = Show(SOON, "D", "Club", "San Antonio, TX", "u4", *SAN_ANTONIO)
+    rows = nearest((*shows(), near), AUSTIN, 3, within_km=within)
+    assert [r["show"].name for r in rows] == ["D"]        # Dallas is too far, C unplaced
+    assert nearest((*shows(), near), None, 3, within_km=within) == []
+    assert nearest(shows(), AUSTIN, 3, within_km=200 * 1.609344)[0]["show"].name == "B"
+
+
 # -- placing a listener -------------------------------------------------------
 
 
@@ -203,17 +215,21 @@ def concerts_for(tmp_path, attractions, events):
     client, seen = fake_ticketmaster(attractions, events)
     finder = ShowFinder("k", client=client)
     finder.SPACING_S = 0
-    path = write_geo_db(tmp_path / "geo.mmdb",
-                        {"81.2.69.0/24": geo_record("London", "England", "GB", *LONDON)})
+    path = write_geo_db(tmp_path / "geo.mmdb", {
+        "81.2.69.0/24": geo_record("London", "England", "GB", *LONDON),
+        "2.2.2.0/24": geo_record("Paris", "Ile-de-France", "FR", *PARIS),
+    })
     return Concerts(finder, GeoLocator(path, home=AUSTIN)), seen
 
 
 def band_shows():
-    return {"a": [tm_event(SOON, "London", "", *LONDON, venue="Roundhouse"),
-                  tm_event(LATER, "Dallas", "TX", *DALLAS, venue="Granada")]}
+    return {"a": [tm_event(SOON, "Brighton", "", *BRIGHTON, venue="Concorde 2"),
+                  tm_event(SOON, "London", "", *LONDON, venue="Roundhouse"),
+                  tm_event(SOON, "Dallas", "TX", *DALLAS, venue="Granada"),
+                  tm_event(LATER, "San Antonio", "TX", *SAN_ANTONIO, venue="Paper Tiger")]}
 
 
-async def test_the_artist_page_lists_the_shows_nearest_the_visitor(db, bus, tmp_path):
+async def test_the_artist_page_lists_the_shows_within_100_miles_of_the_visitor(db, bus, tmp_path):
     await share(db, "2026-08-01", "aaaaaaaaaaa", "alice", artist="The Band")
     concerts, _ = concerts_for(tmp_path, [tm_attraction("a", "Band")], band_shows())
     app = embed_app(db, bus, concerts=concerts)
@@ -225,17 +241,25 @@ async def test_the_artist_page_lists_the_shows_nearest_the_visitor(db, bus, tmp_
         response = await visitor.get("/partials/shows?artist=the%20band")
     body = response.text
     assert response.headers["cache-control"] == "private, no-store"
-    assert "Nearest to London, GB" in body and "db-ip.com" in body
-    assert body.index("Roundhouse") < body.index("Granada")
+    assert "Within 100 miles of London, GB" in body and "db-ip.com" in body
+    assert body.index("Roundhouse") < body.index("Concorde 2")
+    assert "Granada" not in body and "Paper Tiger" not in body
+    assert "All 4 upcoming shows" in body
 
     async with peer(app, "192.168.1.5") as neighbour:      # on the radio's own network
         body = (await neighbour.get("/partials/shows?artist=The%20Band")).text
-    assert "Nearest to Austin, Texas." in body and "db-ip.com" not in body
-    assert body.index("Granada") < body.index("Roundhouse")
+    assert "Within 100 miles of Austin, Texas, nearest first." in body
+    assert "db-ip.com" not in body and "Paper Tiger" in body
+    assert "Granada" not in body and "Roundhouse" not in body
+
+    async with peer(app, "2.2.2.2") as faraway:             # nothing within reach
+        body = (await faraway.get("/partials/shows?artist=The%20Band")).text
+    assert "No upcoming The Band shows within 161 km of Paris, FR." in body
+    assert "<ol" not in body and "All 4 upcoming shows" in body
 
     async with peer(app, "1.1.1.1") as stranger:            # an address the file lacks
         body = (await stranger.get("/partials/shows?artist=The%20Band")).text
-    assert "Soonest first" in body
+    assert "couldn't tell where you are" in body and "<ol" not in body
 
 
 async def test_only_the_channels_artists_can_be_looked_up(db, bus, tmp_path):
@@ -264,13 +288,13 @@ async def test_the_now_playing_card_asks_once_then_shows_the_nearest_show(db, bu
         assert 'hx-get="/partials/shows?compact=1&artist=Band"' in first
         assert 'href="/artist/Band"' in first
         line = (await client.get("/partials/shows?compact=1&artist=Band")).text
-        assert "Dallas, TX" in line and "Roundhouse" not in line
+        assert "San Antonio, TX" in line and "Dallas" not in line
         again = (await client.get("/partials/live")).text
     assert "hx-get=\"/partials/shows" not in again          # cached now: drawn in place
-    assert "🎟 Dallas, TX" in again
+    assert "🎟 San Antonio, TX" in again
     # It scrolls like the title, since a phone is too narrow for the line.
     line = again[again.index('class="shows-line marquee"'):]
-    assert line[:line.index("</div>")].count("🎟 Dallas, TX") == 1
+    assert line[:line.index("</div>")].count("🎟 San Antonio, TX") == 1
     assert len(seen) == 2
 
 
@@ -287,3 +311,10 @@ def test_the_key_comes_from_the_environment(monkeypatch, tmp_path):
     config = load_config(tmp_path / "none.toml")
     assert config.concerts.ticketmaster_key == "abc"
     assert config.geoip_db.name == "dbip-city-lite.mmdb"
+    assert config.concerts.radius_miles == 100
+
+
+def test_the_radius_can_be_set_in_the_config(tmp_path):
+    path = tmp_path / "meshradio.toml"
+    path.write_text("[concerts]\nradius_miles = 50\n")
+    assert load_config(path).concerts.radius_miles == 50

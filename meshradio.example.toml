@@ -109,6 +109,8 @@ dir = ""                        # snapshot dir; empty = <data_dir>/backups
 # key is set (developer.ticketmaster.com); prefer the
 # MESHRADIO_TICKETMASTER_KEY env var.
 ticketmaster_key = ""
+# Only shows within this many miles of the listener are listed.
+radius_miles = 100
 # Listeners on this radio's own network (LAN, Tailscale) are placed here.
 home_label = "Austin, Texas"
 home_lat = 30.2672

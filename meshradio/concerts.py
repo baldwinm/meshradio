@@ -88,11 +88,18 @@ def distance_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float
 
 
 def nearest(
-    shows: tuple[Show, ...], place: Place | None, limit: int, since: str = ""
+    shows: tuple[Show, ...],
+    place: Place | None,
+    limit: int,
+    since: str = "",
+    within_km: float | None = None,
 ) -> list[dict[str, Any]]:
     """The ``limit`` shows on or after ``since`` nearest ``place`` (soonest
     first when there's no place), each with its distance in the listener's
-    unit."""
+    unit. With ``within_km``, only shows that close to ``place`` count, so
+    an unknown place, or a show with no location, has none."""
+    if within_km is not None and place is None:
+        return []
     rows: list[dict[str, Any]] = []
     for show in shows:
         if show.day < since:
@@ -100,7 +107,11 @@ def nearest(
         away = None
         if place is not None and show.lat is not None and show.lon is not None:
             km = distance_km(place.lat, place.lon, show.lat, show.lon)
+            if within_km is not None and km > within_km:
+                continue
             away = km / KM_PER_MILE if place.miles else km
+        elif within_km is not None:
+            continue
         rows.append({"show": show, "away": away})
     if place is not None:
         rows.sort(key=lambda r: (r["away"] is None, r["away"] or 0.0, r["show"].day))
@@ -284,6 +295,12 @@ class _Unavailable(Exception):
 
 @dataclass
 class Concerts:
-    """What the web app needs: the shows, and where a listener is."""
+    """What the web app needs: the shows, where a listener is, and how far
+    from them a show may be (``[concerts] radius_miles``)."""
     finder: ShowFinder
     locator: Any               # geoip.GeoLocator
+    radius_miles: int = 100
+
+    @property
+    def radius_km(self) -> float:
+        return self.radius_miles * KM_PER_MILE
