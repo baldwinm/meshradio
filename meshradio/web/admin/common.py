@@ -24,7 +24,7 @@ from ..admin_auth import (
     csrf_token,
     token_hash,
 )
-from ..context import ctx_of, forwarded_scheme
+from ..context import ctx_of, is_https
 
 ISO_DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 ISO_MONTH = re.compile(r"\A\d{4}-\d{2}\Z")
@@ -61,10 +61,6 @@ def settings_of(request: Request) -> AdminSettings:
     return request.app.state.admin
 
 
-def client_ip(request: Request) -> str:
-    return request.client.host if request.client else ""
-
-
 def is_embed(request: Request) -> bool:
     """The public site: per-visitor players, no hardware."""
     return ctx_of(request).sessions is not None
@@ -93,10 +89,6 @@ async def read_form(request: Request) -> dict[str, list[str]]:
 def field(form: dict[str, list[str]], name: str) -> str:
     values = form.get(name)
     return values[0].strip() if values else ""
-
-
-def https(request: Request) -> bool:
-    return request.url.scheme == "https" or forwarded_scheme(request) == "https"
 
 
 async def current_admin(request: Request) -> str | None:
@@ -162,7 +154,7 @@ def render(request: Request, name: str, token: str | None, **context: Any) -> HT
             "embed": is_embed(request),
             "tz": ctx.player.tz,
             "section": "",
-            "plain_http": not https(request),
+            "plain_http": not is_https(request),
             **context,
         },
         status_code=status_code,

@@ -14,8 +14,8 @@ from fastapi.responses import HTMLResponse
 from ... import config_overrides as overrides_mod
 from ...config import ConfigError
 from ..admin_auth import ADMIN_PATH
-from ..context import ctx_of
-from .common import checked_form, client_ip, field, go, is_embed, render, require_admin, settings_of
+from ..context import client_host, ctx_of
+from .common import checked_form, field, go, is_embed, render, require_admin, settings_of
 
 router = APIRouter(prefix=ADMIN_PATH)
 
@@ -170,7 +170,7 @@ async def _record_change(
     admin = settings_of(request)
     after = overrides_mod.current(admin.config, setting)
     await ctx_of(request).db.log_admin(
-        "change_setting", ip=client_ip(request), target=setting.label,
+        "change_setting", ip=client_host(request), target=setting.label,
         before=overrides_mod.describe(setting, before),
         after=overrides_mod.describe(setting, after)
         + ("" if setting.key in admin.overrides else " (the file's)"),

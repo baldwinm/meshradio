@@ -38,7 +38,7 @@ from ..runtime import supervise
 from . import admin as admin_pages
 from . import routes_api, routes_ingest, routes_pages, ws
 from .admin_auth import ADMIN_PATH, AdminSettings
-from .context import WebContext, absolute_url, forwarded_scheme
+from .context import WebContext, absolute_url, is_https
 from .middleware import CountErrors, OriginGuard, SecurityHeaders
 from .proxy import ForwardedClient
 from .ratelimit import RateLimiter
@@ -187,13 +187,10 @@ def create_app(
                 # Secure when the visitor reached us over HTTPS (hosted embed
                 # deployments sit behind a TLS-terminating proxy); plain-HTTP
                 # LAN/appliance use keeps working without it.
-                https = (
-                    request.url.scheme == "https" or forwarded_scheme(request) == "https"
-                )
                 response.set_cookie(
                     SESSION_COOKIE, cookie,
                     max_age=365 * 24 * 3600, httponly=True, samesite="lax",
-                    secure=https,
+                    secure=is_https(request),
                 )
             return response
 

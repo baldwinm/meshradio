@@ -89,6 +89,12 @@ def calendar_month(days: list[dict[str, Any]], key: str) -> dict[str, Any]:
     return {"label": month_label(key), "key": key, "weeks": weeks}
 
 
+def client_host(request: Request) -> str:
+    """The visitor's address as the app sees it (after web/proxy.py has
+    replaced a counted proxy with the visitor), or "" when unknown."""
+    return request.client.host if request.client else ""
+
+
 def proxy_trusted(request: Request) -> bool:
     """Did this request come through a proxy whose forwarding headers we
     believe (``[web] trusted_proxies``)? With uvicorn's own proxy handling on
@@ -99,7 +105,7 @@ def proxy_trusted(request: Request) -> bool:
     trusted = getattr(request.app.state, "trusted_proxies", frozenset({"127.0.0.1"}))
     peer = getattr(request.state, "peer", None)
     if peer is None:
-        peer = request.client.host if request.client else ""
+        peer = client_host(request)
     return "*" in trusted or peer in trusted
 
 
@@ -112,6 +118,12 @@ def forwarded_scheme(request: Request) -> str | None:
         return None
     value = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
     return value if value in ("http", "https") else None
+
+
+def is_https(request: Request) -> bool:
+    """Did the visitor reach us over https, directly or through a trusted
+    proxy that terminated TLS?"""
+    return request.url.scheme == "https" or forwarded_scheme(request) == "https"
 
 
 def absolute_url(request: Request, path: str | None = None) -> str:
@@ -338,7 +350,7 @@ class WebContext:
         for partials/shows.html. Their address is placed (geoip.py) for this
         response only; one that can't be placed has no shows in reach."""
         assert self.concerts is not None
-        place = self.concerts.locator.locate(request.client.host if request.client else None)
+        place = self.concerts.locator.locate(client_host(request) or None)
         upcoming = [s for s in lineup.shows if s.day >= self.today()]
         radius = self.concerts.radius_miles
         return {

@@ -13,8 +13,8 @@ from ...ingest.corescope import format_probe, probe
 from ...ingest.relay import CURSOR_KEY
 from ...net import http_client
 from ..admin_auth import ADMIN_PATH
-from ..context import ctx_of
-from .common import checked_form, client_ip, go, render, require_admin, settings_of
+from ..context import client_host, ctx_of
+from .common import checked_form, go, render, require_admin, settings_of
 
 router = APIRouter(prefix=ADMIN_PATH)
 
@@ -116,7 +116,7 @@ async def probe_feed(request: Request, name: str):
     async with http_client(base_url=feed.base_url) as client:
         report = await probe(client, feed.channel, name=name)
     await ctx_of(request).db.log_admin(
-        "probe_feed", ip=client_ip(request), target=name, after="ok" if report.ok else "failed"
+        "probe_feed", ip=client_host(request), target=name, after="ok" if report.ok else "failed"
     )
     return render(request, "feeds.html", token, section="feeds",
                   feeds=feed_rows(request, time.time()),
@@ -133,5 +133,5 @@ async def relay_resend(request: Request):
         raise HTTPException(404)
     db = ctx_of(request).db
     await db.set_setting(CURSOR_KEY, "")
-    await db.log_admin("relay_resend", ip=client_ip(request))
+    await db.log_admin("relay_resend", ip=client_host(request))
     return go(f"{ADMIN_PATH}/feeds")

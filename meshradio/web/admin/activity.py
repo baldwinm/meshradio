@@ -11,17 +11,8 @@ from fastapi.responses import HTMLResponse
 
 from ... import config_overrides as overrides_mod
 from ..admin_auth import ADMIN_PATH
-from ..context import ctx_of
-from .common import (
-    ACTION_LABELS,
-    checked_form,
-    client_ip,
-    field,
-    go,
-    render,
-    require_admin,
-    settings_of,
-)
+from ..context import client_host, ctx_of
+from .common import ACTION_LABELS, checked_form, field, go, render, require_admin, settings_of
 from .config import set_override
 from .days import put_back
 
@@ -106,7 +97,7 @@ async def undo(request: Request, entry_id: int):
             return go(f"{ADMIN_PATH}/log", error=error)
         after = entry["before"]
     new_id = await db.log_admin(
-        "undo", ip=client_ip(request), target=entry["target"],
+        "undo", ip=client_host(request), target=entry["target"],
         before=f"{ACTION_LABELS.get(action, action)}: {entry['after'] or ''}", after=after,
     )
     await db.mark_undone(entry_id, new_id)

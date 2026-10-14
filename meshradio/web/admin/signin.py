@@ -25,14 +25,12 @@ from ..admin_auth import (
     token_hash,
     verify_password,
 )
-from ..context import ctx_of
+from ..context import client_host, ctx_of, is_https
 from .common import (
     checked_form,
-    client_ip,
     current_admin,
     field,
     go,
-    https,
     read_form,
     render,
     safe_next,
@@ -63,7 +61,7 @@ def _paused(throttle_wait: float) -> str:
 async def login(request: Request):
     settings = settings_of(request)
     db = ctx_of(request).db
-    ip = client_ip(request)
+    ip = client_host(request)
     form = await read_form(request)
     nxt = field(form, "next")
     now = time.time()
@@ -96,7 +94,7 @@ async def login(request: Request):
     response = go(f"{STEP_PATH}/code")
     response.set_cookie(
         STEP_COOKIE, step, max_age=STEP_TTL_S, path=STEP_PATH,
-        httponly=True, samesite="strict", secure=https(request),
+        httponly=True, samesite="strict", secure=is_https(request),
     )
     return response
 
@@ -111,7 +109,7 @@ async def code_page(request: Request):
     settings = settings_of(request)
     step = request.cookies.get(STEP_COOKIE)
     if not settings.totp_secret or settings.pending.get(
-        step, client_ip(request), settings.fingerprint, time.time()
+        step, client_host(request), settings.fingerprint, time.time()
     ) is None:
         return _drop_step(go(f"{ADMIN_PATH}/login"))
     return render(request, "login_code.html", step)
@@ -121,7 +119,7 @@ async def code_page(request: Request):
 async def code(request: Request):
     settings = settings_of(request)
     db = ctx_of(request).db
-    ip = client_ip(request)
+    ip = client_host(request)
     now = time.time()
     step = request.cookies.get(STEP_COOKIE)
     form = await read_form(request)
@@ -170,7 +168,7 @@ async def _signed_in(request: Request, landing: str) -> Response:
     hash stored, the cookie scoped to /admin."""
     settings = settings_of(request)
     db = ctx_of(request).db
-    ip = client_ip(request)
+    ip = client_host(request)
     now = time.time()
     token = new_session_token()
     await db.prune_admin_sessions(now - SESSION_MAX_S, now - SESSION_IDLE_S)
@@ -179,7 +177,7 @@ async def _signed_in(request: Request, landing: str) -> Response:
     response = go(safe_next(landing))
     response.set_cookie(
         ADMIN_COOKIE, token, max_age=SESSION_MAX_S, path=ADMIN_PATH,
-        httponly=True, samesite="strict", secure=https(request),
+        httponly=True, samesite="strict", secure=is_https(request),
     )
     return response
 
@@ -189,7 +187,7 @@ async def logout(request: Request):
     token, _form = await checked_form(request)
     db = ctx_of(request).db
     await db.end_admin_session(token_hash(token))
-    await db.log_admin("sign_out", ip=client_ip(request))
+    await db.log_admin("sign_out", ip=client_host(request))
     response = go(f"{ADMIN_PATH}/login")
     response.delete_cookie(ADMIN_COOKIE, path=ADMIN_PATH)
     return response
