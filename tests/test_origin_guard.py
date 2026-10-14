@@ -22,7 +22,8 @@ from meshradio.bus import EventBus
 from meshradio.config import PlayerConfig
 from meshradio.db import Database
 from meshradio.media.player import NullBackend, PlayerService
-from meshradio.web.server import create_app, same_site
+from meshradio.web.middleware import same_site
+from meshradio.web.server import create_app
 
 from .helpers import client_for, page_app
 

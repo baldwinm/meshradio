@@ -724,7 +724,9 @@ meshradio/
 ├── ui/              # panel.py (OLED + controls; log panel on dev)
 ├── system/          # power.py (fuel gauge), provision.py (first boot)
 └── web/             # FastAPI app split into:
-    ├── server.py        # create_app: assembly, lifespan, sessions, origin guard, CSP headers
+    ├── server.py        # create_app: assembly, lifespan, session cookie, middleware order
+    ├── middleware.py    # origin guard, security headers + CSP, error counter
+    ├── templating.py    # Jinja2 filters and globals, asset hash, cache-headed static files
     ├── context.py       # WebContext shared state on app.state (+ short-TTL archive caches)
     ├── proxy.py         # visitor address from X-Forwarded-For, counted from the right
     ├── sessions.py      # per-visitor session players + speaker registry

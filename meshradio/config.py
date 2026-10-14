@@ -105,7 +105,7 @@ class WebConfig:
     # from its dashboard without a commit.
     public_url: str = ""
     # Content-Security-Policy and friends on every response (see
-    # web/server.py: SecurityHeaders). Off only if a proxy in front already
+    # web/middleware.py: SecurityHeaders). Off only if a proxy in front already
     # sets them. csp_report_only keeps the policy advisory — the browser
     # console reports what it would have blocked — for trying a change out.
     security_headers: bool = True
