@@ -1200,7 +1200,8 @@ html.mr-fx1 body::before {
    now-playing card's one line under the artist. */
 .meta .artist a { color: inherit; text-decoration: none; }
 .meta .artist a:hover { text-decoration: underline; }
-.shows-line { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shows-line { font-size: 0.72rem; white-space: nowrap; }
+.shows-line a { display: block; }
 .shows-line:empty { display: none; }
 .shows-line a { color: var(--amber); text-decoration: none; }
 .shows-line a:hover { text-decoration: underline; }
