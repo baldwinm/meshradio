@@ -43,7 +43,8 @@ from ..concerts import Concerts, show_date
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import record_error, supervise
-from . import routes_admin, routes_api, routes_ingest, routes_pages, ws
+from . import admin as admin_pages
+from . import routes_api, routes_ingest, routes_pages, ws
 from .admin_auth import ADMIN_PATH, AdminSettings
 from .context import WebContext, absolute_url, forwarded_scheme
 from .proxy import ForwardedClient
@@ -517,15 +518,15 @@ def create_app(
     # every /admin URL is the ordinary 404.
     app.state.admin = admin
     if admin is not None:
-        app.include_router(routes_admin.router)
-        templates.env.filters.update(routes_admin.FILTERS)
+        app.include_router(admin_pages.router)
+        templates.env.filters.update(admin_pages.FILTERS)
 
         @app.middleware("http")
         async def admin_headers(request: Request, call_next):
             response = await call_next(request)
             path = request.url.path
             if path == ADMIN_PATH or path.startswith(f"{ADMIN_PATH}/"):
-                routes_admin.admin_headers(response)
+                admin_pages.admin_headers(response)
             return response
 
     # Inside the origin guard, so a refused cross-site request never costs a

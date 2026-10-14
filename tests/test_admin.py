@@ -20,7 +20,8 @@ from meshradio.cli import _run_set_theme
 from meshradio.config import Config, ConfigError, load_config
 from meshradio.db import Database
 from meshradio.ingest.corescope import FeedProbe
-from meshradio.web import routes_admin
+from meshradio.web.admin import feeds as admin_feeds
+from meshradio.web.admin.artists import artist_key, lookalike_groups
 from meshradio.web.admin_auth import (
     LoginThrottle,
     check_totp,
@@ -29,7 +30,6 @@ from meshradio.web.admin_auth import (
     totp_at,
     verify_password,
 )
-from meshradio.web.routes_admin import artist_key, lookalike_groups
 
 from .helpers import (
     ADMIN_PASSWORD,
@@ -552,7 +552,7 @@ async def test_a_probe_reports_without_touching_the_archive(db, bus, tmp_path, m
     async def fake_probe(client, channel, name="corescope", sample=5):
         return FeedProbe(name=name, channel=channel, error="timed out")
 
-    monkeypatch.setattr(routes_admin, "probe", fake_probe)
+    monkeypatch.setattr(admin_feeds, "probe", fake_probe)
     app = _app(db, bus, tmp_path, corescope__base_url="https://scope.example")
     async with client_for(app, visited=False) as client:
         await sign_in(client)

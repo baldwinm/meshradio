@@ -344,7 +344,7 @@ MIGRATIONS: list[str] = [
         INSERT INTO themes_fts(rowid, title) VALUES (new.id, new.title);
     END;
     """,
-    # v14 — the admin page (web/routes_admin.py).
+    # v14 — the admin page (web/admin/).
     #
     # admin_log: every sign-in and every change made from /admin or the
     # operator CLI, with the value before and after, so the archive's hand
