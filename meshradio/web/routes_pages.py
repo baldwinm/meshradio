@@ -65,6 +65,7 @@ async def index(request: Request):
         "index.html",
         {
             "state": state,
+            "np_shows": ctx.now_playing_shows(request, state),
             **day,
             "meta_description": (
                 f"Today's theme on the Austin mesh #music channel: “{titles}”."
@@ -335,7 +336,7 @@ async def about(request: Request):
 
 
 # Bump when privacy.html changes what it says.
-PRIVACY_UPDATED = "October 10, 2026"
+PRIVACY_UPDATED = "October 14, 2026"
 
 
 @router.get("/privacy", response_class=HTMLResponse)
@@ -456,6 +457,30 @@ async def partial_live(request: Request):
 @router.get("/partials/now-playing", response_class=HTMLResponse)
 async def partial_now_playing(request: Request):
     return await ctx_of(request).render_now_playing(request)
+
+
+@router.get("/partials/shows", response_class=HTMLResponse)
+async def partial_shows(request: Request, artist: str = "", compact: bool = False):
+    """An artist's upcoming shows, nearest the listener first: the artist
+    page's list, or (``compact``) the now-playing card's one line. Only for
+    artists the channel has shared, so the Ticketmaster quota can't be spent
+    on whatever a stranger types."""
+    ctx = ctx_of(request)
+    if ctx.concerts is None:
+        raise HTTPException(404, "no concert listings here")
+    canonical = await ctx.db.artist_lookup(artist) if artist else None
+    if canonical is None or not ctx.concerts.finder.wants(canonical):
+        raise HTTPException(404, "no songs by that artist")
+    lineup = await ctx.concerts.finder.lineup(canonical)
+    response = ctx.templates.TemplateResponse(
+        request,
+        "partials/shows.html",
+        {**ctx.shows_context(request, canonical, lineup, limit=1 if compact else 3),
+         "compact": compact},
+    )
+    # Says where the listener is: never for a shared cache.
+    response.headers["cache-control"] = "private, no-store"
+    return response
 
 
 @router.get("/partials/day-nav", response_class=HTMLResponse)

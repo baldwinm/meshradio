@@ -102,3 +102,19 @@ enabled = true
 interval_s = 21600              # 6h between periodic snapshots
 keep = 8                        # snapshots to retain (older pruned)
 dir = ""                        # snapshot dir; empty = <data_dir>/backups
+
+[concerts]
+# Upcoming shows for the playing artist on its artist page and the
+# now-playing card, nearest the listener first. Off until a free Ticketmaster
+# key is set (developer.ticketmaster.com); prefer the
+# MESHRADIO_TICKETMASTER_KEY env var.
+ticketmaster_key = ""
+# Listeners on this radio's own network (LAN, Tailscale) are placed here.
+home_label = "Austin, Texas"
+home_lat = 30.2672
+home_lon = -97.7431
+# A public instance places visitors by IP address with DB-IP's free city
+# file, fetched monthly to geoip_db (empty = <data_dir>/geoip/). An appliance
+# whose listeners are all local doesn't need it.
+geoip_download = false
+geoip_db = ""

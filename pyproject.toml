@@ -1,6 +1,6 @@
 [project]
 name = "meshradio"
-version = "0.12.1"
+version = "0.13.0"
 description = "A standalone internet radio that plays the Austin MeshCore #music channel."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -11,6 +11,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "jinja2>=3.1",
     "httpx>=0.27",
+    "maxminddb>=2.6",
     "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
@@ -37,6 +38,7 @@ browser = [
     "playwright>=1.55",
 ]
 dev = [
+    "mmdb-writer>=0.2.5",
     "mypy>=2.3.1",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",

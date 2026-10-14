@@ -17,8 +17,10 @@ from . import backup as backup_mod
 from .audio.routing import make_router
 from .backup import BackupService
 from .bus import EventBus
+from .concerts import Concerts, ShowFinder
 from .config_overrides import SETTINGS, current
 from .db import Database
+from .geoip import GeoDbUpdater, GeoLocator, Place
 from .ingest.corescope import CoreScopePoller
 from .ingest.mesh import MeshIngest
 from .ingest.relay import RelayPusher
@@ -163,6 +165,24 @@ async def run(config, demo: bool = False) -> None:
     if config.backup.enabled:
         services.append(BackupService(config.backup, config.db_path, config.backup_dir))
 
+    # Upcoming shows for the playing artist (concerts.py), only with a
+    # Ticketmaster key. The IP database is fetched where geoip_download says
+    # so (the public site); the Pi's listeners are on its LAN, which no
+    # database knows, so they get the configured home location instead.
+    concerts = None
+    if config.concerts.ticketmaster_key:
+        home = Place(
+            label=config.concerts.home_label,
+            lat=float(config.concerts.home_lat),
+            lon=float(config.concerts.home_lon),
+            country="US",
+            home=True,
+        )
+        locator = GeoLocator(config.geoip_db, home=home)
+        concerts = Concerts(ShowFinder(config.concerts.ticketmaster_key), locator)
+        if config.concerts.geoip_download:
+            services.append(GeoDbUpdater(locator))
+
     for service in services:
         service.start()
 
@@ -214,6 +234,7 @@ async def run(config, demo: bool = False) -> None:
         proxy_hops=config.web.proxy_hops,
         rate_limit=config.web.rate_limit,
         admin=admin,
+        concerts=concerts,
     )
     server = uvicorn.Server(
         uvicorn.Config(
@@ -242,6 +263,8 @@ async def run(config, demo: bool = False) -> None:
             demo_task.cancel()
         for service in reversed(services):
             await service.stop()
+        if concerts is not None:
+            await concerts.finder.aclose()
         await db.close()
         log.info("meshradio stopped")
 

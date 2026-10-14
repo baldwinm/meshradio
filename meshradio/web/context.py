@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import URL
 
 from ..bus import EventBus
+from ..concerts import Concerts, nearest
 from ..db import Database
 from ..media.player import PlayerService
 from .feed import FEED_DAYS
@@ -197,6 +198,7 @@ class WebContext:
     templates: Jinja2Templates
     speakers: SpeakerRegistry      # communal speaker election
     health: dict
+    concerts: Concerts | None = None
     open_sockets: int = 0          # WebSockets live right now, across every session
     _cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
 
@@ -327,13 +329,50 @@ class WebContext:
             "yt_export_url": yt_export_url(await self.db.tracks_for_day(day)),
         }
 
+    # -- upcoming shows (concerts.py) -----------------------------------------
+
+    def shows_context(
+        self, request: Request, artist: str, lineup: Any, limit: int
+    ) -> dict[str, Any]:
+        """An artist's shows nearest whoever is asking, for partials/shows.html.
+        Their address is placed (geoip.py) for this response only."""
+        assert self.concerts is not None
+        place = self.concerts.locator.locate(request.client.host if request.client else None)
+        upcoming = [s for s in lineup.shows if s.day >= self.today()]
+        return {
+            "artist": artist,
+            "place": place,
+            "rows": nearest(tuple(upcoming), place, limit),
+            "total": len(upcoming),
+            "tm_url": lineup.url,
+        }
+
+    def now_playing_shows(self, request: Request, state: dict[str, Any]) -> dict[str, Any]:
+        """The now-playing card's one-line nearest show, from the cache only:
+        the card re-renders on every state push and must never wait on
+        Ticketmaster. On a miss the card asks /partials/shows for it."""
+        current = state.get("current") or {}
+        artist = current.get("artist") or ""
+        if (
+            self.concerts is None
+            or current.get("source") == "radio"
+            or not self.concerts.finder.wants(artist)
+        ):
+            return {}
+        lineup = self.concerts.finder.cached(artist)
+        if lineup is None:
+            return {"pending": artist}
+        return self.shows_context(request, artist, lineup, limit=1)
+
     # -- partial renderers (shared by page and API routes) -------------------
 
     async def render_now_playing(self, request: Request):
         p = await self.get_player(request)
+        state = p.state()
         return self.templates.TemplateResponse(
             request, "partials/now_playing.html",
-            {"state": p.state(), **await self.day_context(p)},
+            {"state": state, "np_shows": self.now_playing_shows(request, state),
+             **await self.day_context(p)},
         )
 
     async def render_live(self, request: Request):
@@ -342,9 +381,11 @@ class WebContext:
         page's three containers. One request per event instead of three, and
         the day context (two queries) built once instead of twice."""
         p = await self.get_player(request)
+        state = p.state()
         return self.templates.TemplateResponse(
             request, "partials/live.html",
-            {"state": p.state(), **await self.day_context(p)},
+            {"state": state, "np_shows": self.now_playing_shows(request, state),
+             **await self.day_context(p)},
         )
 
     async def render_queue(self, request: Request):

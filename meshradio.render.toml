@@ -44,3 +44,11 @@ trusted_proxies = ["*"]
 # and walk around the rate limits. Admin -> Overview -> "This connection"
 # shows the chain as it arrives, to check this number against.
 proxy_hops = 2
+
+# Upcoming shows for the playing artist, nearest each visitor (concerts.py).
+# On once MESHRADIO_TICKETMASTER_KEY is set in the dashboard (a free key from
+# developer.ticketmaster.com). Visitors are placed by IP address using
+# DB-IP's free city file, which this fetches monthly into data/geoip/ on the
+# persistent disk; the address is looked up on this server and never sent on.
+[concerts]
+geoip_download = true

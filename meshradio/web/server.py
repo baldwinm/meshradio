@@ -39,6 +39,7 @@ from ..bus import (
     TRACK_READY,
     EventBus,
 )
+from ..concerts import Concerts, show_date
 from ..db import Database
 from ..media.player import PlayerService
 from ..runtime import record_error, supervise
@@ -352,6 +353,7 @@ def create_app(
     proxy_hops: int = 0,
     rate_limit: bool = True,
     admin: AdminSettings | None = None,
+    concerts: Concerts | None = None,
 ) -> FastAPI:
     # Ingest freshness for /healthz: updated by successful relay pushes and,
     # via the lifespan watcher below, by any successful analyzer poll —
@@ -403,6 +405,7 @@ def create_app(
     templates = Jinja2Templates(directory=_HERE / "templates")
     templates.env.filters["mmss"] = _mmss
     templates.env.filters["total_length"] = _total_length
+    templates.env.filters["show_date"] = show_date
     # base.html builds every page's link-preview tags from the live request.
     templates.env.globals["absolute_url"] = absolute_url
     templates.env.globals["asset_v"] = _asset_version()
@@ -413,6 +416,8 @@ def create_app(
     # CDN script, so keep it off the offline LAN/appliance skin. player_factory
     # is set exactly when we're in embed mode (see app.py).
     templates.env.globals["embed_mode"] = player_factory is not None
+    # Upcoming shows on artist pages and the now-playing card (concerts.py).
+    templates.env.globals["concerts_on"] = concerts is not None
     app.mount("/static", VersionedStatic(directory=_HERE / "static"), name="static")
 
     @app.middleware("http")
@@ -467,6 +472,7 @@ def create_app(
         templates=templates,
         speakers=SpeakerRegistry(MAX_SOCKETS_COMMUNAL),
         health=health,
+        concerts=concerts,
     )
     app.state.ctx = ctx
     app.state.sessions = sessions
