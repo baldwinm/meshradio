@@ -334,17 +334,23 @@ class WebContext:
     def shows_context(
         self, request: Request, artist: str, lineup: Any, limit: int
     ) -> dict[str, Any]:
-        """An artist's shows nearest whoever is asking, for partials/shows.html.
-        Their address is placed (geoip.py) for this response only."""
+        """An artist's shows within reach of whoever is asking, nearest first,
+        for partials/shows.html. Their address is placed (geoip.py) for this
+        response only; one that can't be placed has no shows in reach."""
         assert self.concerts is not None
         place = self.concerts.locator.locate(request.client.host if request.client else None)
         upcoming = [s for s in lineup.shows if s.day >= self.today()]
+        radius = self.concerts.radius_miles
         return {
             "artist": artist,
             "place": place,
-            "rows": nearest(tuple(upcoming), place, limit),
+            "rows": nearest(tuple(upcoming), place, limit, within_km=self.concerts.radius_km),
             "total": len(upcoming),
             "tm_url": lineup.url,
+            "radius": (
+                f"{radius:,} miles" if place is None or place.miles
+                else f"{round(self.concerts.radius_km):,} km"
+            ),
         }
 
     def now_playing_shows(self, request: Request, state: dict[str, Any]) -> dict[str, Any]:

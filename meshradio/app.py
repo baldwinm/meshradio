@@ -179,7 +179,10 @@ async def run(config, demo: bool = False) -> None:
             home=True,
         )
         locator = GeoLocator(config.geoip_db, home=home)
-        concerts = Concerts(ShowFinder(config.concerts.ticketmaster_key), locator)
+        concerts = Concerts(
+            ShowFinder(config.concerts.ticketmaster_key), locator,
+            radius_miles=config.concerts.radius_miles,
+        )
         if config.concerts.geoip_download:
             services.append(GeoDbUpdater(locator))
 

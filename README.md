@@ -261,10 +261,11 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   name and it lands on the same page as a plain video link.
 - **Upcoming shows** — with a free Ticketmaster key
   (`MESHRADIO_TICKETMASTER_KEY`), an artist's page lists their three shows
-  nearest the visitor, and the now-playing card shows the nearest one under
-  the artist. The visitor's city comes from their IP address, looked up in
-  DB-IP's free city file on the server itself (`[concerts] geoip_download`,
-  on for the public site), so the address goes nowhere; listeners on the
+  nearest the visitor within 100 miles (`[concerts] radius_miles`), and the
+  now-playing card shows the nearest one under the artist. A visitor who
+  can't be placed, or has no show in range, sees none. The visitor's city
+  comes from their IP address, looked up in DB-IP's free city file on the
+  server itself (`[concerts] geoip_download`, on for the public site), so the address goes nowhere; listeners on the
   radio's own network count as being at `[concerts] home_*` (Austin).
   Ticketmaster is asked by artist only, once per artist per 12 hours, and
   only for artists the channel has shared.
