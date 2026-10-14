@@ -10,15 +10,11 @@ from __future__ import annotations
 from typing import Any
 
 from .core import Core
+from .fields import TOPIC_SUFFIX, strip_topic
 
-# YouTube Music share links resolve to an auto-generated "<Artist> - Topic"
-# channel, while a plain YouTube link to the same artist's video names the
-# artist's own channel. oEmbed's author_name is the channel either way, so
-# without this the same artist would split into two pages.
-TOPIC_SUFFIX = " - Topic"
-
-# The same normalisation in SQL, over ``tr.artist``. LIKE is case-insensitive
-# for ASCII, which is all the suffix is.
+# ``strip_topic`` in SQL, over ``tr.artist``. LIKE is case-insensitive for
+# ASCII, which is all the suffix is. Rows are stored without the suffix now
+# (and migration 15 cleaned the old ones), but a stray one still groups right.
 ARTIST_SQL = (
     "TRIM(CASE WHEN tr.artist LIKE '%" + TOPIC_SUFFIX + "' "
     f"THEN substr(tr.artist, 1, length(tr.artist) - {len(TOPIC_SUFFIX)}) "
@@ -28,10 +24,7 @@ ARTIST_SQL = (
 
 def artist_name(raw: str | None) -> str:
     """An artist as the pages show and link it: the Topic suffix dropped."""
-    name = (raw or "").strip()
-    if name.lower().endswith(TOPIC_SUFFIX.lower()):
-        name = name[: -len(TOPIC_SUFFIX)].strip()
-    return name
+    return strip_topic(raw)
 
 
 class BrowseQueries(Core):

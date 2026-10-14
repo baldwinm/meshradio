@@ -34,10 +34,25 @@ MAX_DURATION_S = 24 * 3600
 # once the Topic suffix is dropped). Lower case; matched case-insensitively.
 PLACEHOLDER_ARTISTS = frozenset({"release - topic"})
 
+# YouTube Music share links resolve to an auto-generated "<Artist> - Topic"
+# channel, while a plain YouTube link to the same artist's video names the
+# artist's own channel. oEmbed's author_name is the channel either way, so the
+# suffix is dropped where artists are stored (``strip_topic``), and the
+# artist pages drop it again when they read, for rows written before that.
+TOPIC_SUFFIX = " - Topic"
+
 
 def is_placeholder_artist(name: str | None) -> bool:
     """Whether ``name`` is a stand-in channel name rather than an artist."""
     return bool(name) and " ".join(str(name).split()).lower() in PLACEHOLDER_ARTISTS
+
+
+def strip_topic(name: str | None) -> str:
+    """``name`` with YouTube's " - Topic" channel suffix dropped."""
+    name = (name or "").strip()
+    if name.lower().endswith(TOPIC_SUFFIX.lower()):
+        name = name[: -len(TOPIC_SUFFIX)].strip()
+    return name
 
 
 # C0 and C1 controls (newlines and tabs included: these fields are one line),

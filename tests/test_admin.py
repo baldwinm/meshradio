@@ -487,13 +487,13 @@ def test_lookalike_spellings_group_but_different_names_dont():
 
 async def test_a_merge_respells_old_and_new_songs_and_undo_restores(db, bus, tmp_path):
     a = await _song(db, artist="Beatles")
-    b = await _song(db, video_id=OTHER, artist="The Beatles - Topic")
+    b = await _song(db, video_id=OTHER, artist="the beatles")
     async with client_for(_app(db, bus, tmp_path), visited=False) as client:
         await sign_in(client)
         page = await client.get("/admin/artists")
         assert "Beatles" in page.text and "look-alike group" in page.text
         await admin_post(client, "/admin/artists/merge",
-                         spelling=["Beatles", "The Beatles - Topic"], canonical="The Beatles")
+                         spelling=["Beatles", "the beatles"], canonical="The Beatles")
         assert (await db.track_by_id(a["id"]))["artist"] == "The Beatles"
         assert (await db.track_by_id(b["id"]))["artist"] == "The Beatles"
         # A song arriving later with an old spelling joins the merged name.
@@ -503,7 +503,7 @@ async def test_a_merge_respells_old_and_new_songs_and_undo_restores(db, bus, tmp
         [entry] = await db.admin_log_entries("changes")
         await admin_post(client, f"/admin/log/{entry['id']}/undo")
     assert (await db.track_by_id(a["id"]))["artist"] == "Beatles"
-    assert (await db.track_by_id(b["id"]))["artist"] == "The Beatles - Topic"
+    assert (await db.track_by_id(b["id"]))["artist"] == "the beatles"
     assert await db.artist_aliases() == []
 
 

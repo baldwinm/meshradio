@@ -17,7 +17,7 @@ import aiosqlite
 from ..ingest.parse import untitled_theme
 from .browse import ARTIST_SQL
 from .core import utcnow
-from .fields import MAX_TITLE, PLACEHOLDER_ARTISTS, clean_text
+from .fields import MAX_TITLE, PLACEHOLDER_ARTISTS, clean_text, strip_topic
 from .tracks import TrackQueries
 
 # How long the activity log keeps an entry. Pruned as entries are written.
@@ -206,8 +206,9 @@ class AdminQueries(TrackQueries):
                     "mesh_ts,ingested_at,source,dedupe_hash,meta_edited_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(dedupe_hash) DO NOTHING RETURNING id",
-                    (old["video_id"], old["url"], old.get("title"), old.get("artist"),
-                     old.get("duration"), theme["id"], old.get("sender") or "",
+                    (old["video_id"], old["url"], old.get("title"),
+                     strip_topic(old.get("artist")) or None, old.get("duration"),
+                     theme["id"], old.get("sender") or "",
                      old["mesh_ts"], utcnow(), old["source"], old["dedupe_hash"],
                      old.get("meta_edited_at")),
                 )
