@@ -85,6 +85,12 @@ BACKUP_OVERDUE_FACTOR = 1.25
 # flagged even if its last attempt wasn't an outright error.
 FEED_STALE_FACTOR = 3
 
+# The Pi pushes every two minutes even with nothing new ([relay] interval_s),
+# so a receiver that hasn't heard from it in three pushes reads as quiet, and
+# past the uptime check's limit (MAX_RELAY_AGE_S in uptime.yml) as stopped.
+RELAY_QUIET_S = 3 * 120
+RELAY_STOPPED_S = 1800
+
 LOG_PAGE = 100
 
 # What each backup's label means, for the Backups screen.
@@ -1073,10 +1079,18 @@ def feed_rows(request: Request, now: float) -> list[dict[str, Any]]:
 
     if ctx.ingest_token:
         info = seen.get("relay", {})
+        at = info.get("at")
+        if not at:
+            state, status = "dim", "No push received since start"
+        elif now - at > RELAY_STOPPED_S:
+            state, status = "bad", f"No push for {int((now - at) // 60)} min"
+        elif now - at > RELAY_QUIET_S:
+            state, status = "warn", "Quiet"
+        else:
+            state, status = "ok", "OK"
         rows.append({"name": "relay", "label": "Relay from the Pi", "detail": "received here",
-                     "state": "ok" if info else "dim",
-                     "status": "OK" if info else "No push received since start",
-                     "at": info.get("at"), "last_ok": info.get("at"), "probe": False})
+                     "state": state, "status": status,
+                     "at": at, "last_ok": at, "probe": False})
     if settings.relay is not None:
         status = settings.relay.status
         if not status:

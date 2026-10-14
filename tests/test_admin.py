@@ -534,6 +534,20 @@ async def test_feeds_show_what_each_poller_last_reported(db, bus, tmp_path):
         assert "comchan (backup): No answer" in (await client.get("/admin")).text
 
 
+async def test_the_relay_row_goes_quiet_then_stopped_when_the_pi_stops_pushing(
+    db, bus, tmp_path
+):
+    app = page_app(db, bus, admin=admin_settings(tmp_path), ingest_token="s3cret")
+    async with client_for(app, visited=False) as client:
+        await sign_in(client)
+        feeds = app.state.ctx.health.setdefault("feeds", {})
+        for age, chip in ((60, '"chip ok">OK'),
+                          (13 * 60, '"chip warn">Quiet'),
+                          (45 * 60, '"chip bad">No push for 45 min')):
+            feeds["relay"] = {"status": "ok", "at": time.time() - age}
+            assert chip in (await client.get("/admin/feeds")).text
+
+
 async def test_a_probe_reports_without_touching_the_archive(db, bus, tmp_path, monkeypatch):
     async def fake_probe(client, channel, name="corescope", sample=5):
         return FeedProbe(name=name, channel=channel, error="timed out")
