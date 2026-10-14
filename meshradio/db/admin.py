@@ -1,4 +1,4 @@
-"""What the admin page (web/routes_admin.py) reads and writes.
+"""What the admin page (web/admin/) reads and writes.
 
 Kept apart from the archive's own queries because every write here is an
 operator's hand edit: each one is logged in ``admin_log`` with what it
@@ -45,7 +45,7 @@ class AdminQueries(TrackQueries):
         undo: dict[str, Any] | None = None,
     ) -> int:
         """Append one entry and return its id. ``undo`` is what
-        ``routes_admin`` needs to reverse the change; None when it can't be."""
+        ``web.admin.activity`` needs to reverse the change; None when it can't be."""
         cutoff = (datetime.now(UTC) - timedelta(days=LOG_RETENTION_DAYS)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )

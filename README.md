@@ -731,7 +731,8 @@ meshradio/
     ├── routes_pages.py  # HTML pages (now playing, archive, search, stats, members, artists, weeks…) + htmx partials
     ├── routes_api.py    # player/queue control API
     ├── routes_ingest.py # /audio streaming, relay /api/ingest, /healthz
-    ├── routes_admin.py  # /admin: overview, days, removals, artists, feeds, backups, log, config
+    ├── admin/           # /admin, one module per screen: signin, overview, days (songs, removals),
+    │                    #   artists, feeds, backups, activity (log + undo), config, device; common, filters
     ├── admin_auth.py    # admin sign-in: scrypt password hash, two-step codes, lockout, CSRF
     ├── ws.py            # WebSocket: forwards bus events → htmx re-fetch
     ├── feed.py          # /feed.xml Atom builder (pure; safe against hostile text)
