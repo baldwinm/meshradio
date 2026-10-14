@@ -305,24 +305,23 @@ async def test_search_lists_a_repeat_share_once(db, bus):
     assert "1 song for “rain”" in body
 
 
-def test_asset_version_follows_content_not_mtime(tmp_path, monkeypatch):
+def test_asset_version_follows_content_not_mtime(tmp_path):
     """A fresh clone stamps every file with the build's time, so a version
     from mtimes invalidated every asset on every deploy. The hash moves only
     when a file's bytes do."""
-    from meshradio.web import server as server_mod
+    from meshradio.web.templating import asset_version
 
     static = tmp_path / "static"
     static.mkdir()
     (static / "style.css").write_text("body{}")
     (static / "js").mkdir()
     (static / "js" / "radio.js").write_text("// radio")
-    monkeypatch.setattr(server_mod, "_HERE", tmp_path)
-    first = server_mod._asset_version()
+    first = asset_version(static)
     assert re.fullmatch(r"[0-9a-f]{12}", first)
     (static / "style.css").touch()                                  # a new mtime, same bytes
-    assert server_mod._asset_version() == first
+    assert asset_version(static) == first
     (static / "style.css").write_text("body{margin:0}")
-    assert server_mod._asset_version() != first
+    assert asset_version(static) != first
 
 
 @pytest.mark.parametrize("headers", [{}, {"HX-Request": "true", "HX-Boosted": "true"}])

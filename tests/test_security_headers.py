@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from meshradio.web.server import content_security_policy
+from meshradio.web.middleware import content_security_policy
 
 from .helpers import client_for, embed_app, make_ready_on, page_app, seed_day
 
