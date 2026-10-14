@@ -117,3 +117,22 @@ function toggleMute() {
     setVolume(restore);
   }
 }
+
+// The title and nearest-show lines (.marquee) sit still when they fit and
+// scroll only when their text is wider than the card. Measured again after
+// every swap (the card re-renders on each state push), on resize, and once
+// the web fonts land, since each can change who fits.
+function fitMarquees() {
+  document.querySelectorAll(".marquee").forEach((box) => {
+    const text = box.querySelector("span");
+    if (!text) return;
+    // While scrolling, the span carries the box's width as left padding.
+    const pad = parseFloat(getComputedStyle(text).paddingLeft) || 0;
+    box.classList.toggle("scrolling", text.offsetWidth - pad > box.clientWidth + 1);
+  });
+}
+fitMarquees();
+document.addEventListener("DOMContentLoaded", fitMarquees);
+document.body.addEventListener("htmx:afterSettle", fitMarquees);
+window.addEventListener("resize", fitMarquees);
+if (document.fonts) document.fonts.ready.then(fitMarquees);

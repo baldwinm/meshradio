@@ -112,3 +112,25 @@ def test_pausing_a_day_played_from_the_archive_stays_on_it(hosted, page):
     assert page.evaluate("window.__yt.loads") == ["ddddddddddd"]
     assert page.evaluate("window.__yt.getPlayerState()") == 2          # paused
     expect(page.locator("#now-playing")).to_contain_text("Song D")
+
+
+def test_now_playing_text_scrolls_only_when_it_does_not_fit(hosted, page):
+    page.goto(hosted.url + "/")
+    page.locator(".controls button").first.click()
+    wait_for_video(page, 1)
+    page.wait_for_load_state("networkidle")       # the card's re-renders after play
+    title = page.locator(".title.marquee")
+    expect(title).not_to_have_class(re.compile(r"\bscrolling\b"))   # "Song A" fits
+
+    long = "A very long song title that no phone screen could ever show in one line"
+    page.evaluate(f"""() => {{
+        document.querySelector('.title.marquee span').textContent = {long!r};
+        window.dispatchEvent(new Event('resize'));
+    }}""")
+    expect(title).to_have_class(re.compile(r"\bscrolling\b"))
+
+    page.evaluate("""() => {
+        document.querySelector('.title.marquee span').textContent = 'Short';
+        window.dispatchEvent(new Event('resize'));
+    }""")
+    expect(title).not_to_have_class(re.compile(r"\bscrolling\b"))
