@@ -85,7 +85,7 @@ def _sessionless(path: str) -> bool:
     )
 
 
-def create_app(
+def create_app(  # noqa: C901
     bus: EventBus,
     db: Database,
     player: PlayerService,
