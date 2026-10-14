@@ -156,6 +156,24 @@ class BackupConfig:
 
 
 @dataclass
+class ConcertsConfig:
+    """Upcoming shows for the playing artist, nearest the listener first
+    (concerts.py). On only with a Ticketmaster key; prefer the
+    MESHRADIO_TICKETMASTER_KEY env var."""
+    ticketmaster_key: str = ""
+    # DB-IP's city file, for placing a listener by IP address (geoip.py).
+    # Empty = <data_dir>/geoip/dbip-city-lite.mmdb. geoip_download fetches
+    # and refreshes it monthly; without the file, shows go by date.
+    geoip_db: str = ""
+    geoip_download: bool = False
+    # Where listeners on the radio's own network are (no database knows a
+    # LAN address). Defaults to Austin, where the channel is.
+    home_label: str = "Austin, Texas"
+    home_lat: float = 30.2672
+    home_lon: float = -97.7431
+
+
+@dataclass
 class Config:
     hardware_profile: str = "dev"
     data_dir: Path = field(default_factory=lambda: Path("./data"))
@@ -167,6 +185,7 @@ class Config:
     web: WebConfig = field(default_factory=WebConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
+    concerts: ConcertsConfig = field(default_factory=ConcertsConfig)
 
     @property
     def db_path(self) -> Path:
@@ -175,6 +194,11 @@ class Config:
     @property
     def cache_dir(self) -> Path:
         return self.data_dir / "cache"
+
+    @property
+    def geoip_db(self) -> Path:
+        path = self.concerts.geoip_db
+        return Path(path) if path else self.data_dir / "geoip" / "dbip-city-lite.mmdb"
 
     @property
     def backup_dir(self) -> Path:
@@ -226,6 +250,7 @@ _BOOLS = [
     ("mesh", "enabled"), ("corescope", "enabled"), ("comchan", "enabled"),
     ("player", "live_autoplay"), ("web", "security_headers"),
     ("web", "csp_report_only"), ("web", "rate_limit"), ("backup", "enabled"),
+    ("concerts", "geoip_download"),
 ]
 _STRINGS = [
     ("mesh", "serial_port"), ("mesh", "channel"), ("mesh", "channel_key"),
@@ -236,6 +261,12 @@ _STRINGS = [
     ("web", "host"), ("web", "ingest_token"), ("web", "public_url"),
     ("web", "admin_password_hash"), ("web", "admin_totp_secret"),
     ("relay", "push_url"), ("relay", "token"), ("backup", "dir"),
+    ("concerts", "ticketmaster_key"), ("concerts", "geoip_db"), ("concerts", "home_label"),
+]
+# Each with its floor and ceiling; an integer is accepted for a float.
+_FLOATS: list[tuple[str, str, float, float]] = [
+    ("concerts", "home_lat", -90.0, 90.0),
+    ("concerts", "home_lon", -180.0, 180.0),
 ]
 _STRING_LISTS = [
     ("web", "allowed_hosts"), ("web", "trusted_proxies"), ("cache", "ytdlp_extra_args"),
@@ -279,6 +310,13 @@ def validate_config(cfg: Config) -> None:
         value = getattr(getattr(cfg, section), name)
         if not isinstance(value, str):
             problems.append(f"{key(section, name)} must be a string, got {value!r}")
+    for section, name, flo, fhi in _FLOATS:
+        value = getattr(getattr(cfg, section), name)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            problems.append(f"{key(section, name)} must be a number, got {value!r}")
+        elif not flo <= value <= fhi:
+            problems.append(f"{key(section, name)} must be between {flo:g} and {fhi:g}, "
+                            f"got {value!r}")
     for section, name in _STRING_LISTS:
         value = getattr(getattr(cfg, section), name)
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
@@ -350,7 +388,7 @@ def load_config(path: str | Path | None = None) -> Config:
             with open(candidate, "rb") as f:
                 raw = tomllib.load(f)
             sections = ("mesh", "corescope", "comchan", "player", "cache",
-                        "web", "relay", "backup")
+                        "web", "relay", "backup", "concerts")
             for section in sections:
                 if section in raw:
                     _apply(getattr(cfg, section), raw[section], f"[{section}]")
@@ -375,6 +413,9 @@ def load_config(path: str | Path | None = None) -> Config:
     env_totp = os.environ.get("MESHRADIO_ADMIN_TOTP_SECRET")
     if env_totp:
         cfg.web.admin_totp_secret = env_totp.strip()
+    env_tm = os.environ.get("MESHRADIO_TICKETMASTER_KEY")
+    if env_tm and env_tm.strip():
+        cfg.concerts.ticketmaster_key = env_tm.strip()
     # Not a secret, but where a host is reached is the host's business: a
     # custom domain is added in its dashboard, and so is the name to match.
     env_public = os.environ.get("MESHRADIO_PUBLIC_URL")

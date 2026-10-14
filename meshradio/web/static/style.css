@@ -1195,3 +1195,13 @@ html.mr-fx1 body::before {
   box-shadow: 0 0 24px rgb(255 47 208 / 60%), 0 0 48px rgb(0 200 255 / 45%);
 }
 .mr-fx1-v iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+/* Upcoming shows (partials/shows.html): the artist page's list and the
+   now-playing card's one line under the artist. */
+.meta .artist a { color: inherit; text-decoration: none; }
+.meta .artist a:hover { text-decoration: underline; }
+.shows-line { font-size: 0.72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shows-line:empty { display: none; }
+.shows-line a { color: var(--amber); text-decoration: none; }
+.shows-line a:hover { text-decoration: underline; }
+.shows-credit { color: var(--muted); font-size: 0.7rem; margin: 0 0 1rem; }

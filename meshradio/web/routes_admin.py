@@ -123,6 +123,7 @@ ACTION_LABELS = {
 SECRET_KEYS = {
     ("web", "ingest_token"), ("relay", "token"), ("mesh", "channel_key"),
     ("web", "admin_password_hash"), ("web", "admin_totp_secret"),
+    ("concerts", "ticketmaster_key"),
 }
 # Where each setting the environment can override comes from.
 ENV_KEYS = {
@@ -130,6 +131,7 @@ ENV_KEYS = {
     ("relay", "token"): "MESHRADIO_RELAY_TOKEN",
     ("web", "admin_password_hash"): "MESHRADIO_ADMIN_PASSWORD_HASH",
     ("web", "admin_totp_secret"): "MESHRADIO_ADMIN_TOTP_SECRET",
+    ("concerts", "ticketmaster_key"): "MESHRADIO_TICKETMASTER_KEY",
 }
 # Device-only settings, left off the public site's config view: the public
 # instance has no hardware, so they say nothing true about it.

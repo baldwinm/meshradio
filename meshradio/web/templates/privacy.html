@@ -44,13 +44,32 @@
 
   <h3 class="privacy-h">Your IP address</h3>
   <p>MeshRadio uses your address for a short time, in memory only, to stop any
-    one visitor from flooding the site with requests. It doesn't write visitor
+    one visitor from flooding the site with requests{% if concerts_on %} and to
+    find concerts near you (below){% endif %}. It doesn't write visitor
     addresses to disk or keep access logs.
     {% if embed_mode %}The site is hosted on
     <a href="https://render.com/privacy" target="_blank" rel="noopener">Render</a>,
     which may keep its own standard request logs.{% endif %}
     Attempts to sign in to the admin page, and changes made there, are logged
     with the address they came from.</p>
+  {% if concerts_on %}
+  <h3 class="privacy-h">Concert listings</h3>
+  <p>Artist pages and the now-playing card show the artist's upcoming shows
+    nearest you. To find what's near you, the server looks your address up in
+    a city database kept on the server itself
+    ({% if embed_mode %}<a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a>'s
+    free IP-to-city file{% else %}or, on this radio's own network, uses the
+    radio's home city{% endif %}). That gives a rough city, never a street
+    address. The lookup happens on our server: your address isn't sent
+    anywhere for it, and neither it nor the city is stored. A VPN or mobile
+    network can put you in the wrong city.</p>
+  <p>The shows themselves come from
+    <a href="https://www.ticketmaster.com" target="_blank" rel="noopener">Ticketmaster</a>.
+    The server asks for them by artist name only, so Ticketmaster learns
+    nothing about you unless you follow a ticket link to its site, where
+    <a href="https://privacy.ticketmaster.com/privacy-policy" target="_blank" rel="noopener">its privacy policy</a>
+    applies.</p>
+  {% endif %}
 
   <h3 class="privacy-h">Songs and names</h3>
   <p>The songs, themes and names you see here come from the Austin MeshCore

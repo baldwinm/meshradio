@@ -351,3 +351,65 @@ def write_autoupdate_report(**fields) -> dict:
     with open(os.environ["MESHRADIO_AUTOUPDATE_STATUS"], "w") as f:
         json.dump(report, f)
     return report
+
+
+# -- concert listings ---------------------------------------------------------
+
+
+def tm_attraction(attraction_id, name, upcoming=1):
+    return {"id": attraction_id, "name": name, "url": f"https://tm.example/a/{attraction_id}",
+            "upcomingEvents": {"_total": upcoming}}
+
+
+def tm_event(day, city, state, lat, lon, venue="Club", status="onsale", name="Show"):
+    """One Ticketmaster event, shaped as Discovery v2 returns it."""
+    return {
+        "name": name,
+        "url": f"https://tm.example/e/{city}-{day}",
+        "dates": {"start": {"localDate": day}, "status": {"code": status}},
+        "_embedded": {"venues": [{
+            "name": venue, "city": {"name": city}, "state": {"stateCode": state},
+            "location": {"latitude": str(lat), "longitude": str(lon)},
+        }]},
+    }
+
+
+def fake_ticketmaster(attractions=(), events=None, status=200):
+    """An httpx client answering like the Discovery API, and the requests it
+    saw. ``attractions`` answer every name search; ``events`` maps an
+    attraction id to its events."""
+    seen: list[httpx.Request] = []
+    events = events or {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if status != 200:
+            return httpx.Response(status)
+        if request.url.path.endswith("/attractions.json"):
+            return httpx.Response(200, json={"_embedded": {"attractions": list(attractions)}})
+        found = events.get(request.url.params.get("attractionId"), [])
+        return httpx.Response(200, json={"_embedded": {"events": found}} if found else {})
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler)), seen
+
+
+def geo_record(city, region, country, lat, lon):
+    return {
+        "city": {"names": {"en": city}},
+        "subdivisions": [{"names": {"en": region}}],
+        "country": {"iso_code": country, "names": {"en": country}},
+        "location": {"latitude": lat, "longitude": lon},
+    }
+
+
+def write_geo_db(path, networks):
+    """A city database in DB-IP's (GeoIP2-City) format: ``networks`` maps a
+    CIDR to a ``geo_record``."""
+    from mmdb_writer import MMDBWriter
+    from netaddr import IPSet
+
+    writer = MMDBWriter(ip_version=6, database_type="DBIP-City-Lite", ipv4_compatible=True)
+    for cidr, record in networks.items():
+        writer.insert_network(IPSet([cidr]), record)
+    writer.to_db_file(str(path))
+    return path

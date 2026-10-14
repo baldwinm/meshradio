@@ -154,7 +154,8 @@ set. Secrets belong in the environment, not the committed file:
 `MESHRADIO_INGEST_TOKEN` for the receiver's token (`[web] ingest_token`) and
 `MESHRADIO_RELAY_TOKEN` for the pusher's (`[relay] token`), and
 `MESHRADIO_ADMIN_PASSWORD_HASH` / `MESHRADIO_ADMIN_TOTP_SECRET` for the admin
-page; each overrides the file. `MESHRADIO_PUBLIC_URL` likewise overrides
+page, and `MESHRADIO_TICKETMASTER_KEY` for concert listings (`[concerts]
+ticketmaster_key`); each overrides the file. `MESHRADIO_PUBLIC_URL` likewise overrides
 `[web] public_url`, so a host moved to its own domain names it from its
 dashboard. Values are checked at startup — a number of the wrong type or out of
 range, an unknown backend, audio format or time zone — and a bad one stops
@@ -257,6 +258,15 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   first), who on the channel posts them most, and the themes they turned up in.
   A YouTube Music share names an auto-generated "Artist - Topic" channel; the
   suffix is folded away, so it lands on the same page as a plain video link.
+- **Upcoming shows** — with a free Ticketmaster key
+  (`MESHRADIO_TICKETMASTER_KEY`), an artist's page lists their three shows
+  nearest the visitor, and the now-playing card shows the nearest one under
+  the artist. The visitor's city comes from their IP address, looked up in
+  DB-IP's free city file on the server itself (`[concerts] geoip_download`,
+  on for the public site), so the address goes nowhere; listeners on the
+  radio's own network count as being at `[concerts] home_*` (Austin).
+  Ticketmaster is asked by artist only, once per artist per 12 hours, and
+  only for artists the channel has shared.
 - **Weekly recap** — `/week` sums up the newest week (Sunday to Saturday, like
   the calendar's rows): each day's theme, the busiest day, the top sharers and
   artists, who shared for the first time, and songs the channel had heard

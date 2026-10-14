@@ -14,7 +14,22 @@
     <div class="meta">
       {% set t = current.title or current.video_id %}
       <div class="title marquee"><span>{{ t }} ✱ {{ t }} ✱ </span></div>
+      {% if current.artist and current.source != "radio" %}
+      <div class="artist"><a href="/artist/{{ current.artist|urlencode }}" hx-boost="true"
+         hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">{{ current.artist }}</a></div>
+      {% else %}
       <div class="artist">{{ current.artist or "" }}</div>
+      {% endif %}
+      {# The artist's nearest show: cached already, or asked for once (the
+         card re-renders on every state push and mustn't wait on it). #}
+      {% if np_shows and np_shows.pending %}
+      <div class="shows-line" hx-get="/partials/shows?compact=1&artist={{ np_shows.pending|urlencode }}"
+           hx-trigger="load" hx-swap="outerHTML"></div>
+      {% elif np_shows %}
+      {% with compact=True, rows=np_shows.rows, place=np_shows.place, artist=np_shows.artist %}
+        {% include "partials/shows.html" %}
+      {% endwith %}
+      {% endif %}
       <div class="sender">
         {% if current.source == "radio" %}📻 {{ current.sender }}{% else %}shared by {{ current.sender or "—" }}{% endif %}
       </div>

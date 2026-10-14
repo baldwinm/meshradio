@@ -20,6 +20,11 @@
   <a href="/archive/{{ profile.last_day }}">{{ profile.last_day }}</a>{% endif %}.</p>
 {% endif %}
 
+{% if concerts_on %}
+{# Fetched after the page: the first look at an artist asks Ticketmaster. #}
+<section id="shows" hx-get="/partials/shows?artist={{ name|urlencode }}" hx-trigger="load"></section>
+{% endif %}
+
 {% if sharers %}
 <h3>Shared most by</h3>
 <ol class="board">

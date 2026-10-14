@@ -1,0 +1,33 @@
+{# An artist's upcoming shows, nearest the listener first (concerts.py,
+   context.shows_context). compact: the now-playing card's one line.
+   DB-IP's licence asks for a link wherever its locations are used. #}
+{% macro away(row) -%}
+  {%- if row.away is not none and row.away < 15 %} · close by
+  {%- elif row.away is not none %} · {{ "{:,.0f}".format(row.away) }} {{ "mi" if place.miles else "km" }}{% endif -%}
+{%- endmacro %}
+{% if compact %}
+  {% if rows %}{% set r = rows[0] %}
+  <div class="shows-line"><a href="{{ r.show.url }}" target="_blank" rel="noopener"
+     title="{{ artist }}{% if place %}'s nearest show to {{ place.label }}{% if not place.home %} (location by DB-IP){% endif %}{% else %}'s next show{% endif %}, on Ticketmaster">🎟 {{ r.show.city }} · {{ r.show.day|show_date }}{{ away(r) }}</a></div>
+  {% endif %}
+{% else %}
+<h3>Upcoming shows</h3>
+{% if rows %}
+<p class="cal-hint">
+  {%- if place %}Nearest to {{ place.label }}{% if not place.home %}, going by your internet connection{% endif %}.
+  {%- else %}Soonest first.{% endif %}</p>
+<ol class="board board-plain shows">
+  {% for r in rows %}
+  <li><a class="board-name" href="{{ r.show.url }}" target="_blank" rel="noopener">{{ r.show.city or r.show.venue }}</a>
+    <span class="board-val">{{ r.show.day|show_date }}{% if r.show.venue %} · {{ r.show.venue }}{% endif %}{{ away(r) }}</span></li>
+  {% endfor %}
+</ol>
+{% if total > rows|length and tm_url %}
+<p class="cal-hint"><a href="{{ tm_url }}" target="_blank" rel="noopener">All {{ total }} upcoming shows ↗</a></p>
+{% endif %}
+{% else %}
+<p class="cal-hint">No upcoming shows listed for {{ artist }}.</p>
+{% endif %}
+<p class="shows-credit">Shows and tickets from Ticketmaster
+  {%- if place and not place.home %} · location by <a href="https://db-ip.com" target="_blank" rel="noopener">DB-IP</a>{% endif %}</p>
+{% endif %}
