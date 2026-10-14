@@ -257,7 +257,8 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
 - **Artist pages** — every artist name is a link too: their songs (most-shared
   first), who on the channel posts them most, and the themes they turned up in.
   A YouTube Music share names an auto-generated "Artist - Topic" channel; the
-  suffix is folded away, so it lands on the same page as a plain video link.
+  suffix is dropped when the song is stored, so every page shows the plain
+  name and it lands on the same page as a plain video link.
 - **Upcoming shows** — with a free Ticketmaster key
   (`MESHRADIO_TICKETMASTER_KEY`), an artist's page lists their three shows
   nearest the visitor, and the now-playing card shows the nearest one under
@@ -486,7 +487,7 @@ able to drive it:
 
 `/admin` does in a browser what the maintenance flags below do over SSH: name
 or fix a day's theme, take a song off a day (and put it back), correct a
-song's title or artist, merge artist spellings ("Beatles", "The Beatles - Topic")
+song's title or artist, merge artist spellings ("Beatles", "The Beatles")
 into one, give many songs their artist from one list (**Artists → Songs with
 no real artist**, or the songs filed under any name), check and probe the feeds, and take or download backups. It's off
 until you give it a password:

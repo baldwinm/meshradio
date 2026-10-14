@@ -16,6 +16,7 @@ from .fields import (
     clean_duration,
     clean_text,
     is_placeholder_artist,
+    strip_topic,
 )
 from .themes import ThemeQueries
 
@@ -243,13 +244,19 @@ class TrackQueries(ThemeQueries):
         """``artist`` as the operator asked for it to be spelled: a spelling
         merged on the admin page's Artists screen maps to the name it was
         merged into, so a song arriving later joins the merged artist. A
-        stand-in channel name (``PLACEHOLDER_ARTISTS``) is no artist at all."""
+        stand-in channel name (``PLACEHOLDER_ARTISTS``) is no artist at all,
+        and YouTube's " - Topic" channel suffix is dropped, so a YouTube Music
+        share is stored under the artist's plain name."""
         if not artist or is_placeholder_artist(artist):
             return None
-        row = await self._fetchone(
-            "SELECT canonical FROM artist_aliases WHERE alias=?", (artist,)
-        )
-        return row["canonical"] if row else artist
+        plain = strip_topic(artist)
+        for name in dict.fromkeys((artist, plain)):
+            row = await self._fetchone(
+                "SELECT canonical FROM artist_aliases WHERE alias=?", (name,)
+            )
+            if row:
+                return row["canonical"]
+        return plain or None
 
     async def fill_track_duration(self, track_id: int, seconds: float) -> bool:
         """Set a track's duration only if it has none. Returns whether it did.

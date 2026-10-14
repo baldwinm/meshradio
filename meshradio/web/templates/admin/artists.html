@@ -19,7 +19,7 @@
     </form>
   </div>
 </section>
-<p class="small muted">Songs carry the artist name YouTube gave them, which varies ("Beatles", "The Beatles", "The Beatles - Topic"). Merging respells every song under one name and remembers the spelling, so new songs with it are respelled too. Each merge can be undone from the activity log.</p>
+<p class="small muted">Songs carry the artist name YouTube gave them, which varies ("Beatles", "The Beatles", "the beatles"). Merging respells every song under one name and remembers the spelling, so new songs with it are respelled too. Each merge can be undone from the activity log.</p>
 {% for g in groups %}
 <form class="panel" method="post" action="/admin/artists/merge">
   <input type="hidden" name="csrf" value="{{ csrf }}">

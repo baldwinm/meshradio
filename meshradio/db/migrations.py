@@ -385,4 +385,27 @@ MIGRATIONS: list[str] = [
     ALTER TABLE tracks ADD COLUMN meta_edited_at TEXT;
     ALTER TABLE deleted_tracks ADD COLUMN track_json TEXT;
     """,
+    # v15 — artists stored without YouTube's " - Topic" channel suffix.
+    #
+    # Only the artist pages used to drop it, as they read, so the now-playing
+    # card, day lists and member pages showed "Artist - Topic" for every
+    # YouTube Music share. Ingest now drops it (``canonical_artist``); this
+    # does the same to the rows already stored, merged names included, then
+    # maps the result through the operator's merges. "Release - Topic" is a
+    # stand-in, not an artist, and stays as it is for the Fix artists screen.
+    """
+    UPDATE tracks
+       SET artist = NULLIF(TRIM(substr(TRIM(artist), 1, length(TRIM(artist)) - 8)), '')
+     WHERE TRIM(artist) LIKE '% - Topic'
+       AND lower(TRIM(artist)) != 'release - topic';
+    UPDATE artist_aliases
+       SET canonical = TRIM(substr(TRIM(canonical), 1, length(TRIM(canonical)) - 8))
+     WHERE TRIM(canonical) LIKE '% - Topic'
+       AND lower(TRIM(canonical)) != 'release - topic';
+    DELETE FROM artist_aliases WHERE alias = canonical COLLATE BINARY;
+    UPDATE tracks
+       SET artist = (SELECT canonical FROM artist_aliases WHERE alias = tracks.artist)
+     WHERE EXISTS (SELECT 1 FROM artist_aliases
+                    WHERE alias = tracks.artist AND canonical != tracks.artist COLLATE BINARY);
+    """,
 ]
