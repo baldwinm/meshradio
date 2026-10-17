@@ -92,17 +92,23 @@ body {
 }
 /* Our own button in the donation site's colours, so the policy needs no
    third-party script, style or font for it. */
+/* An outline until hovered: filled yellow it was the loudest thing on every
+   page, pulling the eye off the player whenever the page was short. */
 #site-footer .coffee {
   display: inline-block;
   padding: 0.35rem 0.9rem;
-  border: 1px solid #000;
+  border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent);
   border-radius: 6px;
-  background: #ffdd00;
-  color: #000;
+  background: transparent;
+  color: var(--amber);
   font-weight: 600;
   text-decoration: none;
 }
-#site-footer .coffee:hover { color: #000; filter: brightness(1.06); text-decoration: none; }
+#site-footer .coffee:hover, #site-footer .coffee:focus-visible {
+  color: #000; background: #ffdd00; border-color: #000; text-decoration: none;
+}
+/* skin picker, in the footer's bottom bar */
+.skin-pick { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); }
 
 /* -- help (? button + dialog) --------------------------------------------- */
 .help-btn {
@@ -118,7 +124,7 @@ body {
 
 dialog#help {
   width: calc(100% - 2rem);
-  max-width: 30rem;
+  max-width: min(30rem, calc(100vw - 1rem));
   padding: 0;
   color: var(--text);
   background: linear-gradient(#343444, #26262f);
@@ -240,14 +246,27 @@ html[data-skin="itunes"] .about strong { color: var(--text); }
   max-height: min(65vh, 30rem); overflow-y: auto; overflow-x: hidden;
   scrollbar-width: thin; scrollbar-color: var(--face) var(--lcd-bg);
 }
-.results li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; padding: 0.2rem 0; }
+.results li { display: flex; gap: 0.4rem; align-items: center; padding: 0.2rem 0; }
 .results .title { color: var(--green); }
 .results .artist { color: var(--green-dim); }
 .results .sender { color: var(--amber); font-size: 0.75rem; }
 .results .shares { color: var(--green-dim); font-size: 0.72rem; }
-.results .day-link { color: var(--green-dark); margin-left: auto; font-size: 0.72rem; text-decoration: none; }
+.results .day-link { color: var(--muted); margin-left: auto; font-size: 0.72rem; text-decoration: none; }
 .results .day-link:hover { color: var(--amber); }
 .results button { flex: none; }
+
+/* A song row's words (results, archive day): title, then artist / sharer /
+   day. On a wide screen they run along one line; on a phone (below) the
+   title gets a line of its own so it's never the part that's cut. */
+.row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 0.45rem;
+}
+.row-sub { display: contents; }
 
 /* Cover-art stamp beside a song in the archive's lists (partials/thumb.html).
    Sized here and on the <img> so lazy-loaded rows don't shift the list as the
@@ -328,6 +347,7 @@ nav a {
   text-decoration: none;
 }
 nav a:hover { color: var(--amber); }
+nav a { white-space: nowrap; }
 /* Current section: pressed-in button, the way a 90s player marks the open tab. */
 nav a[aria-current="page"] {
   color: var(--green);
@@ -353,6 +373,31 @@ h2, h3, .eq-window summary {
 }
 h3 { margin-top: 1rem; }
 h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
+/* Members name the themes; tracked capitals turned a long one into a wall
+   (and two lines on a phone). The bar stays, the shouting goes. */
+h3.theme-title { text-transform: none; letter-spacing: 0.02em; font-size: 0.9rem; }
+
+/* The page headline where it's the day's theme (Now Playing's banner, an
+   archive day): big and plain, not a titlebar; the date is its caption. */
+.day-title, .day-banner .day-theme {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  text-shadow: none;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: inherit;
+  font-size: 1.5rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--amber);
+}
+.day-title { margin-top: 1.2rem; }
+.day-caption { margin: 0.2rem 0 0.7rem; color: var(--muted); font-size: 0.8rem; }
 
 /* -- main player window ---------------------------------------------------- */
 
@@ -375,6 +420,18 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
   border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
 }
 
+/* Embed mode: the YouTube player is the art. dock.js lays the player window
+   over this slot; 356×200 is the smallest YouTube allows (200px tall), and
+   the still inside shows until the player covers it. */
+.yt-slot {
+  flex: 0 0 356px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 2px solid;
+  border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo);
+}
+.yt-slot .art { display: block; width: 100%; height: 100%; border: 0; }
+
 /* track readout = green LCD */
 .now-playing .meta {
   flex: 1;
@@ -391,9 +448,10 @@ h3 small { color: var(--muted); text-transform: none; letter-spacing: normal; }
   justify-content: center;
   gap: 0.2rem;
 }
-.meta .title { font-size: 0.95rem; font-weight: 400; color: var(--green); }
-.meta .artist { color: var(--green-dim); font-size: 0.8rem; }
-.meta .sender { color: var(--amber); font-size: 0.72rem; }
+.meta .title { font-size: 1.25rem; font-weight: 400; color: var(--green); }
+.meta .artist { color: var(--green-dim); font-size: 0.95rem; }
+.meta .sender { color: var(--amber); font-size: 0.8rem; }
+.meta.idle .sender { line-height: 1.5; }
 
 .marquee { overflow: hidden; white-space: nowrap; }
 .marquee span { display: inline-block; white-space: nowrap; }
@@ -494,8 +552,26 @@ button {
 button:hover { color: #fff; filter: brightness(1.12); }
 button:active { border-color: var(--face-lo) var(--face-hi) var(--face-hi) var(--face-lo); }
 
-.radio-btn { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.radio-btn.active { color: var(--green); }
+/* Play leads the row: the one control every visitor is looking for. */
+.play-btn { min-width: 3rem; padding: 0.35rem 1rem; font-size: 1.2rem; color: var(--green); }
+
+/* Station switches (Keep playing, Radio): a light that's lit when on, and a
+   label that doesn't change, so its state reads at a glance. */
+.toggle { font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.4rem; }
+.toggle .led {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--face-lo);
+  border: 1px solid var(--face-lo);
+}
+/* A real LED's green whatever the skin: some skins' "green" is their text colour. */
+.toggle[aria-pressed="true"] .led { background: #3ddc5a; box-shadow: 0 0 6px #3ddc5a; }
+
+/* Busy while a request is out, done once it worked (feedback.js). */
+button.htmx-request { opacity: 0.6; cursor: progress; }
+button.done, button.done:hover { color: var(--green); filter: none; cursor: default; }
+
+/* Keyboard focus, everywhere: there are shortcuts, so there are keyboard users. */
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 
 button.subtle {
   padding: 0.05rem 0.45rem;
@@ -523,16 +599,20 @@ button.subtle:hover { color: var(--amber); }
 .day-banner {
   display: flex;
   gap: 0.7rem;
-  align-items: baseline;
+  align-items: center;
   background: var(--lcd-bg);
   border: 2px solid;
   border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
   font-family: "Lucida Console", "Courier New", monospace;
-  padding: 0.3rem 0.55rem;
+  padding: 0.55rem 0.75rem;
   margin: 1rem 0 0.45rem;
 }
-.day-banner .day-date { color: var(--green); font-size: 0.8rem; }
-.day-banner .day-theme { color: var(--amber); font-size: 0.85rem; font-weight: 700; }
+.day-head { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.day-banner .day-date {
+  color: var(--green-dim); font-size: 0.72rem; white-space: nowrap;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.day-banner .day-theme { font-family: Tahoma, Verdana, sans-serif; }
 .day-banner .day-export {
   margin-left: auto;               /* flush right, always visible */
   align-self: center;
@@ -573,10 +653,9 @@ ol, ul { line-height: 1.75; }
 }
 .queue .title, section.theme .title { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
 .queue .artist, section.theme .artist { color: var(--green-dim); overflow: hidden; text-overflow: ellipsis; }
-.queue .sender, section.theme .sender { color: var(--green-dark); font-size: 0.75rem; }
+.queue .sender, section.theme .sender { color: var(--green-dim); font-size: 0.75rem; }
 .queue .duration { color: var(--green); }
-.queue li { cursor: pointer; }
-.queue li:hover { background: #101810; }
+.queue li:hover, .queue li:focus-within { background: #101810; }
 .queue li.selected {
   background: #1c2a1c;
   outline: 1px solid var(--green-dim);
@@ -622,6 +701,15 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 .queue li .badge, .queue li .sender { order: 7; margin-left: auto; flex: none; }
 .queue li .duration { order: 8; }
 
+/* Each row's own ⤒ / ✕ (queue.js). With a mouse they appear on the row
+   you're over; on touch they're always there. */
+.q-acts { order: 9; display: flex; gap: 2px; flex: none; }
+.q-btn { padding: 0 0.4rem; font-size: 0.75rem; line-height: 1.4; }
+@media (hover: hover) and (pointer: fine) {
+  .q-acts { visibility: hidden; }
+  .queue li:hover .q-acts, .queue li:focus-within .q-acts { visibility: visible; }
+}
+
 .queue-total {
   margin: 0.3rem 0 0;
   text-align: right;
@@ -648,6 +736,16 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
   gap: 0.5rem;
 }
 .cal-nav h3 { margin: 0; text-align: center; }
+/* Month/year arrows: real buttons, big enough to find and to tap. */
+.cal-nav .cal-step {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 40px; min-height: 36px; flex: none;
+  font-size: 1.1rem;
+  background: linear-gradient(#464658, #2a2a36);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+}
+.cal-nav .cal-step-off { background: none; border-color: transparent; }
 .cal-step {
   color: var(--green);
   text-decoration: none;
@@ -774,6 +872,11 @@ section.theme ol button { margin-left: auto; flex: none; }
    than the browser's default blue, which belongs to no skin. */
 main p a:not([class]) { color: var(--accent); text-decoration-color: var(--accent); }
 main p a:not([class]):hover { color: var(--amber); text-decoration-color: var(--amber); }
+/* Every other unclassed link (artist and member names in song rows): the
+   row's own colour, not the browser's blue, which was all but invisible on
+   the black lists. */
+main a:not([class]) { color: inherit; text-decoration: none; }
+main a:not([class]):hover { color: var(--amber); text-decoration: underline; }
 
 .empty, .sender { color: var(--muted); }
 p.empty {
@@ -894,20 +997,80 @@ select option { background: #26262f; color: #d8dce6; }
   background: #000;
 }
 
+/* -- the player window's place (embed mode; dock.js) ----------------------------
+   On Now Playing it sits over the card's #yt-slot as the art. Elsewhere it
+   docks: bottom-right on a wide screen, after the page on a narrow one. It's
+   never smaller than YouTube's 200px minimum, and never covers the page's
+   content there (the body makes room for it). */
+#yt-window.in-slot { position: absolute; z-index: 5; margin: 0; }
+html body #yt-window.in-slot {
+  padding: 0; border: 0; border-radius: 0; box-shadow: none; background: #000;
+}
+#yt-window.in-slot iframe, #yt-window.in-slot #yt-player { height: 100%; aspect-ratio: auto; }
+
+@media (min-width: 900px) {
+  body:has(main.page-other) #yt-window {
+    position: fixed; right: 1rem; bottom: 1rem; z-index: 20;
+    width: calc(356px + 1rem + 4px); margin: 0;
+  }
+  body:has(main.page-other) #yt-window iframe,
+  body:has(main.page-other) #yt-window #yt-player { height: 200px; aspect-ratio: auto; }
+  body:has(main.page-other):has(#yt-window:not([hidden])) { padding-bottom: 240px; }
+}
+@media (max-width: 899px) {
+  /* Narrow screens: no room to float it, so it follows the page instead of
+     pushing the page below the fold. */
+  body { display: flex; flex-direction: column; }
+  #yt-window { order: 1; }
+  #site-footer { order: 2; }
+}
+
 /* -- small screens ------------------------------------------------------------ */
 
 @media (max-width: 520px) {
   body { padding: 0 0.5rem 3rem; font-size: 12px; }
-  header { flex-wrap: wrap; gap: 0.5rem; }
+  /* Logo and ? on top, the three sections as equal tabs below: nothing runs
+     off the side of the screen. */
+  header {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    gap: 0.4rem; padding: 0.4rem 0.5rem;
+  }
+  nav {
+    grid-column: 1 / -1; grid-row: 2; margin: 0;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;
+  }
+  nav a { text-align: center; padding: 0.55rem 0.2rem; font-size: 0.7rem; letter-spacing: 0.04em; }
+  .help-body .k { white-space: normal; }
   .art { width: 112px; }
+  .yt-slot { flex-basis: 100%; }
   .thumb { width: 44px; height: 25px; }
-  .meta .title { font-size: 0.85rem; }
+  .meta .title { font-size: 1.05rem; }
+  .day-title, .day-banner .day-theme { font-size: 1.25rem; }
+  .day-banner { padding: 0.45rem 0.55rem; }
   .controls { flex-wrap: wrap; }
-  .controls input[type="range"][title="Volume"] { flex: 1; min-width: 80px; }
   .playbar .time { min-width: 2.9rem; font-size: 0.75rem; padding: 0.15rem 0.2rem; }
   .queue .sender { display: none; }      /* keep title + duration readable */
+  .q-acts { visibility: visible; }       /* no hover to reveal them on a phone */
+  .controls input[type="range"][title="Volume"] { display: none; }
   .queue li .duration { margin-left: auto; }
   .queue, .days, section.theme ol { font-size: 0.75rem; }
+  /* Song rows: the title on its own line, the rest under it, and a compact
+     "+" button, so the title is never what gets cut. */
+  section.theme ol li { white-space: normal; }
+  .row-text { display: block; }
+  .row-text .title { display: block; white-space: normal; overflow: visible; }
+  .row-sub { display: block; font-size: 0.7rem; line-height: 1.5; }
+  .row-sub > * { margin-right: 0.35rem; }
+  .results .day-link { margin-left: 0; }
+  .add-l { display: none; }
+  /* the two days side by side, the calendar and week links under them */
+  .day-steps { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; font-size: 0.7rem; }
+  .day-steps > :last-child { grid-column: 2; grid-row: 1; text-align: right; }
+  .cal-unit { display: none; }
+  /* the query gets the full width; the filters share the row under it */
+  .search-form { display: grid; grid-template-columns: 1fr 1fr auto; }
+  .search-form input[type="search"] { grid-column: 1 / -1; }
+  .search-form select { max-width: none; min-width: 0; }
   .eq-gap { margin: 0 2px; }
   .eq-slider-wrap { width: 18px; }
   .eq-band label { font-size: 0.55rem; }
@@ -917,16 +1080,20 @@ select option { background: #26262f; color: #d8dce6; }
 @media (pointer: coarse) {
   button { padding: 0.45rem 0.9rem; }
   button.subtle { padding: 0.25rem 0.6rem; }
+  .q-btn { min-width: 36px; min-height: 32px; padding: 0 0.4rem; }
+  .add-btn { min-width: 40px; min-height: 36px; padding: 0 0.5rem; }
   input[type="range"] { height: 20px; }
   input[type="range"]::-webkit-slider-thumb { height: 18px; }
   input[type="range"]::-moz-range-thumb { height: 18px; }
+  /* phones and tablets have volume buttons; the mute icon stays */
+  .controls input[type="range"][title="Volume"] { display: none; }
 }
 
 /* ============================================================================
    SKINS. The default look above is "winamp". Alternate skins re-theme mostly
    by overriding the CSS variables (which recolors everything var-driven) plus
    the handful of hardcoded structural gradients. Chosen via <html data-skin>
-   (server-rendered from a cookie; picker in the header).
+   (server-rendered from a cookie; picker in the footer).
    ========================================================================== */
 
 /* ---- iTunes (early-2000s aqua / brushed metal) --------------------------- */

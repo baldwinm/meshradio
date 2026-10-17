@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ theme_titles|join(" · ") or day }} · MeshRadio{% endblock %}
+{% block main_class %}page-now{% endblock %}
 {% block content %}
 {# One request per state push, not three: radio.js fires meshradio:state on
    every WebSocket message, this element fetches /partials/live, and the

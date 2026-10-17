@@ -67,8 +67,10 @@ async def seed(db):
     for video_id, title, artist in SONGS:
         tracks.append(await share(db, DAY, video_id, "alice", title=title, artist=artist,
                                   theme="songs about trains"))
-    await share(db, EARLIER, "ddddddddddd", "bob", title="Song D", artist="Artist B",
-                theme="rainy days")
+    earlier = await share(db, EARLIER, "ddddddddddd", "bob", title="Song D",
+                          artist="Artist B", theme="rainy days")
+    # Downloaded (or, hosted, looked up): offered with "+ queue" in the lists.
+    await db.set_cache_status(earlier["id"], "ready")
     return tracks
 
 

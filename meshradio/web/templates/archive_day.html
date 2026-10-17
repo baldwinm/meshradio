@@ -2,14 +2,20 @@
 {% from "partials/thumb.html" import thumb %}
 {% block title %}{{ date }}{% if themes %} — {{ themes[0].title }}{% endif %} · MeshRadio{% endblock %}
 {% block content %}
-<h2>{{ date }}</h2>
+{# Headline the theme, as Now Playing does; the date is its caption. A day
+   with several themes keeps the date as the headline and titles each list. #}
+{% set single = themes|length == 1 %}
+<h2 class="day-title">{{ themes[0].title if single else date|day_label(long=True) }}</h2>
+<p class="day-caption">{% if single %}{{ date|day_label(long=True) }}
+  {%- if themes[0].set_by %} · theme set by <a href="/member/{{ themes[0].set_by|urlencode }}">{{ themes[0].set_by }}</a>{% endif %}
+  {%- endif %}</p>
 {# Steps to the days either side, so the archive reads straight through instead
    of via the calendar every time. Links, not the play buttons on Now Playing —
    this is browsing, and it shouldn't hijack what's currently playing. #}
 <nav class="day-steps" aria-label="Archive days">
   {% if prev_day %}
   <a class="cal-step" href="/archive/{{ prev_day }}" rel="prev"
-     title="The day before ({{ prev_day }})">← {{ prev_day }}</a>
+     title="The day before ({{ prev_day }})">← {{ prev_day|day_label }}</a>
   {% else %}
   <span class="cal-step cal-step-off" aria-hidden="true">←</span>
   {% endif %}
@@ -17,7 +23,7 @@
   <a class="day-month" href="/week/{{ week }}" title="This day's week, summed up">📰 Week</a>
   {% if next_day %}
   <a class="cal-step" href="/archive/{{ next_day }}" rel="next"
-     title="The day after ({{ next_day }})">{{ next_day }} →</a>
+     title="The day after ({{ next_day }})">{{ next_day|day_label }} →</a>
   {% else %}
   <span class="cal-step cal-step-off" aria-hidden="true">→</span>
   {% endif %}
@@ -35,16 +41,27 @@
 </div>
 {% for theme in themes %}
 <section class="theme">
-  <h3>{{ theme.title }} {% if theme.set_by %}<small>set by {{ theme.set_by }}</small>{% endif %}</h3>
+  {% if not single %}
+  <h3 class="theme-title">{{ theme.title }} {% if theme.set_by %}<small>set by {{ theme.set_by }}</small>{% endif %}</h3>
+  {% endif %}
   <ol>
     {% for track in theme.tracks %}
+    {% set name = track.title or track.video_id %}
     <li>
       {{ thumb(track) }}
-      <span class="title">{{ track.title or track.video_id }}</span>
-      {% if track.artist %}<span class="artist">— <a href="/artist/{{ track.artist|urlencode }}">{{ track.artist }}</a></span>{% endif %}
-      <span class="sender">({% if track.sender %}<a href="/member/{{ track.sender|urlencode }}">{{ track.sender }}</a>{% else %}?{% endif %})</span>
+      {# Title, then who and by whom: one line where there's room, two on a
+         phone, so the title is never the part that gets cut. #}
+      <span class="row-text">
+        <span class="title">{{ name }}</span>
+        <span class="row-sub">
+          {% if track.artist %}<span class="artist">— <a href="/artist/{{ track.artist|urlencode }}">{{ track.artist }}</a></span>{% endif %}
+          <span class="sender">({% if track.sender %}<a href="/member/{{ track.sender|urlencode }}">{{ track.sender }}</a>{% else %}?{% endif %})</span>
+        </span>
+      </span>
       {% if track.cache_status == "ready" %}
-        <button hx-post="/api/queue/{{ track.id }}" hx-swap="none">+ queue</button>
+        <button class="add-btn" hx-post="/api/queue/{{ track.id }}" hx-swap="none"
+                title="Add to queue" aria-label="Add {{ name }} to the queue"
+                data-done="✓" data-toast="Queued: {{ name }}">+<span class="add-l"> queue</span></button>
       {% elif track.cache_status == "failed" %}
         <span class="badge failed">{{ "unavailable on YouTube" if embed_mode else "couldn't fetch audio" }}</span>
       {% else %}

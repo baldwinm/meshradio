@@ -1,10 +1,12 @@
 <div class="day-nav">
   {% if prev_day %}
     <button class="subtle" hx-post="/api/play-day/{{ prev_day }}" hx-swap="none"
-            title="Play the previous day's songs">← {{ prev_day }}</button>
+            title="Play the previous day's songs ({{ prev_day }})"
+            data-toast="Playing {{ prev_day|day_label }}">← {{ prev_day|day_label }}</button>
   {% endif %}
   {% if next_day %}
     <button class="subtle next" hx-post="/api/play-day/{{ next_day }}" hx-swap="none"
-            title="Play the next day's songs">{{ next_day }} →</button>
+            title="Play the next day's songs ({{ next_day }})"
+            data-toast="Playing {{ next_day|day_label }}">{{ next_day|day_label }} →</button>
   {% endif %}
 </div>

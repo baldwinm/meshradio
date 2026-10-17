@@ -134,3 +134,61 @@ def test_now_playing_text_scrolls_only_when_it_does_not_fit(hosted, page):
         window.dispatchEvent(new Event('resize'));
     }""")
     expect(title).not_to_have_class(re.compile(r"\bscrolling\b"))
+
+
+PHONE = {"width": 390, "height": 844}
+
+
+@pytest.mark.parametrize("site", ["appliance", "hosted"])
+@pytest.mark.parametrize("path", ["/", "/archive", f"/archive/{DAY}", "/search?q=song", "/stats"])
+def test_phone_pages_never_scroll_sideways(request, page, site, path):
+    """At a phone's width nothing runs off the side: the header's tabs, the
+    song rows and the search form all fit."""
+    server = request.getfixturevalue(site)
+    page.set_viewport_size(PHONE)
+    page.goto(server.url + path)
+    page.wait_for_load_state("networkidle")
+    assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
+
+
+def test_queue_rows_carry_their_own_remove_button(hosted, page):
+    page.goto(hosted.url + f"/archive/{DAY}")
+    page.get_by_role("button", name="Play this day").click()
+    page.wait_for_url(hosted.url + "/")
+    rows = page.locator("#queue .queue > li")
+    before = rows.count()
+    assert before >= 1
+    doomed = rows.first.locator(".title").inner_text()
+    rows.first.hover()
+    rows.first.get_by_role("button", name=re.compile("^Remove")).click()
+    expect(rows).to_have_count(before - 1)
+    expect(page.locator("#queue")).not_to_contain_text(doomed)
+
+
+def test_queueing_from_the_archive_says_it_worked(hosted, page):
+    page.goto(hosted.url + f"/archive/{EARLIER}")
+    button = page.get_by_role("button", name="Add Song D to the queue")
+    button.click()
+    expect(button).to_have_text("✓")
+    expect(button).to_be_disabled()
+    expect(page.locator(".mr-toast")).to_contain_text("Queued: Song D")
+
+
+def test_the_player_sits_in_the_card_and_docks_elsewhere(hosted, page):
+    page.goto(hosted.url + "/")
+    page.locator(".controls button").first.click()
+    wait_for_video(page, 1)
+    page.wait_for_load_state("networkidle")
+    win = page.locator("#yt-window")
+    expect(win).to_have_class(re.compile(r"\bin-slot\b"))
+    slot = page.locator("#yt-slot").bounding_box()
+    box = win.bounding_box()
+    assert slot and box
+    assert abs(slot["x"] - box["x"]) < 2 and abs(slot["y"] - box["y"]) < 2
+    assert box["height"] >= 199                    # YouTube's smallest player
+
+    page.get_by_role("link", name="Archive").first.click()
+    page.wait_for_url(hosted.url + "/archive")
+    expect(win).not_to_have_class(re.compile(r"\bin-slot\b"))
+    assert win.evaluate("el => getComputedStyle(el).position") == "fixed"
+    assert page.evaluate("window.__yt.loads.length") == 1    # the song never reloaded

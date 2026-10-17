@@ -27,7 +27,7 @@ async def test_stats_page_counts_plays_and_links_members(db, bus):
     await db.record_play(track["id"], "speaker")
     async with client_for(page_app(db, bus)) as client:
         body = (await client.get("/stats")).text
-    assert 'class="stat-l">plays' in body
+    assert 'stat-n">1</span><span class="stat-l">play<' in body   # one play, said so
     assert 'href="/member/ana"' in body            # sharers are explorable
     # The per-song listening lists were pulled; the tile is all that remains.
     assert "Recently played" not in body and "Most played" not in body
@@ -47,7 +47,7 @@ async def test_member_page_gathers_a_members_record(db, bus):
     assert 'href="/archive/2026-08-01"' in body
     tiles = re.findall(r'stat-n">(\d+)</span><span class="stat-l">(\w+)', body)
     assert dict((label, int(n)) for n, label in tiles) == {
-        "shares": 2, "songs": 2, "days": 2, "themes": 1,
+        "shares": 2, "songs": 2, "days": 2, "theme": 1,      # "1 theme set"
     }
 
 

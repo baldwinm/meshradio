@@ -2,9 +2,13 @@
 (function () {
   var u = function (b) { return decodeURIComponent(escape(atob(b))); };
 
+  // Also the site's toast for ordinary notices (feedback.js).
+  window.mrToast = function (m) { n(m); };
+
   function n(m) {
     var t = document.createElement("div");
     t.className = "mr-toast";
+    t.setAttribute("role", "status");
     t.textContent = m;
     document.body.appendChild(t);
     requestAnimationFrame(function () { t.classList.add("show"); });

@@ -3,6 +3,7 @@ the static files with their cache headers."""
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import math
 from pathlib import Path
@@ -52,6 +53,19 @@ def total_length(tracks) -> tuple[str, bool]:
     return f"{total // 3600}:{total % 3600 // 60:02d}:{total % 60:02d}", unknown
 
 
+def day_label(value, long: bool = False) -> str:
+    """An ISO day as people say it: 'Thu, Oct 16', or with ``long``
+    'Thursday, October 16, 2026'. Anything that isn't a date comes back as
+    it was, so a bad row shows its raw text rather than breaking the page."""
+    try:
+        day = datetime.date.fromisoformat(str(value))
+    except ValueError:
+        return str(value or "")
+    if long:
+        return f"{day:%A}, {day:%B} {day.day}, {day.year}"
+    return f"{day:%a}, {day:%b} {day.day}"
+
+
 def asset_version(static: Path) -> str:
     """A hash of everything under static/ — cache-busts CSS/JS across updates.
 
@@ -96,6 +110,7 @@ def make_templates(embed_mode: bool, concerts_on: bool) -> Jinja2Templates:
     templates.env.filters["mmss"] = mmss
     templates.env.filters["total_length"] = total_length
     templates.env.filters["show_date"] = show_date
+    templates.env.filters["day_label"] = day_label
     # base.html builds every page's link-preview tags from the live request.
     templates.env.globals["absolute_url"] = absolute_url
     templates.env.globals["asset_v"] = asset_version(_HERE / "static")
