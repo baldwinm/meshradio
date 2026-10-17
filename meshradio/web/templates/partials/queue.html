@@ -1,14 +1,29 @@
 {% if state.queue %}
-<div class="queue-actions">
-  <button class="subtle" hx-post="/api/queue/clear" hx-target="#queue"
-          title="Empty the queue (also switches the station off)">Clear queue</button>
+{% set total, partial = state.queue|total_length %}
+{# Listening, the queue is just songs. ✎ Edit (queue.js) puts a class on the
+   #queue container, which survives every re-render of this partial, and that
+   shows the checkboxes, the drag handles and the action bar below. #}
+<div class="queue-head">
+  <span class="queue-total" title="Total length of the queue{% if partial %} (some songs' lengths aren't known yet){% endif %}">
+    {{ state.queue|length }} song{{ "" if state.queue|length == 1 else "s" }} · {{ total }}{% if partial %}+{% endif %}</span>
+  <button class="subtle q-edit" type="button" aria-controls="queue-list">✎ Edit</button>
 </div>
-{# Each row carries its own actions (queue.js): they used to appear in the bar
-   above once a row was selected, which nothing on the row hinted at. #}
-<ol class="queue">
+<div class="q-editbar" role="toolbar" aria-label="Edit the queue">
+  <span class="q-count" aria-live="polite">None selected</span>
+  <button class="q-act q-next" type="button" disabled
+          title="Play the selected songs next">⤒<span class="q-l"> Play next</span></button>
+  <button class="q-act q-remove" type="button" disabled
+          title="Take the selected songs out of the queue">✕<span class="q-l"> Remove</span><span class="q-n"></span></button>
+  <button class="q-act q-all subtle" type="button">☐<span class="q-l"> Select all</span></button>
+  <button class="q-act q-clear subtle" type="button"
+          title="Empty the queue (also switches the station off)">Clear queue</button>
+  <button class="q-done" type="button">Done</button>
+</div>
+<ol class="queue" id="queue-list">
   {% for track in state.queue %}
   {% set name = track.title or track.video_id %}
   <li data-track-id="{{ track.id }}">
+    <input class="q-check" type="checkbox" aria-label="Select {{ name }}">
     <span class="title">{{ name }}</span>
     {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
     {% if track.duration %}<span class="duration">{{ track.duration|mmss }}</span>{% endif %}
@@ -20,21 +35,10 @@
       {% endif %}
       <span class="sender">({{ track.sender or "?" }})</span>
     {% endif %}
-    <span class="q-acts">
-      {% if not loop.first %}
-      <button class="q-btn q-play-next" type="button" title="Play next"
-              aria-label="Play {{ name }} next">⤒</button>
-      {% endif %}
-      <button class="q-btn q-remove" type="button" title="Remove from the queue"
-              aria-label="Remove {{ name }} from the queue">✕</button>
-    </span>
+    <span class="q-handle" title="Drag to move (or Alt+↑ / Alt+↓)" aria-hidden="true">⋮⋮</span>
   </li>
   {% endfor %}
 </ol>
-{% set total, partial = state.queue|total_length %}
-<p class="queue-total" title="Total length of the queue{% if partial %} (some songs' lengths aren't known yet){% endif %}">
-  {{ state.queue|length }} song{{ "" if state.queue|length == 1 else "s" }} · {{ total }}{% if partial %}+{% endif %}
-</p>
 {% else %}
 <p class="empty">Queue is empty{% if state.station == "radio" %} — radio is fetching more…{% endif %}.</p>
 {% endif %}

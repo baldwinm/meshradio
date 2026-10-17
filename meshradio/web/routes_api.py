@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Path, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from ..bus import TRACK_FAILED
@@ -95,6 +95,67 @@ async def api_queue_top(request: Request, index: int, track_id: int):
     ctx = ctx_of(request)
     await (await ctx.get_player(request)).move_to_front(index, track_id)
     return await ctx.render_queue(request)
+
+
+# Edit mode (queue.js). Each answers with the queue as it now stands, plus
+# two headers for the page's "Undo" notice: how many songs the change
+# touched and the token that undoes it (absent when nothing changed).
+_MAX_IDS = 500
+
+
+def _track_ids(ids: str) -> list[int]:
+    """``ids`` is a comma-separated list of track ids, as the page sends it."""
+    try:
+        out = [int(part) for part in ids.split(",") if part.strip()]
+    except ValueError:
+        raise HTTPException(422, "ids must be track ids, comma-separated") from None
+    if not out or len(out) > _MAX_IDS:
+        raise HTTPException(422, f"between 1 and {_MAX_IDS} track ids")
+    return out
+
+
+async def _edited(request: Request, count: int, token: int | None):
+    response = await ctx_of(request).render_queue(request)
+    response.headers["X-Queue-Count"] = str(count)
+    if token is not None:
+        response.headers["X-Queue-Undo"] = str(token)
+    return response
+
+
+@router.post("/api/queue/edit/remove")
+async def api_queue_edit_remove(request: Request, ids: str = Query(max_length=8000)):
+    player = await ctx_of(request).get_player(request)
+    count, token = await player.remove_tracks(_track_ids(ids))
+    return await _edited(request, count, token)
+
+
+@router.post("/api/queue/edit/next")
+async def api_queue_edit_next(request: Request, ids: str = Query(max_length=8000)):
+    player = await ctx_of(request).get_player(request)
+    count, token = await player.play_next(_track_ids(ids))
+    return await _edited(request, count, token)
+
+
+@router.post("/api/queue/edit/move/{track_id}/{to_index}")
+async def api_queue_edit_move(request: Request, track_id: int, to_index: int = Path(ge=0)):
+    player = await ctx_of(request).get_player(request)
+    token = await player.move_track(track_id, to_index)
+    return await _edited(request, 1 if token is not None else 0, token)
+
+
+@router.post("/api/queue/edit/clear")
+async def api_queue_edit_clear(request: Request):
+    player = await ctx_of(request).get_player(request)
+    count = len(player.queue)
+    token = await player.clear_queue_undoable()
+    return await _edited(request, count, token)
+
+
+@router.post("/api/queue/edit/undo/{token}")
+async def api_queue_edit_undo(request: Request, token: int):
+    player = await ctx_of(request).get_player(request)
+    undone = await player.undo_edit(token)
+    return await _edited(request, 1 if undone else 0, None)
 
 
 @router.post("/api/queue/{track_id}")

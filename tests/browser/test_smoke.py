@@ -151,18 +151,72 @@ def test_phone_pages_never_scroll_sideways(request, page, site, path):
     assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
 
 
-def test_queue_rows_carry_their_own_remove_button(hosted, page):
+def queue_titles(page):
+    return page.locator("#queue .queue > li .title").all_inner_texts()
+
+
+def open_queue_editor(server, page):
+    """Play DAY (Song A plays; B and C queue), then press ✎ Edit."""
+    page.goto(server.url + f"/archive/{DAY}")
+    page.get_by_role("button", name="Play this day").click()
+    page.wait_for_url(server.url + "/")
+    page.wait_for_load_state("networkidle")
+    expect(page.locator("#queue .queue > li")).to_have_count(2)
+    page.get_by_role("button", name="✎ Edit").click()
+    expect(page.locator("#queue")).to_have_class(re.compile(r"\bediting\b"))
+
+
+def test_queue_rows_have_no_buttons_until_edit(hosted, page):
     page.goto(hosted.url + f"/archive/{DAY}")
     page.get_by_role("button", name="Play this day").click()
     page.wait_for_url(hosted.url + "/")
     rows = page.locator("#queue .queue > li")
-    before = rows.count()
-    assert before >= 1
-    doomed = rows.first.locator(".title").inner_text()
-    rows.first.hover()
-    rows.first.get_by_role("button", name=re.compile("^Remove")).click()
-    expect(rows).to_have_count(before - 1)
-    expect(page.locator("#queue")).not_to_contain_text(doomed)
+    expect(rows).to_have_count(2)
+    expect(rows.first.locator(".q-check")).to_be_hidden()
+    expect(rows.first.locator(".q-handle")).to_be_hidden()
+    expect(page.locator(".q-editbar")).to_be_hidden()
+
+
+def test_edit_mode_removes_the_ticked_songs_and_undoes_it(hosted, page):
+    open_queue_editor(hosted, page)
+    before = queue_titles(page)
+    page.get_by_label(f"Select {before[0]}").check()
+    expect(page.locator(".q-count")).to_have_text("1 selected")
+    page.locator(".q-remove").click()
+    expect(page.locator("#queue .queue > li")).to_have_count(1)
+    toast = page.locator(".mr-toast.has-action")
+    expect(toast).to_contain_text("Removed 1 song")
+    toast.get_by_role("button", name="Undo").click()
+    expect(page.locator("#queue .queue > li")).to_have_count(2)
+    assert queue_titles(page) == before
+
+
+def test_edit_mode_moves_songs_by_drag_and_by_keyboard(hosted, page):
+    open_queue_editor(hosted, page)
+    first, second = queue_titles(page)
+    handle = page.locator("#queue .queue > li").nth(1).locator(".q-handle")
+    target = page.locator("#queue .queue > li").first.bounding_box()
+    box = handle.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] / 2, target["y"] + 2, steps=8)
+    page.mouse.up()
+    expect(page.locator("#queue .queue > li .title").first).to_have_text(second)
+
+    page.get_by_label(f"Select {second}").focus()
+    page.keyboard.press("Alt+ArrowDown")
+    expect(page.locator("#queue .queue > li .title").first).to_have_text(first)
+
+    page.keyboard.press("Escape")
+    expect(page.locator("#queue")).not_to_have_class(re.compile(r"\bediting\b"))
+
+
+def test_phone_edit_bar_sits_at_the_bottom_of_the_screen(hosted, page):
+    page.set_viewport_size(PHONE)
+    open_queue_editor(hosted, page)
+    bar = page.locator(".q-editbar").bounding_box()
+    assert bar and abs(bar["y"] + bar["height"] - PHONE["height"]) < 2
+    assert page.evaluate("document.documentElement.scrollWidth") <= PHONE["width"]
 
 
 def test_queueing_from_the_archive_says_it_worked(hosted, page):

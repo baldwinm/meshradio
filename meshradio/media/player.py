@@ -89,6 +89,9 @@ class PlayerService(Service):
         self.day: str | None = None        # archive date being replayed (None = live/today)
         self.current: dict[str, Any] | None = None
         self.queue: list[dict[str, Any]] = []
+        # The last queue edit's before-picture, for Undo (``undo_edit``).
+        self._edit_token = 0
+        self._edit_undo: dict[str, Any] | None = None
         self.volume: int = config.volume
         # The station filling the queue when it runs dry, if any. "radio" pulls
         # a YouTube Mix from the seed track; "archive" replays random channel
@@ -370,6 +373,98 @@ class PlayerService(Service):
         if self._queue_entry(index, track_id) is None:
             return False
         self.queue.insert(0, self.queue.pop(index))
+        self.publish_state()
+        return True
+
+    # Edit mode (queue.js): changes name songs by track id rather than by
+    # position. A queue never holds the same video twice, so an id is one row,
+    # and an id still means the same song after the queue has shifted under a
+    # page that rendered it a moment ago. Each change keeps one undo step.
+
+    def _snapshot(self) -> int:
+        """Remember the queue as it is, before an edit, for ``undo_edit``.
+        Returns the token the page sends back to undo it; only the latest edit
+        can be undone."""
+        self._edit_token += 1
+        self._edit_undo = {
+            "token": self._edit_token,
+            "queue": list(self.queue),
+            "removed": [],
+        }
+        return self._edit_token
+
+    async def remove_tracks(self, track_ids: list[int]) -> tuple[int, int | None]:
+        """Take the named songs out of the queue. Returns how many went and
+        the undo token (None when nothing changed)."""
+        wanted = set(track_ids)
+        gone = [t for t in self.queue if t["id"] in wanted]
+        if not gone:
+            return 0, None
+        token = self._snapshot()
+        self._edit_undo["removed"] = gone
+        self.queue = [t for t in self.queue if t["id"] not in wanted]
+        self.publish_state()
+        return len(gone), token
+
+    async def play_next(self, track_ids: list[int]) -> tuple[int, int | None]:
+        """Move the named songs to the front of the queue, keeping the order
+        they were in. Returns how many moved and the undo token."""
+        wanted = set(track_ids)
+        picked = [t for t in self.queue if t["id"] in wanted]
+        rest = [t for t in self.queue if t["id"] not in wanted]
+        if not picked or picked + rest == self.queue:
+            return len(picked), None
+        token = self._snapshot()
+        self.queue = picked + rest
+        self.publish_state()
+        return len(picked), token
+
+    async def move_track(self, track_id: int, to_index: int) -> int | None:
+        """Move one song so it ends up at ``to_index`` (dragged, or nudged
+        with the keyboard). Returns the undo token, or None for no change."""
+        index = next((i for i, t in enumerate(self.queue) if t["id"] == track_id), None)
+        if index is None:
+            return None
+        to_index = max(0, min(int(to_index), len(self.queue) - 1))
+        if to_index == index:
+            return None
+        token = self._snapshot()
+        self.queue.insert(to_index, self.queue.pop(index))
+        self.publish_state()
+        return token
+
+    async def clear_queue_undoable(self) -> int | None:
+        """Clear queue from Edit mode: as ``clear_queue``, with an undo step
+        that puts the songs back (the station stays off)."""
+        if not self.queue:
+            await self.clear_queue()
+            return None
+        token = self._snapshot()
+        self._edit_undo["removed"] = list(self.queue)
+        await self.clear_queue()
+        return token
+
+    async def undo_edit(self, token: int) -> bool:
+        """Put the queue back as it was before the edit ``token`` named.
+
+        The queue may have moved on since: a song that has started playing
+        stays playing rather than coming back, a song played meanwhile doesn't
+        return, and songs that arrived after the edit keep their place at the
+        end. Songs the edit removed come back where they were."""
+        undo = self._edit_undo
+        if not undo or undo["token"] != token:
+            return False
+        self._edit_undo = None
+        now = {t["id"] for t in self.queue}
+        removed = {t["id"] for t in undo["removed"]}
+        playing = self.current["id"] if self.current else None
+        restored = [
+            t for t in undo["queue"]
+            if (t["id"] in now or t["id"] in removed) and t["id"] != playing
+        ]
+        before = {t["id"] for t in undo["queue"]}
+        arrived = [t for t in self.queue if t["id"] not in before]
+        self.queue = restored + arrived
         self.publish_state()
         return True
 
