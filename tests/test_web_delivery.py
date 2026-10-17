@@ -95,8 +95,9 @@ async def test_audio_opts_out_of_gzip(db, bus, tmp_path):
         ("/archive", "Archive"),
         ("/archive/themes", "Archive"),   # the theme list is part of the archive
         ("/search", "Search"),
-        ("/stats", "Stats"),
-        ("/about", "About"),
+        # Stats and About live in the footer, not the header's tabs.
+        ("/stats", None),
+        ("/about", None),
     ],
 )
 async def test_nav_marks_the_current_section(db, bus, path, expect):
@@ -106,8 +107,25 @@ async def test_nav_marks_the_current_section(db, bus, path, expect):
     marked = [
         line for line in body.splitlines() if 'aria-current="page"' in line
     ]
+    if expect is None:
+        assert not marked, f"{path}: no header tab should be current"
+        return
     assert len(marked) == 1, f"{path}: expected exactly one current nav item"
     assert expect in body[body.index('aria-current="page"'):][:80]
+
+
+async def test_header_offers_three_sections_and_the_footer_the_rest(db, bus):
+    """Three tabs up top; Stats, About and the skin picker in the footer."""
+    async with client_for(page_app(db, bus)) as client:
+        body = (await client.get("/")).text
+    header = body[body.index("<header>"):body.index("</header>")]
+    footer = body[body.index('<footer id="site-footer">'):body.index("</footer>")]
+    nav = header[header.index("<nav"):]
+    assert re.findall(r'<a href="(/[a-z]*)"', nav) == [
+        "/", "/archive", "/search",
+    ]
+    assert 'href="/stats"' in footer and 'href="/about"' in footer
+    assert 'id="skin-select"' in footer and "skin-select" not in header
 
 
 async def test_pages_have_their_own_titles(db, bus):

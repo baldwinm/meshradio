@@ -1,16 +1,17 @@
 {% extends "base.html" %}
+{% from "partials/stat.html" import stat %}
 {% block title %}Channel stats · MeshRadio{% endblock %}
 {% block content %}
 <h2>Channel stats</h2>
 <p class="cal-hint"><a class="cal-swap" href="/week">📰 This week</a>
   The whole channel, all time. The weekly recap sums up one week at a time.</p>
 <div class="stat-tiles">
-  <div class="stat"><span class="stat-n">{{ totals.songs or 0 }}</span><span class="stat-l">songs</span></div>
-  <div class="stat"><span class="stat-n">{{ totals.shares or 0 }}</span><span class="stat-l">shares</span></div>
-  <div class="stat"><span class="stat-n">{{ totals.sharers or 0 }}</span><span class="stat-l">sharers</span></div>
-  <div class="stat"><span class="stat-n">{{ totals.days or 0 }}</span><span class="stat-l">days</span></div>
-  <div class="stat"><span class="stat-n">{{ totals.themes or 0 }}</span><span class="stat-l">themes</span></div>
-  <div class="stat"><span class="stat-n">{{ plays.plays or 0 }}</span><span class="stat-l">plays</span></div>
+  {{ stat(totals.songs, "song", "songs") }}
+  {{ stat(totals.shares, "share", "shares") }}
+  {{ stat(totals.sharers, "sharer", "sharers") }}
+  {{ stat(totals.days, "day", "days") }}
+  {{ stat(totals.themes, "theme", "themes") }}
+  {{ stat(plays.plays, "play", "plays") }}
 </div>
 
 <h3>Top sharers</h3>
@@ -18,7 +19,7 @@
 <ol class="board">
   {% for s in top_sharers %}
   <li><a class="board-name" href="/member/{{ s.sender|urlencode }}">{{ s.sender }}</a>
-    <span class="board-val">{{ s.shares }} shares · {{ s.songs }} songs</span></li>
+    <span class="board-val">{{ s.shares }} {{ "share" if s.shares == 1 else "shares" }} · {{ s.songs }} {{ "song" if s.songs == 1 else "songs" }}</span></li>
   {% endfor %}
 </ol>
 {% else %}<p class="empty">No shares yet.</p>{% endif %}
@@ -28,7 +29,7 @@
 <ol class="board">
   {% for a in top_artists %}
   <li><a class="board-name" href="/artist/{{ a.artist|urlencode }}">{{ a.artist }}</a>
-    <span class="board-val">{{ a.shares }} shares · {{ a.sharers }} {{ "person" if a.sharers == 1 else "people" }}</span></li>
+    <span class="board-val">{{ a.shares }} {{ "share" if a.shares == 1 else "shares" }} · {{ a.sharers }} {{ "person" if a.sharers == 1 else "people" }}</span></li>
   {% endfor %}
 </ol>
 {% else %}<p class="empty">No artists yet.</p>{% endif %}
@@ -51,7 +52,7 @@
 <ol class="board">
   {% for t in busiest_themes %}
   <li><a class="board-name" href="/archive/{{ t.date }}">{{ t.title }}</a>
-    <span class="board-val">{{ t.tracks }} songs</span></li>
+    <span class="board-val">{{ t.tracks }} {{ "song" if t.tracks == 1 else "songs" }}</span></li>
   {% endfor %}
 </ol>
 {% else %}<p class="empty">No themes yet.</p>{% endif %}

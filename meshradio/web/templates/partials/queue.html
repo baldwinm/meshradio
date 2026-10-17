@@ -1,17 +1,15 @@
 {% if state.queue %}
 <div class="queue-actions">
-  <button class="subtle q-sel-action q-play-next" type="button" hidden
-          title="Play the selected track next">⤒ Play next</button>
-  <button class="subtle q-sel-action q-remove" type="button" hidden
-          title="Remove the selected track from the queue">✕ Remove</button>
   <button class="subtle" hx-post="/api/queue/clear" hx-target="#queue"
           title="Empty the queue (also switches the station off)">Clear queue</button>
 </div>
+{# Each row carries its own actions (queue.js): they used to appear in the bar
+   above once a row was selected, which nothing on the row hinted at. #}
 <ol class="queue">
   {% for track in state.queue %}
-  <li data-track-id="{{ track.id }}" tabindex="0" role="button" aria-pressed="false"
-      title="Select this track">
-    <span class="title">{{ track.title or track.video_id }}</span>
+  {% set name = track.title or track.video_id %}
+  <li data-track-id="{{ track.id }}">
+    <span class="title">{{ name }}</span>
     {% if track.artist %}<span class="artist">— {{ track.artist }}</span>{% endif %}
     {% if track.duration %}<span class="duration">{{ track.duration|mmss }}</span>{% endif %}
     {% if track.source == "radio" %}
@@ -22,6 +20,14 @@
       {% endif %}
       <span class="sender">({{ track.sender or "?" }})</span>
     {% endif %}
+    <span class="q-acts">
+      {% if not loop.first %}
+      <button class="q-btn q-play-next" type="button" title="Play next"
+              aria-label="Play {{ name }} next">⤒</button>
+      {% endif %}
+      <button class="q-btn q-remove" type="button" title="Remove from the queue"
+              aria-label="Remove {{ name }} from the queue">✕</button>
+    </span>
   </li>
   {% endfor %}
 </ol>

@@ -1,13 +1,14 @@
 {% extends "base.html" %}
+{% from "partials/stat.html" import stat %}
 {% from "partials/thumb.html" import thumb %}
 {% block title %}{{ name }} · MeshRadio{% endblock %}
 {% block content %}
 <h2>{{ name }}</h2>
 <div class="stat-tiles">
-  <div class="stat"><span class="stat-n">{{ profile.shares or 0 }}</span><span class="stat-l">shares</span></div>
-  <div class="stat"><span class="stat-n">{{ profile.songs or 0 }}</span><span class="stat-l">songs</span></div>
-  <div class="stat"><span class="stat-n">{{ profile.days or 0 }}</span><span class="stat-l">days</span></div>
-  <div class="stat"><span class="stat-n">{{ themes|length }}</span><span class="stat-l">themes set</span></div>
+  {{ stat(profile.shares, "share", "shares") }}
+  {{ stat(profile.songs, "song", "songs") }}
+  {{ stat(profile.days, "day", "days") }}
+  {{ stat(themes|length, "theme set", "themes set") }}
 </div>
 {% if profile.first_day %}
 <p class="cal-hint">
@@ -46,11 +47,17 @@
   {% for tr in tracks %}
   <li>
     {{ thumb(tr) }}
-    <span class="title">{{ tr.title or tr.video_id }}</span>
-    {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
-    <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
+    <span class="row-text">
+      <span class="title">{{ tr.title or tr.video_id }}</span>
+      <span class="row-sub">
+        {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
+        <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
+      </span>
+    </span>
     {% if tr.cache_status == "ready" %}
-    <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>
+    <button class="subtle add-btn" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue"
+              aria-label="Add {{ tr.title or tr.video_id }} to the queue" data-done="✓"
+              data-toast="Queued: {{ tr.title or tr.video_id }}">+<span class="add-l"> queue</span></button>
     {% endif %}
   </li>
   {% endfor %}

@@ -1,13 +1,14 @@
 {% extends "base.html" %}
+{% from "partials/stat.html" import stat %}
 {% from "partials/thumb.html" import thumb %}
 {% block title %}{{ name }} · MeshRadio{% endblock %}
 {% block content %}
 <h2>{{ name }}</h2>
 <div class="stat-tiles">
-  <div class="stat"><span class="stat-n">{{ profile.shares or 0 }}</span><span class="stat-l">shares</span></div>
-  <div class="stat"><span class="stat-n">{{ profile.songs or 0 }}</span><span class="stat-l">songs</span></div>
-  <div class="stat"><span class="stat-n">{{ profile.sharers or 0 }}</span><span class="stat-l">sharers</span></div>
-  <div class="stat"><span class="stat-n">{{ profile.days or 0 }}</span><span class="stat-l">days</span></div>
+  {{ stat(profile.shares, "share", "shares") }}
+  {{ stat(profile.songs, "song", "songs") }}
+  {{ stat(profile.sharers, "sharer", "sharers") }}
+  {{ stat(profile.days, "day", "days") }}
 </div>
 {% if profile.first_day %}
 <p class="cal-hint">
@@ -40,9 +41,13 @@
   {% for s in songs %}
   <li>
     {{ thumb(s) }}
-    <a class="title" href="https://youtu.be/{{ s.video_id }}" target="_blank" rel="noopener">{{ s.title }}</a>
-    <span class="artist">{{ s.shares }}×</span>
-    <a class="day-link" href="/archive/{{ s.last_day }}">last on {{ s.last_day }}</a>
+    <span class="row-text">
+      <a class="title" href="https://youtu.be/{{ s.video_id }}" target="_blank" rel="noopener">{{ s.title }}</a>
+      <span class="row-sub">
+        <span class="artist">{{ s.shares }}×</span>
+        <a class="day-link" href="/archive/{{ s.last_day }}">last on {{ s.last_day }}</a>
+      </span>
+    </span>
   </li>
   {% endfor %}
 </ol>

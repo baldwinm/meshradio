@@ -36,16 +36,22 @@
     {% for tr in results %}
     <li>
       {{ thumb(tr) }}
-      <span class="title">{{ tr.title or tr.video_id }}</span>
-      {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
-      <span class="sender">({% if tr.sender %}<a href="/member/{{ tr.sender|urlencode }}">{{ tr.sender }}</a>{% else %}?{% endif %})</span>
-      {# A song shared again is one row: say how often rather than repeating it. #}
-      {% if tr.shares > 1 %}
-      <span class="shares">shared {{ tr.shares }}&times;{% if tr.sharers > 1 %} by {{ tr.sharers }} members{% endif %}</span>
-      {% endif %}
-      <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
+      <span class="row-text">
+        <span class="title">{{ tr.title or tr.video_id }}</span>
+        <span class="row-sub">
+          {% if tr.artist %}<span class="artist">— <a href="/artist/{{ tr.artist|urlencode }}">{{ tr.artist }}</a></span>{% endif %}
+          <span class="sender">({% if tr.sender %}<a href="/member/{{ tr.sender|urlencode }}">{{ tr.sender }}</a>{% else %}?{% endif %})</span>
+          {# A song shared again is one row: say how often rather than repeating it. #}
+          {% if tr.shares > 1 %}
+          <span class="shares">shared {{ tr.shares }}&times;{% if tr.sharers > 1 %} by {{ tr.sharers }} members{% endif %}</span>
+          {% endif %}
+          <a class="day-link" href="/archive/{{ tr.date }}">{{ tr.date }} · {{ tr.theme_title }}</a>
+        </span>
+      </span>
       {% if tr.cache_status == "ready" %}
-      <button class="subtle" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue">+ queue</button>
+      <button class="subtle add-btn" hx-post="/api/queue/{{ tr.id }}" hx-swap="none" title="Add to queue"
+              aria-label="Add {{ tr.title or tr.video_id }} to the queue" data-done="✓"
+              data-toast="Queued: {{ tr.title or tr.video_id }}">+<span class="add-l"> queue</span></button>
       {% endif %}
     </li>
     {% endfor %}

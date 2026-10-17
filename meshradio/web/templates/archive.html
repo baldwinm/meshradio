@@ -13,14 +13,14 @@
   <div class="cal-nav">
     {% if prev_month %}
     <a class="cal-step" href="/archive?m={{ prev_month.key }}"
-       title="{{ prev_month.label }}" rel="prev">←</a>
+       title="{{ prev_month.label }}" aria-label="Previous month: {{ prev_month.label }}" rel="prev">←</a>
     {% else %}
     <span class="cal-step cal-step-off" aria-hidden="true">←</span>
     {% endif %}
     <h3>{{ month.label }}</h3>
     {% if next_month %}
     <a class="cal-step" href="/archive?m={{ next_month.key }}"
-       title="{{ next_month.label }}" rel="next">→</a>
+       title="{{ next_month.label }}" aria-label="Next month: {{ next_month.label }}" rel="next">→</a>
     {% else %}
     <span class="cal-step cal-step-off" aria-hidden="true">→</span>
     {% endif %}
@@ -38,7 +38,7 @@
            href="/archive/{{ cell.iso }}"
            title="{{ cell.info.titles or 'songs' }} — {{ cell.info.tracks }} {{ 'song' if cell.info.tracks == 1 else 'songs' }}">
           <span class="cal-day">{{ cell.day }}</span>
-          <span class="cal-count">{{ cell.info.tracks }}</span>
+          <span class="cal-count">{{ cell.info.tracks }}<span class="cal-unit"> {{ 'song' if cell.info.tracks == 1 else 'songs' }}</span></span>
         </a>
         {% else %}
         <div class="cal-cell cal-off" role="gridcell">

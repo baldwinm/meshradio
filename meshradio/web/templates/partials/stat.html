@@ -1,0 +1,7 @@
+{# A stat tile: the number and its label, singular for one. A zero isn't
+   shown at all: a "0 PLAYS" tile only makes the station look dead. #}
+{% macro stat(n, one, many) -%}
+{%- if n -%}
+<div class="stat"><span class="stat-n">{{ n }}</span><span class="stat-l">{{ one if n == 1 else many }}</span></div>
+{%- endif -%}
+{%- endmacro %}

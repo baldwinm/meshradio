@@ -189,15 +189,18 @@ Open **http://localhost:8080** (or `http://<host-or-ip>:8080` from another
 device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname is
 `meshradio`).
 
-- **Now Playing** — art, title, artist, and which mesh member shared it, for
-  the latest day. It rolls forward to a new day on its own as that day's first
+- **Now Playing** — the day's theme as the headline, then art, title, artist,
+  and which mesh member shared it, for the latest day. On the public site the
+  YouTube player is the art; on every other page it docks (bottom-right on a
+  wide screen, after the page on a phone). It rolls forward to a new day on its own as that day's first
   songs arrive — an open tab updates with no reload. Controls: **▶/⏸
   play-pause**, **⏭ next track**, **🔀 shuffle** what's up next, **volume
-  slider**, and (web mode) **📻 Start radio**. **⤴ Export** opens the whole
+  slider** (hidden on phones, which have volume buttons), and the station
+  switches below. **⤴ Export** opens the whole
   day's songs as a YouTube playlist — every song for the day, whatever's
   playing.
-- **Queue** — listed under the player. Select a track to reveal **⤒ Play next**
-  and **✕ Remove** in the bar up top; **Clear queue** empties it (the current
+- **Queue** — listed under the player. Each song has **⤒** (play next) and
+  **✕** (remove) on its row; **Clear queue** empties it (the current
   song keeps playing; radio mode switches off so it doesn't refill what you
   just cleared). A song already on the day's playlist won't be added twice, no
   matter how many people repost it, and a song that's already playing or
@@ -234,7 +237,7 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   when more match), and each links to its day with a **+ queue** button on any
   song that can be played. It's answered from an index, so it stays quick
   however large the archive grows.
-- **Skins** — the header's dropdown re-dresses the player as **Winamp** (the
+- **Skins** — the footer's Skin picker re-dresses the player as **Winamp** (the
   default), **iTunes** or **Media Player**. The choice is kept in a cookie and
   applied on the server, so a page never flashes the wrong skin while it loads.
 - **Keyboard** — <kbd>Space</kbd> (or <kbd>K</kbd>) play/pause, <kbd>N</kbd> next track,
@@ -292,16 +295,16 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   *Install app*, and a home-screen icon opens in its own window without the
   browser bar. It's still the live site: there's no offline mode, and on an
   iPhone the music still stops when you switch apps (YouTube's rule).
-- **🎲 Keep playing** — never run out: when the queue empties, this keeps the
+- **Keep playing** — a switch with a light that's lit while it's on. Never run out: when the queue empties, this keeps the
   music going with random songs pulled from the archive. Unlike **Start radio**
   it needs no YouTube access, so it's the "don't stop at the end of the day"
   button that works on the public embed instance too. Filler songs show an
   `archive` badge in the queue; a freshly posted channel song still jumps ahead
-  of them. Press **◼ Keep playing** to stop.
-- **📻 Start radio** — when the queue runs dry, this seeds a "station" from
+  of them. Press it again to turn it off.
+- **Radio** (web mode) — a switch like Keep playing: when the queue runs dry, this seeds a "station" from
   the current (or last-played) track using its YouTube Mix: similar songs are
   fetched, cached, and queued, and the station keeps topping itself up until
-  you press **◼ Radio on** to stop. Radio tracks show a `radio` badge in the
+  you switch it off. Radio tracks show a `radio` badge in the
   queue and never pollute the channel archive.
 - **10-band EQ + spectrum analyzer** — a real graphic equalizer with classic
   presets and an FFT spectrum display, Winamp-style. (Web-playback mode only;
@@ -669,7 +672,7 @@ hard crash.
 
 ## Project status
 
-**v0.12 — core software + web player + public hosting working, hardware
+**v0.14 — core software + web player + public hosting working, hardware
 integration pending.**
 
 Versions follow [Semantic Versioning](https://semver.org): new features bump the

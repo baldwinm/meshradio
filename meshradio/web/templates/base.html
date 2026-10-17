@@ -70,22 +70,16 @@
        embed iframe) are never torn out and re-run. #}
     <nav hx-boost="true" hx-target="main" hx-select="main" hx-swap="outerHTML show:window:top">
       {% set path = request.url.path %}
+      {# Three places people go every visit. Stats and About are a footer
+         click away; a long tab row cost every visitor a decision and ran
+         off a phone's screen. #}
       {% for href, label in [("/", "Now Playing"), ("/archive", "Archive"),
-                             ("/search", "Search"), ("/stats", "Stats"),
-                             ("/about", "About")] %}
+                             ("/search", "Search")] %}
       <a href="{{ href }}"
          {% if path == href or (href != "/" and path.startswith(href)) %}aria-current="page"{% endif %}
          >{{ label }}</a>
       {% endfor %}
     </nav>
-    <select id="skin-select" class="skin-select" aria-label="Skin" title="Change skin">
-      <option value="winamp" {{ 'selected' if request.state.skin == 'winamp' else '' }}>Winamp</option>
-      <option value="itunes" {{ 'selected' if request.state.skin == 'itunes' else '' }}>iTunes</option>
-      <option value="wmp" {{ 'selected' if request.state.skin == 'wmp' else '' }}>Media Player</option>
-      {% if request.state.skin == 'aurora' %}
-      <option value="aurora" selected>✨ Vaporwave</option>
-      {% endif %}
-    </select>
     <button id="help-btn" class="help-btn" type="button" aria-label="How to use MeshRadio" title="Help">?</button>
   </header>
   <!-- Help dialog. Outside <main> so htmx partial swaps never remove it; the
@@ -103,8 +97,8 @@
           <span class="k">⏭</span> skip, <span class="k">🔀</span> shuffle what's up next,
           drag the bar to scrub, and set the volume. It always shows the latest day,
           rolling forward on its own when a new day's songs start arriving.</li>
-        <li><strong>Queue</strong> — the songs up next. Select a track to reveal
-          <span class="k">⤒ Play next</span> and <span class="k">✕ Remove</span> in the bar up top;
+        <li><strong>Queue</strong> — the songs up next. Each one has
+          <span class="k">⤒</span> play next and <span class="k">✕</span> remove;
           <span class="k">Clear queue</span> empties it.</li>
         <li><strong>Export</strong> — <span class="k">⤴ Export</span> opens the whole day's songs
           as a YouTube playlist (every song for the day, whatever's playing).</li>
@@ -113,8 +107,11 @@
           <span class="k">+ queue</span> adds a single track.
           <span class="k">☰ All themes</span> swaps the calendar for the list of every theme
           the channel has run, so you can see what's been done before.</li>
-        <li><strong>Keep playing</strong> — <span class="k">🎲 Keep playing</span> never lets the music
-          stop: when the queue empties it keeps going with random songs from the archive.</li>
+        <li><strong>Keep playing</strong> — <span class="k">Keep playing</span> is a switch: while its light is
+          on, the music never stops. When the queue empties it keeps going with random songs
+          from the archive.</li>
+        <li><strong>Skins</strong> — change the look from the picker at the bottom of
+          every page.</li>
         <li><strong>Keyboard</strong> —
           <span class="k">Space</span> play or pause,
           <span class="k">N</span> next track,
@@ -123,8 +120,8 @@
           <span class="k">M</span> mute,
           <span class="k">?</span> this help.</li>
         {% if not embed_mode %}
-        <li><strong>Radio</strong> — <span class="k">📻 Start radio</span> keeps the music going with
-          similar songs when the queue runs dry; press it again to stop.</li>
+        <li><strong>Radio</strong> — <span class="k">Radio</span> is a switch: while its light is on, it
+          keeps the music going with similar songs when the queue runs dry.</li>
         <li><strong>Audio</strong> — if you see <span class="k">🔊 Click to enable audio</span>, click it
           once (browsers block autoplay). Open it in several tabs and only the newest plays sound.</li>
         {% endif %}
@@ -137,7 +134,11 @@
   <section id="yt-window" hidden>
     <div id="yt-player"></div>
   </section>
-  <main>
+  {# The page's kind rides on <main> rather than <body>: boosted navigation
+     swaps only <main>, so this is the part that changes with the page. The
+     player window's CSS reads it (main.page-now) to sit in the Now Playing
+     card there and dock everywhere else. #}
+  <main class="{% block main_class %}page-other{% endblock %}">
     {% block content %}{% endblock %}
   </main>
   <button id="audio-ctl" hidden></button>
@@ -195,6 +196,18 @@
         hx-select="main" hx-swap="outerHTML show:window:top">Privacy</a> ·
         <a href="{{ github_url }}/blob/main/LICENSE"
         target="_blank" rel="noopener">MIT License</a> · v{{ version }}</span>
+      {# The skin is a once-in-a-while choice, so it lives down here rather
+         than beside the navigation every visitor has to read past. #}
+      <label class="skin-pick">Skin
+        <select id="skin-select" class="skin-select" title="Change skin">
+          <option value="winamp" {{ 'selected' if request.state.skin == 'winamp' else '' }}>Winamp</option>
+          <option value="itunes" {{ 'selected' if request.state.skin == 'itunes' else '' }}>iTunes</option>
+          <option value="wmp" {{ 'selected' if request.state.skin == 'wmp' else '' }}>Media Player</option>
+          {% if request.state.skin == 'aurora' %}
+          <option value="aurora" selected>✨ Vaporwave</option>
+          {% endif %}
+        </select>
+      </label>
       {% if embed_mode %}
       <a class="coffee" href="https://www.buymeacoffee.com/meshradio" target="_blank"
          rel="noopener">☕ Buy me a coffee</a>
@@ -221,5 +234,9 @@
   <script src="/static/js/lengths.js?v={{ asset_v }}"></script>
   {% endif %}
   <script src="/static/js/fx.js?v={{ asset_v }}"></script>
+  {# after fx.js (mrToast) and embed.js (ytPlayer): button feedback, and the
+     player window's place on the page. #}
+  <script src="/static/js/feedback.js?v={{ asset_v }}"></script>
+  {% if embed_mode %}<script src="/static/js/dock.js?v={{ asset_v }}"></script>{% endif %}
 </body>
 </html>

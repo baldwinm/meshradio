@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/stat.html" import stat %}
 {% from "partials/thumb.html" import thumb %}
 {% block title %}{% if week %}Week of {{ week.label }}{% else %}Weekly recap{% endif %} · MeshRadio{% endblock %}
 {% block content %}
@@ -21,14 +22,14 @@
   {% endif %}
 </nav>
 <div class="stat-tiles">
-  <div class="stat"><span class="stat-n">{{ week.shares }}</span><span class="stat-l">shares</span></div>
-  <div class="stat"><span class="stat-n">{{ week.songs }}</span><span class="stat-l">songs</span></div>
-  <div class="stat"><span class="stat-n">{{ week.sharers }}</span><span class="stat-l">sharers</span></div>
-  <div class="stat"><span class="stat-n">{{ week.days|length }}</span><span class="stat-l">days</span></div>
+  {{ stat(week.shares, "share", "shares") }}
+  {{ stat(week.songs, "song", "songs") }}
+  {{ stat(week.sharers, "sharer", "sharers") }}
+  {{ stat(week.days|length, "day", "days") }}
 </div>
 {% if week.busiest %}
 <p class="cal-hint">Busiest day: <a href="/archive/{{ week.busiest.date }}">{{ week.busiest.weekday }}
-  {{ week.busiest.date }}</a> with {{ week.busiest.tracks }} songs.</p>
+  {{ week.busiest.date }}</a> with {{ week.busiest.tracks }} {{ "song" if week.busiest.tracks == 1 else "songs" }}.</p>
 {% endif %}
 
 <h3>The week's themes</h3>

@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.13 — the core software is built, tested (559 tests), and running:
+*Status: v0.14 — the core software is built, tested (570 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
@@ -326,7 +326,7 @@ Five screens, encoder-navigated: **Now Playing** (theme / title–artist marquee
 
 FastAPI serving Jinja2 + htmx at `http://meshradio.local` (avahi mDNS). WebSocket pushes player state. Pages: Now Playing (with album art fetched via oEmbed thumbnail — the one place the web UI beats the OLED), Archive browser, queue management, output/volume, settings (WiFi, channel key, quiet hours, CoreScope URL), and a log viewer. htmx keeps the frontend a set of HTML templates — no npm, no build step, which is a kit-maintainability feature, not a limitation.
 
-*As built:* the pages are **Now Playing** (cover art is YouTube's still for the video, not an oEmbed lookup), the **Archive** (calendar and all-themes list, plus a page per day), **Search**, **Stats**, **Member** pages, **About** and **Privacy**, with queue management, shuffle, volume and the stations on Now Playing. The **admin page** (below) covers the operator's fixes and shows the running config read-only; *editing* settings (WiFi, channel key, quiet hours, CoreScope URL) and the **log viewer** are *not built* — configuration is the TOML file, logs are `journalctl`. Output selection exists as an API (`/api/output/{name}`, `/api/outputs`) with no control on the page yet. The app listens on port 8080 (`[web] port`); a `meshradio.local` name comes from the OS's mDNS, not from anything the app sets up.
+*As built:* the pages are **Now Playing** (cover art is YouTube's still for the video, not an oEmbed lookup; on embed hosting the player itself is the art — `dock.js` lays the player window, which lives outside `<main>` so swaps never reload it, over the card's `#yt-slot`, and docks it on every other page), the **Archive** (calendar and all-themes list, plus a page per day), **Search**, **Stats**, **Member** pages, **About** and **Privacy**, with queue management, shuffle, volume and the stations on Now Playing. The **admin page** (below) covers the operator's fixes and shows the running config read-only; *editing* settings (WiFi, channel key, quiet hours, CoreScope URL) and the **log viewer** are *not built* — configuration is the TOML file, logs are `journalctl`. Output selection exists as an API (`/api/output/{name}`, `/api/outputs`) with no control on the page yet. The app listens on port 8080 (`[web] port`); a `meshradio.local` name comes from the OS's mDNS, not from anything the app sets up.
 
 The **Archive** browser is a month calendar (`context.archive_months` and `calendar_month`): every day the channel played is a lit, tappable tile carrying its theme title and song count; quiet days render blank. It replaced a flat reverse-chronological list so the channel's rhythm — which days were busy, which went quiet — is visible at a glance.
 

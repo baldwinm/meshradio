@@ -1,8 +1,11 @@
 {% set current = state.current %}
+{# The day's theme is what the station is about, so it's the page's headline;
+   the date is its caption. #}
 <div class="day-banner">
-  <span class="day-date">{{ day }}</span>
-  {% if theme_titles %}<span class="day-theme">{{ theme_titles|join(" · ") }}</span>{% endif %}
-  {% if day == today %}<span class="badge">today</span>{% endif %}
+  <div class="day-head">
+    <span class="day-date">{% if day == today %}Today · {% endif %}{{ day|day_label }}</span>
+    <h2 class="day-theme">{{ theme_titles|join(" · ") or "No theme yet" }}</h2>
+  </div>
   {% if yt_export_url %}
   <a class="btn-link day-export" href="{{ yt_export_url }}" target="_blank" rel="noopener"
      title="Open this whole day's songs as a YouTube playlist">⤴ Export</a>
@@ -10,7 +13,17 @@
 </div>
 <div class="card now-playing">
   {% if current %}
+    {% if state.embed %}
+    {# The YouTube player is the cover art here: dock.js lays the player
+       window (outside <main>, so swaps never reload it) over this slot. The
+       still underneath shows until it arrives, or in a tab that isn't the
+       one playing. #}
+    <div id="yt-slot" class="yt-slot">
+      <img class="art" src="https://i.ytimg.com/vi/{{ current.video_id }}/mqdefault.jpg" alt="">
+    </div>
+    {% else %}
     <img class="art" src="https://i.ytimg.com/vi/{{ current.video_id }}/mqdefault.jpg" alt="">
+    {% endif %}
     <div class="meta">
       {% set t = current.title or current.video_id %}
       <div class="title marquee"><span>{{ t }}</span></div>
@@ -40,7 +53,9 @@
   {% else %}
     <div class="meta idle">
       <div class="title">Nothing playing</div>
-      <div class="sender">mode: {{ state.mode }} · waiting for the mesh…</div>
+      <div class="sender">Press ▶ to play the latest day's songs, or
+        <a href="/archive" hx-boost="true" hx-target="main" hx-select="main"
+           hx-swap="outerHTML show:window:top">browse the archive</a>.</div>
     </div>
   {% endif %}
   {# No inline handlers (the Content-Security-Policy forbids them): playbar.js
@@ -57,38 +72,41 @@
   {% endif %}
   <div class="controls">
     {% if state.status == "idle" %}
-      <button hx-post="/api/play-today" hx-target="#now-playing" title="Play today's songs">▶</button>
+      <button class="play-btn" hx-post="/api/play-today" hx-target="#now-playing"
+              title="Play today's songs" aria-label="Play">▶</button>
     {% else %}
-      <button hx-post="/api/pause" hx-target="#now-playing" title="Play/Pause">
+      <button class="play-btn" hx-post="/api/pause" hx-target="#now-playing" title="Play/Pause"
+              aria-label="{{ 'Pause' if state.status == 'playing' else 'Play' }}">
         {% if state.status == "playing" %}⏸{% else %}▶{% endif %}
       </button>
     {% endif %}
-    <button hx-post="/api/skip" hx-target="#now-playing" title="Next track">⏭</button>
+    <button hx-post="/api/skip" hx-target="#now-playing" title="Next track" aria-label="Next track">⏭</button>
     {% if state.queue|length > 1 %}
-    <button hx-post="/api/queue/shuffle" hx-target="#queue" title="Shuffle the queue">🔀</button>
+    <button hx-post="/api/queue/shuffle" hx-target="#queue" title="Shuffle the queue"
+            aria-label="Shuffle the queue" data-toast="Shuffled what's up next">🔀</button>
     {% endif %}
     {# Radio needs yt-dlp and a residential IP to fetch a Mix, so the public
        embed host can't offer it — the archive station below is the one that
        works everywhere, and there it's what keeps a finished day from
        dropping into silence. #}
+    {# Station modes are switches, not actions: a lit light says it's on, and
+       the label stays put so nobody reads "◼" as "stop the music". #}
     {% if not state.embed %}
-      {% if state.station == "radio" %}
-        <button class="radio-btn active" hx-post="/api/station/off" hx-target="#now-playing"
-                title="Stop fetching more songs — already-queued ones stay">◼ Radio on</button>
-      {% else %}
-        <button class="radio-btn" hx-post="/api/station/radio" hx-target="#now-playing"
-                title="Keep the music going: queue similar songs from a YouTube Mix of this track">📻 Start radio</button>
-      {% endif %}
+      {% set on = state.station == "radio" %}
+      <button class="toggle" aria-pressed="{{ 'true' if on else 'false' }}"
+              hx-post="/api/station/{{ 'off' if on else 'radio' }}" hx-target="#now-playing"
+              title="{{ 'Radio is on: similar songs keep coming. Press to stop fetching more (queued songs stay)' if on
+                       else 'Keep the music going: queue similar songs from a YouTube Mix of this track' }}"
+              ><span class="led" aria-hidden="true"></span>Radio</button>
     {% endif %}
-    {% if state.station == "archive" %}
-      <button class="radio-btn active" hx-post="/api/station/off" hx-target="#now-playing"
-              title="Stop topping the queue up — already-queued songs stay">◼ Keep playing</button>
-    {% else %}
-      <button class="radio-btn" hx-post="/api/station/archive" hx-target="#now-playing"
-              title="Never run out: when the queue empties, keep going with random songs from the archive">🎲 Keep playing</button>
-    {% endif %}
+    {% set on = state.station == "archive" %}
+    <button class="toggle" aria-pressed="{{ 'true' if on else 'false' }}"
+            hx-post="/api/station/{{ 'off' if on else 'archive' }}" hx-target="#now-playing"
+            title="{{ 'On: when the queue empties, random songs from the archive keep playing. Press to turn off' if on
+                     else 'Never run out: when the queue empties, keep going with random songs from the archive' }}"
+            ><span class="led" aria-hidden="true"></span>Keep playing</button>
     <span class="vol-icon" id="vol-icon" title="Mute / unmute" tabindex="0"
-          role="button">{% if state.volume == 0 %}🔇{% else %}🔊{% endif %}</span>
+          role="button" aria-label="Mute or unmute">{% if state.volume == 0 %}🔇{% else %}🔊{% endif %}</span>
     <input type="range" id="vol-range" min="0" max="100" value="{{ state.volume }}" title="Volume">
   </div>
 </div>
