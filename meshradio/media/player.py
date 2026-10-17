@@ -381,7 +381,7 @@ class PlayerService(Service):
     # and an id still means the same song after the queue has shifted under a
     # page that rendered it a moment ago. Each change keeps one undo step.
 
-    def _snapshot(self) -> int:
+    def _snapshot(self, removed: list[dict[str, Any]] | None = None) -> int:
         """Remember the queue as it is, before an edit, for ``undo_edit``.
         Returns the token the page sends back to undo it; only the latest edit
         can be undone."""
@@ -389,7 +389,7 @@ class PlayerService(Service):
         self._edit_undo = {
             "token": self._edit_token,
             "queue": list(self.queue),
-            "removed": [],
+            "removed": list(removed or []),
         }
         return self._edit_token
 
@@ -400,8 +400,7 @@ class PlayerService(Service):
         gone = [t for t in self.queue if t["id"] in wanted]
         if not gone:
             return 0, None
-        token = self._snapshot()
-        self._edit_undo["removed"] = gone
+        token = self._snapshot(gone)
         self.queue = [t for t in self.queue if t["id"] not in wanted]
         self.publish_state()
         return len(gone), token
@@ -439,8 +438,7 @@ class PlayerService(Service):
         if not self.queue:
             await self.clear_queue()
             return None
-        token = self._snapshot()
-        self._edit_undo["removed"] = list(self.queue)
+        token = self._snapshot(self.queue)
         await self.clear_queue()
         return token
 
