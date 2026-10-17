@@ -1,7 +1,7 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.14 — the core software is built, tested (570 tests), and running:
+*Status: v0.15 — the core software is built, tested (577 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
 a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware

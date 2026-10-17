@@ -199,8 +199,11 @@ device on your LAN — e.g. `http://meshradio.local:8080` if the Pi's hostname i
   switches below. **⤴ Export** opens the whole
   day's songs as a YouTube playlist — every song for the day, whatever's
   playing.
-- **Queue** — listed under the player. Each song has **⤒** (play next) and
-  **✕** (remove) on its row; **Clear queue** empties it (the current
+- **Queue** — listed under the player. **✎ Edit** shows a checkbox and a drag
+  handle on every song: tick songs and **⤒ Play next** or **✕ Remove** them,
+  drag a song by its handle (or Alt+↑ / Alt+↓) to move it anywhere, and
+  **Done** goes back to listening. Each change shows a notice with **Undo**.
+  **Clear queue** (in Edit mode) empties it (the current
   song keeps playing; radio mode switches off so it doesn't refill what you
   just cleared). A song already on the day's playlist won't be added twice, no
   matter how many people repost it, and a song that's already playing or
@@ -672,7 +675,7 @@ hard crash.
 
 ## Project status
 
-**v0.14 — core software + web player + public hosting working, hardware
+**v0.15 — core software + web player + public hosting working, hardware
 integration pending.**
 
 Versions follow [Semantic Versioning](https://semver.org): new features bump the

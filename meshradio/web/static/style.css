@@ -701,28 +701,78 @@ section.theme ol::-webkit-scrollbar-button { display: none; }
 .queue li .badge, .queue li .sender { order: 7; margin-left: auto; flex: none; }
 .queue li .duration { order: 8; }
 
-/* Each row's own ⤒ / ✕ (queue.js). With a mouse they appear on the row
-   you're over; on touch they're always there. */
-.q-acts { order: 9; display: flex; gap: 2px; flex: none; }
-.q-btn { padding: 0 0.4rem; font-size: 0.75rem; line-height: 1.4; }
-@media (hover: hover) and (pointer: fine) {
-  .q-acts { visibility: hidden; }
-  .queue li:hover .q-acts, .queue li:focus-within .q-acts { visibility: visible; }
+/* -- queue Edit mode (queue.js) ------------------------------------------------
+   Listening, the rows are just songs: the boxes, handles and action bar only
+   show once #queue has .editing. */
+.queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
 }
-
 .queue-total {
-  margin: 0.3rem 0 0;
-  text-align: right;
   font-family: "Lucida Console", "Courier New", monospace;
   font-size: 0.75rem;
   color: var(--green-dim);
 }
-
-.queue-actions {
-  margin: 0.35rem 0;
+.q-check, .q-handle, .q-editbar { display: none; }
+#queue.editing .queue-head { display: none; }
+#queue.editing .q-editbar {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.35rem;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.45rem;
+  background: var(--lcd-bg);
+  border: 2px solid;
+  border-color: var(--face-hi) var(--face-lo) var(--face-lo) var(--face-hi);
+}
+.q-count {
+  flex: 1;
+  font-family: "Lucida Console", "Courier New", monospace;
+  font-size: 0.78rem;
+  color: var(--amber);
+}
+.q-editbar button { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
+.q-editbar button:disabled { opacity: 0.45; cursor: default; filter: none; }
+.q-done { color: var(--green); }
+#queue.editing .q-check {
+  display: block;
+  order: -1;                       /* before the row number */
+  flex: none;
+  width: 16px; height: 16px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+#queue.editing .q-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  order: 10;                       /* far right, after the duration */
+  flex: none;
+  width: 24px;
+  align-self: stretch;
+  color: var(--muted);
+  letter-spacing: -2px;
+  cursor: grab;
+  touch-action: none;              /* the finger drags the row, not the page */
+  user-select: none;
+}
+#queue.editing .q-handle:hover { color: var(--amber); }
+#queue.editing .queue li { cursor: pointer; user-select: none; }
+/* the row being dragged lifts; the others slide aside to make room */
+#queue .queue.drag-active li { transition: transform 0.12s ease; }
+#queue .queue li.dragging {
+  position: relative;
+  z-index: 2;
+  transition: none;
+  background: #1c2a1c;
+  outline: 1px solid var(--green);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 60%);
+  cursor: grabbing;
 }
 
 /* -- archive calendar ------------------------------------------------------- */
@@ -1050,7 +1100,21 @@ html body #yt-window.in-slot {
   .controls { flex-wrap: wrap; }
   .playbar .time { min-width: 2.9rem; font-size: 0.75rem; padding: 0.15rem 0.2rem; }
   .queue .sender { display: none; }      /* keep title + duration readable */
-  .q-acts { visibility: visible; }       /* no hover to reveal them on a phone */
+  /* Edit mode on a phone: the actions in a bar at the bottom of the screen,
+     in thumb reach, icons over short labels; the page makes room for it. */
+  #queue.editing .q-editbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    margin: 0; padding: 0.4rem 0.4rem calc(0.4rem + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 0.3rem;
+    box-shadow: 0 -4px 14px rgb(0 0 0 / 50%);
+  }
+  #queue.editing .q-count { display: none; }
+  #queue.editing .q-editbar button { min-height: 44px; padding: 0.2rem; font-size: 0.72rem; }
+  #queue.editing .q-editbar .q-l { display: block; font-size: 0.62rem; }
+  body:has(#queue.editing) { padding-bottom: 5.5rem; }
+  body:has(#queue.editing) .mr-toast { bottom: 6rem; }
+  #queue.editing .q-handle { width: 44px; font-size: 1.1rem; }
+  #queue.editing .q-check { width: 20px; height: 20px; }
   .controls input[type="range"][title="Volume"] { display: none; }
   .queue li .duration { margin-left: auto; }
   .queue, .days, section.theme ol { font-size: 0.75rem; }
@@ -1080,7 +1144,6 @@ html body #yt-window.in-slot {
 @media (pointer: coarse) {
   button { padding: 0.45rem 0.9rem; }
   button.subtle { padding: 0.25rem 0.6rem; }
-  .q-btn { min-width: 36px; min-height: 32px; padding: 0 0.4rem; }
   .add-btn { min-width: 40px; min-height: 36px; padding: 0 0.5rem; }
   input[type="range"] { height: 20px; }
   input[type="range"]::-webkit-slider-thumb { height: 18px; }
@@ -1331,6 +1394,9 @@ html[data-skin="aurora"] select option { background: #23123f; color: #f2e9ff; }
   transition: opacity 0.35s, transform 0.35s;
 }
 .mr-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* A notice with an action (queue Edit mode's Undo): it takes clicks. */
+.mr-toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 0.8rem; }
+.toast-undo { font-size: 0.8rem; padding: 0.15rem 0.7rem; color: var(--amber); }
 
 /* -- toggled flourish ----------------------------------------------------- */
 @keyframes mr-fx1-hue { to { filter: hue-rotate(360deg); } }

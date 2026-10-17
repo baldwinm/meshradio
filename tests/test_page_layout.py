@@ -1,6 +1,6 @@
 """What the listener pages put first and how they say it: the day's theme as
 Now Playing's headline, the YouTube player as the card's art on the public
-site, a button on every queue row, plain words when nothing is playing, and
+site, a queue that is just songs until ✎ Edit, plain words when nothing is playing, and
 stat tiles that never show a zero or a "1 shares"."""
 
 import re
@@ -57,7 +57,9 @@ async def test_nothing_playing_says_what_to_do_not_the_mode(db, bus):
     assert "Press ▶ to play" in body and 'href="/archive"' in body
 
 
-async def test_every_queue_row_has_its_own_actions(db, bus):
+async def test_queue_rows_carry_no_buttons_and_one_edit_switch_does(db, bus):
+    """Listening, the queue is just songs: no per-row buttons. Edit mode's
+    boxes, handles and action bar are in the markup, shown by queue.js."""
     for video_id in ("aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"):
         await make_ready_on(db, video_id, "2026-08-01")
     async with client_for(page_app(db, bus)) as client:
@@ -65,9 +67,12 @@ async def test_every_queue_row_has_its_own_actions(db, bus):
         body = (await client.get("/partials/live")).text
     rows = re.findall(r"<li data-track-id=.*?</li>", body, re.S)
     assert len(rows) == 2                                  # the playing song isn't queued
-    assert "q-play-next" not in rows[0]                    # it's already next
-    assert "q-play-next" in rows[1]
-    assert all("q-remove" in row for row in rows)
+    assert not any("<button" in row for row in rows)
+    assert all('class="q-check"' in row and 'class="q-handle"' in row for row in rows)
+    assert body.count('class="subtle q-edit"') == 1
+    bar = re.search(r'<div class="q-editbar".*?</div>', body, re.S).group(0)
+    for action in ("q-next", "q-remove", "q-all", "q-clear", "q-done"):
+        assert action in bar
 
 
 async def test_keep_playing_is_a_switch_that_shows_its_state(db, bus):
