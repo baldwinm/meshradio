@@ -12,6 +12,11 @@
 # merge made with the workflow's own token starts no push workflows, so the
 # job then runs this workflow on main by hand (workflow_dispatch): that run
 # is what Render's checksPass and the Pi's pi-deploy branch wait on.
+#
+# On main, once all three pass, the last two jobs move the Pi's pi-deploy
+# branch and tag a new version. They're jobs here rather than workflow_run
+# workflows because a run that GITHUB_TOKEN dispatched (the one above)
+# triggers no workflow_run, so Dependabot merges never reached the Pi.
 name: tests
 
 on:
@@ -93,3 +98,25 @@ jobs:
         run: |
           gh pr merge --merge "$PR_URL"
           gh workflow run test.yml --ref main
+
+  pi-deploy:
+    needs: [test, lint, browser]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/pi-deploy.yml
+    with:
+      sha: ${{ github.sha }}
+
+  release-tag:
+    needs: [test, lint, browser]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-tag.yml
+    with:
+      sha: ${{ github.sha }}

@@ -2,36 +2,36 @@
 # The Pi's update timer (deploy/auto-update.sh) follows that branch, so it
 # only ever installs a commit CI has gated — the same rule Render deploys by.
 #
+# Called from test.yml as its last job, not started by a workflow_run event:
+# the test run that a Dependabot auto-merge dispatches is started by
+# GITHUB_TOKEN, and runs started that way fire no workflow_run, so those
+# merges never reached the Pi.
+#
 # Only forward: when runs finish out of order, an older commit never moves
 # the branch back. Pushed with GITHUB_TOKEN, so the push itself starts no
 # workflows.
 name: pi-deploy
 
 on:
-  workflow_run:
-    workflows: [tests]
-    types: [completed]
-    branches: [main]
-
-permissions:
-  contents: write
-
-concurrency: pi-deploy
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
 
 jobs:
   advance:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      (github.event.workflow_run.event == 'push' ||
-       github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency: pi-deploy
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Advance pi-deploy
         env:
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ inputs.sha }}
         run: |
           if ! git merge-base --is-ancestor "$SHA" origin/main; then
             echo "$SHA is not on main; leaving pi-deploy alone"

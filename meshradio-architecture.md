@@ -640,6 +640,10 @@ are caught up from the furthest song they still hold.
   pass (the `automerge` job); a merge made with the workflow's token starts
   no push workflows, so the job then dispatches the test workflow on `main`,
   which is the run Render's `checksPass` and the Pi's `pi-deploy` branch wait on.
+  On `main`, two last jobs run once all three pass: `pi-deploy` and
+  `release-tag`, which call the reusable workflows below. They used to be
+  `workflow_run` workflows, but a run dispatched with the workflow's token
+  fires no `workflow_run`, so Dependabot merges reached Render and never the Pi.
 - **Uptime check** ([uptime.yml](.github/workflows/uptime.yml)) — every ten
   minutes GitHub asks `https://meshradio.co/healthz` whether the site is up,
   has ingested within half an hour, has had a relay push within half an hour
@@ -691,8 +695,8 @@ are caught up from the furthest song they still hold.
   `EnvironmentFile`, instead of sitting in `config.toml`.
 - **Release tags** come from [release-tag.yml](.github/workflows/release-tag.yml): when the test workflow passes on a `main` commit whose `pyproject.toml` version has no `v<version>` tag yet, it tags that commit, so a version bump is the whole release step and `git describe` on the Pi names what it runs.
 - **Pi updates** follow CI the way Render does. When the test workflow passes on
-  `main`, [pi-deploy.yml](.github/workflows/pi-deploy.yml) moves a `pi-deploy`
-  branch to that commit (only forward). A timer on the Pi
+  `main`, its last job calls [pi-deploy.yml](.github/workflows/pi-deploy.yml),
+  which moves a `pi-deploy` branch to that commit (only forward). A timer on the Pi
   ([deploy/meshradio-autoupdate.timer](deploy/meshradio-autoupdate.timer)) runs
   [deploy/auto-update.sh](deploy/auto-update.sh) every ten minutes: it
   fast-forwards the clone to `pi-deploy`, reinstalls the package into the venv
