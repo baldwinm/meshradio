@@ -85,7 +85,7 @@ def _sessionless(path: str) -> bool:
     )
 
 
-def create_app(  # noqa: C901
+def create_app(
     bus: EventBus,
     db: Database,
     player: PlayerService,
@@ -112,24 +112,7 @@ def create_app(  # noqa: C901
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        async def watch_ingest():
-            sub = bus.subscribe(INGEST_STATUS)
-            try:
-                async for _topic, payload in sub:
-                    now = time.time()
-                    for source, status in payload.items():
-                        seen = health["feeds"].setdefault(source, {})
-                        seen.update(status=status, at=now)
-                        if status == "ok":
-                            seen["last_ok"] = now
-                    # "ok" is the pollers' success marker; mesh reports link
-                    # state ("connected"/"disconnected"), which isn't ingest.
-                    if "ok" in payload.values():
-                        health["last_ingest"] = now
-            finally:
-                sub.close()
-
-        task = supervise("ingest-health-watch", watch_ingest)
+        task = supervise("ingest-health-watch", lambda: _watch_ingest(bus, health))
         yield
         task.cancel()
         # Visitors' snapshots flush every few seconds; on shutdown, write
@@ -156,43 +139,13 @@ def create_app(  # noqa: C901
     )
     app.mount("/static", VersionedStatic(directory=_HERE / "static"), name="static")
 
-    @app.middleware("http")
-    async def skin_from_cookie(request: Request, call_next):
-        skin = request.cookies.get("skin", DEFAULT_SKIN)
-        request.state.skin = skin if skin in ALLOWED_SKINS else DEFAULT_SKIN
-        return await call_next(request)
+    app.middleware("http")(_skin_from_cookie)
 
     # Per-visitor sessions (public embed hosting) vs one communal player
     # (the appliance). A cookie names the session; each browser gets its own.
     sessions = SessionManager(player_factory, db, bus, player.tz) if player_factory else None
-
     if sessions is not None:
-        @app.middleware("http")
-        async def ensure_session_cookie(request: Request, call_next):
-            if _sessionless(request.url.path):
-                return await call_next(request)
-            # Only a cookie this server signed names a session; anything else
-            # (none, garbage, forged, an earlier key's) is reissued, and the
-            # request is marked as having presented nothing — a session may
-            # not be opened on it (see context.get_player).
-            secret = await sessions.secret()
-            sid = verify_cookie(request.cookies.get(SESSION_COOKIE), secret)
-            fresh = sid is None
-            if fresh:
-                sid, cookie = issue_cookie(secret)
-            request.state.sid = sid
-            request.state.fresh_sid = fresh
-            response = await call_next(request)
-            if fresh:
-                # Secure when the visitor reached us over HTTPS (hosted embed
-                # deployments sit behind a TLS-terminating proxy); plain-HTTP
-                # LAN/appliance use keeps working without it.
-                response.set_cookie(
-                    SESSION_COOKIE, cookie,
-                    max_age=365 * 24 * 3600, httponly=True, samesite="lax",
-                    secure=is_https(request),
-                )
-            return response
+        _add_session_cookies(app, sessions)
 
     ctx = WebContext(
         bus=bus,
@@ -219,25 +172,7 @@ def create_app(  # noqa: C901
     # See context.forwarded_scheme: whose X-Forwarded-* headers to believe.
     app.state.trusted_proxies = frozenset(trusted_proxies)
 
-    @app.exception_handler(404)
-    async def not_found(request: Request, exc):
-        """A browser gets the site's own 404 page; anything else keeps the JSON.
-
-        The archive's day URLs are the one place a typo (or a crawler) lands on
-        a path built from free text, and the old behaviour was a 200 titled
-        with whatever was typed."""
-        wants_html = "text/html" in request.headers.get("accept", "")
-        detail = getattr(exc, "detail", None)
-        if not wants_html:
-            return JSONResponse({"detail": detail or "Not Found"}, status_code=404)
-        return templates.TemplateResponse(
-            request,
-            "404.html",
-            # Not a document: no indexing, and no canonical/og:url built from
-            # the path that missed — that path is whatever a stranger typed.
-            {"detail": detail, "meta_url": absolute_url(request, "/"), "meta_noindex": True},
-            status_code=404,
-        )
+    app.exception_handler(404)(_not_found_page(templates))
 
     app.include_router(routes_pages.router)
     app.include_router(routes_api.router)
@@ -252,15 +187,35 @@ def create_app(  # noqa: C901
     if admin is not None:
         app.include_router(admin_pages.router)
         templates.env.filters.update(admin_pages.FILTERS)
+        app.middleware("http")(_admin_headers)
 
-        @app.middleware("http")
-        async def admin_headers(request: Request, call_next):
-            response = await call_next(request)
-            path = request.url.path
-            if path == ADMIN_PATH or path.startswith(f"{ADMIN_PATH}/"):
-                admin_pages.admin_headers(response)
-            return response
+    _add_guards(
+        app,
+        rate_limit=rate_limit,
+        allowed_hosts=allowed_hosts,
+        security_headers=security_headers,
+        embed_mode=player_factory is not None,
+        csp_report_only=csp_report_only,
+        public_url=public_url,
+        proxy_hops=proxy_hops,
+        trusted_proxies=trusted_proxies,
+    )
+    return app
 
+
+def _add_guards(
+    app: FastAPI,
+    *,
+    rate_limit: bool,
+    allowed_hosts: Sequence[str],
+    security_headers: bool,
+    embed_mode: bool,
+    csp_report_only: bool,
+    public_url: str,
+    proxy_hops: int,
+    trusted_proxies: Sequence[str],
+) -> None:
+    """The outer middleware layers, innermost first (each wraps those before it)."""
     # Inside the origin guard, so a refused cross-site request never costs a
     # client its budget; outside the session middleware, so a refused press
     # mints no cookie and opens nothing.
@@ -283,7 +238,7 @@ def create_app(  # noqa: C901
         # Outermost of all: the guards' own 403/400 answers get them too.
         app.add_middleware(
             SecurityHeaders,
-            embed_mode=player_factory is not None,
+            embed_mode=embed_mode,
             report_only=csp_report_only,
             hsts=public_url.startswith("https://"),
         )
@@ -293,4 +248,87 @@ def create_app(  # noqa: C901
         app.add_middleware(ForwardedClient, hops=proxy_hops, trusted=list(trusted_proxies))
     # Outermost, so a failure anywhere inside — a route or a middleware — counts.
     app.add_middleware(CountErrors)
-    return app
+
+
+async def _watch_ingest(bus: EventBus, health: dict) -> None:
+    sub = bus.subscribe(INGEST_STATUS)
+    try:
+        async for _topic, payload in sub:
+            now = time.time()
+            for source, status in payload.items():
+                seen = health["feeds"].setdefault(source, {})
+                seen.update(status=status, at=now)
+                if status == "ok":
+                    seen["last_ok"] = now
+            # "ok" is the pollers' success marker; mesh reports link
+            # state ("connected"/"disconnected"), which isn't ingest.
+            if "ok" in payload.values():
+                health["last_ingest"] = now
+    finally:
+        sub.close()
+
+
+async def _skin_from_cookie(request: Request, call_next):
+    skin = request.cookies.get("skin", DEFAULT_SKIN)
+    request.state.skin = skin if skin in ALLOWED_SKINS else DEFAULT_SKIN
+    return await call_next(request)
+
+
+def _add_session_cookies(app: FastAPI, sessions: SessionManager) -> None:
+    @app.middleware("http")
+    async def ensure_session_cookie(request: Request, call_next):
+        if _sessionless(request.url.path):
+            return await call_next(request)
+        # Only a cookie this server signed names a session; anything else
+        # (none, garbage, forged, an earlier key's) is reissued, and the
+        # request is marked as having presented nothing — a session may
+        # not be opened on it (see context.get_player).
+        secret = await sessions.secret()
+        sid = verify_cookie(request.cookies.get(SESSION_COOKIE), secret)
+        fresh = sid is None
+        if fresh:
+            sid, cookie = issue_cookie(secret)
+        request.state.sid = sid
+        request.state.fresh_sid = fresh
+        response = await call_next(request)
+        if fresh:
+            # Secure when the visitor reached us over HTTPS (hosted embed
+            # deployments sit behind a TLS-terminating proxy); plain-HTTP
+            # LAN/appliance use keeps working without it.
+            response.set_cookie(
+                SESSION_COOKIE, cookie,
+                max_age=365 * 24 * 3600, httponly=True, samesite="lax",
+                secure=is_https(request),
+            )
+        return response
+
+
+def _not_found_page(templates):
+    async def _not_found(request: Request, exc):
+        """A browser gets the site's own 404 page; anything else keeps the JSON.
+
+        The archive's day URLs are the one place a typo (or a crawler) lands on
+        a path built from free text, and the old behaviour was a 200 titled
+        with whatever was typed."""
+        wants_html = "text/html" in request.headers.get("accept", "")
+        detail = getattr(exc, "detail", None)
+        if not wants_html:
+            return JSONResponse({"detail": detail or "Not Found"}, status_code=404)
+        return templates.TemplateResponse(
+            request,
+            "404.html",
+            # Not a document: no indexing, and no canonical/og:url built from
+            # the path that missed — that path is whatever a stranger typed.
+            {"detail": detail, "meta_url": absolute_url(request, "/"), "meta_noindex": True},
+            status_code=404,
+        )
+
+    return _not_found
+
+
+async def _admin_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == ADMIN_PATH or path.startswith(f"{ADMIN_PATH}/"):
+        admin_pages.admin_headers(response)
+    return response
