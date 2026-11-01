@@ -133,7 +133,7 @@ class Cacher(Service):
         except Exception:
             log.exception("cacher: unexpected error on %s", track.get("video_id"))
 
-    async def process_track(self, track: dict[str, Any]) -> None:  # noqa: C901
+    async def process_track(self, track: dict[str, Any]) -> None:
         track_id = track["id"]
         video_id = track["video_id"]
 
@@ -144,47 +144,11 @@ class Cacher(Service):
             return
 
         if self.embed:
-            # Relayed tracks arrive with metadata already attached — nothing
-            # to look up, and no dependency on YouTube answering this host.
-            if current.get("title"):
-                await self.db.set_cache_status(track_id, "ready")
-                self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
-                return
-            meta = await metadata.fetch_oembed(video_id, self._http)
-            if meta is None:
-                # Could be a deleted video or a transient throttle; stay
-                # pending so the sweep retries, fail only after max_retries.
-                attempts = self._embed_attempts.get(track_id, 0) + 1
-                self._embed_attempts[track_id] = attempts
-                if attempts < self.config.max_retries:
-                    log.warning(
-                        "oEmbed failed for %s (attempt %d/%d); will retry",
-                        video_id, attempts, self.config.max_retries,
-                    )
-                    return
-                self._embed_attempts.pop(track_id, None)
-                await self.db.set_cache_status(track_id, "failed")
-                self.bus.publish(TRACK_FAILED, {"track": await self.db.track_by_id(track_id)})
-                return
-            self._embed_attempts.pop(track_id, None)
-            await self.db.update_track_metadata(
-                track_id, title=meta["title"] or None, artist=meta["artist"] or None
-            )
-            await self.db.set_cache_status(track_id, "ready")
-            self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
+            await self._process_embed(track_id, video_id, current)
             return
 
         # Same song already cached under another track row? Reuse the file.
-        existing = await self.db.cached_track_for_video(video_id)
-        if existing and existing["id"] != track_id and Path(existing["cache_path"]).exists():
-            await self.db.update_track_metadata(
-                track_id,
-                title=existing["title"],
-                artist=existing["artist"],
-                duration=existing["duration"],
-            )
-            await self.db.set_cache_status(track_id, "ready", existing["cache_path"])
-            self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
+        if await self._reuse_cached_file(track_id, video_id):
             return
 
         for attempt in range(self.config.max_retries):
@@ -197,7 +161,7 @@ class Cacher(Service):
                     duration=info.get("duration"),
                 )
                 await self.db.set_cache_status(track_id, "ready", str(info["_filepath"]))
-                self.bus.publish(TRACK_READY, {"track": await self.db.track_by_id(track_id)})
+                await self._publish(TRACK_READY, track_id)
                 await self.prune(added_bytes=int(info.get("_filesize", 0)))
                 return
             if attempt < self.config.max_retries - 1:
@@ -211,7 +175,59 @@ class Cacher(Service):
                 track_id, title=meta["title"] or None, artist=meta["artist"] or None
             )
         await self.db.set_cache_status(track_id, "failed")
-        self.bus.publish(TRACK_FAILED, {"track": await self.db.track_by_id(track_id)})
+        await self._publish(TRACK_FAILED, track_id)
+
+    async def _publish(self, topic: str, track_id: int) -> None:
+        self.bus.publish(topic, {"track": await self.db.track_by_id(track_id)})
+
+    async def _process_embed(
+        self, track_id: int, video_id: str, current: dict[str, Any]
+    ) -> None:
+        """Embed mode: no audio file, only the song's title and artist."""
+        # Relayed tracks arrive with metadata already attached — nothing
+        # to look up, and no dependency on YouTube answering this host.
+        if current.get("title"):
+            await self.db.set_cache_status(track_id, "ready")
+            await self._publish(TRACK_READY, track_id)
+            return
+        meta = await metadata.fetch_oembed(video_id, self._http)
+        if meta is None:
+            # Could be a deleted video or a transient throttle; stay
+            # pending so the sweep retries, fail only after max_retries.
+            attempts = self._embed_attempts.get(track_id, 0) + 1
+            self._embed_attempts[track_id] = attempts
+            if attempts < self.config.max_retries:
+                log.warning(
+                    "oEmbed failed for %s (attempt %d/%d); will retry",
+                    video_id, attempts, self.config.max_retries,
+                )
+                return
+            self._embed_attempts.pop(track_id, None)
+            await self.db.set_cache_status(track_id, "failed")
+            await self._publish(TRACK_FAILED, track_id)
+            return
+        self._embed_attempts.pop(track_id, None)
+        await self.db.update_track_metadata(
+            track_id, title=meta["title"] or None, artist=meta["artist"] or None
+        )
+        await self.db.set_cache_status(track_id, "ready")
+        await self._publish(TRACK_READY, track_id)
+
+    async def _reuse_cached_file(self, track_id: int, video_id: str) -> bool:
+        """Point this track at another row's cached file of the same video, if one exists."""
+        existing = await self.db.cached_track_for_video(video_id)
+        if not (existing and existing["id"] != track_id
+                and Path(existing["cache_path"]).exists()):
+            return False
+        await self.db.update_track_metadata(
+            track_id,
+            title=existing["title"],
+            artist=existing["artist"],
+            duration=existing["duration"],
+        )
+        await self.db.set_cache_status(track_id, "ready", existing["cache_path"])
+        await self._publish(TRACK_READY, track_id)
+        return True
 
     async def _download(self, url: str, video_id: str) -> dict[str, Any] | None:
         """Run yt-dlp; return its info JSON (plus _filepath) or None on failure."""
