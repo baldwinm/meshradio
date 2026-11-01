@@ -63,8 +63,8 @@ target-version = "py311"
 [tool.ruff.lint]
 # Errors and pyflakes, bugbear's likely bugs, modern syntax for 3.11+, the
 # simplifications that read better, sorted imports, and a cap on function
-# complexity (C901). Functions already over the cap carry `# noqa: C901`; that
-# list is the refactor backlog, so shrink it rather than grow it.
+# complexity (C901). No function is exempt from the cap: split one that grows
+# past it rather than adding `# noqa: C901` (tests/test_lint_rules.py checks).
 select = ["E", "F", "W", "B", "UP", "SIM", "I", "C90"]
 
 [tool.ruff.lint.mccabe]
