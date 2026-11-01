@@ -58,9 +58,11 @@ async def broadcast_state(reg: SpeakerRegistry, p: PlayerService) -> None:
         await asyncio.gather(*(push(conn) for conn in clients))
 
 
-@router.websocket("/ws")
-async def ws(websocket: WebSocket):  # noqa: C901
-    ctx = ctx_of(websocket)
+async def _resolve_scope(websocket: WebSocket, ctx):
+    """The speakers, player, bus and topics this socket serves, or None if refused.
+
+    A refused handshake is closed here, before accept.
+    """
     if ctx.sessions is not None:
         # Per-visitor session: this browser's own player/bus/speakers. The
         # page that opens this socket always carries the cookie (the HTTP
@@ -72,15 +74,44 @@ async def ws(websocket: WebSocket):  # noqa: C901
             # Close before accept: uvicorn turns that into a 403 (see
             # server.OriginGuard._deny_websocket for why not a denial body).
             await websocket.close(code=1008)
-            return
+            return None
         session = await ctx.sessions.get(sid)
-        reg, p = session.speakers, session.player
         topics: tuple[str, ...] = (PLAYER_STATE,)
-        bus = session.bus
-    else:
-        reg, p = ctx.speakers, ctx.player
-        topics = (PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
-        bus = ctx.bus
+        return session.speakers, session.player, session.bus, topics
+    return ctx.speakers, ctx.player, ctx.bus, (PLAYER_STATE, OUTPUT_CHANGED, POWER_STATE)
+
+
+async def _recv_claims(websocket: WebSocket, reg, p) -> None:
+    last_claim = float("-inf")
+    while True:
+        msg = await websocket.receive_text()
+        # A claim from the page that already has the role changes nothing,
+        # and one page may only re-elect so often: each claim broadcasts
+        # to every socket in the registry.
+        if msg != "claim" or reg.is_speaker(websocket):
+            continue
+        now = time.monotonic()
+        if now - last_claim < CLAIM_INTERVAL_S:
+            continue
+        last_claim = now
+        reg.claim(websocket)
+        await broadcast_state(reg, p)
+
+
+async def _send_events(websocket: WebSocket, sub, reg) -> None:
+    async for topic, payload in sub:
+        if topic == PLAYER_STATE:
+            payload = {**payload, "speaker": reg.is_speaker(websocket)}
+        await websocket.send_json({"topic": topic, "data": payload})
+
+
+@router.websocket("/ws")
+async def ws(websocket: WebSocket):
+    ctx = ctx_of(websocket)
+    scope = await _resolve_scope(websocket, ctx)
+    if scope is None:
+        return
+    reg, p, bus, topics = scope
     # The slot is taken before the handshake completes so two handshakes
     # can't both squeeze past the same last place; a refused one is closed
     # before accept, like a bad origin or cookie, with a code that says why.
@@ -90,34 +121,11 @@ async def ws(websocket: WebSocket):  # noqa: C901
     ctx.open_sockets += 1
     sub = None
     tasks: list[asyncio.Task] = []
-    last_claim = float("-inf")
-
-    async def recv_loop():
-        nonlocal last_claim
-        while True:
-            msg = await websocket.receive_text()
-            # A claim from the page that already has the role changes nothing,
-            # and one page may only re-elect so often: each claim broadcasts
-            # to every socket in the registry.
-            if msg != "claim" or reg.is_speaker(websocket):
-                continue
-            now = time.monotonic()
-            if now - last_claim < CLAIM_INTERVAL_S:
-                continue
-            last_claim = now
-            reg.claim(websocket)
-            await broadcast_state(reg, p)
-
-    async def send_loop():
-        async for topic, payload in sub:
-            if topic == PLAYER_STATE:
-                payload = {**payload, "speaker": reg.is_speaker(websocket)}
-            await websocket.send_json({"topic": topic, "data": payload})
-
     try:
         await websocket.accept()
         sub = bus.subscribe(*topics)
-        tasks = [asyncio.create_task(recv_loop()), asyncio.create_task(send_loop())]
+        tasks = [asyncio.create_task(_recv_claims(websocket, reg, p)),
+                 asyncio.create_task(_send_events(websocket, sub, reg))]
         await broadcast_state(reg, p)  # joining may reassign the speaker
         await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
     except (WebSocketDisconnect, asyncio.CancelledError):
