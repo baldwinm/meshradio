@@ -35,14 +35,77 @@ async def log_page(request: Request, kind: str = "all", before: int | None = Non
                   error=error)
 
 
-UNDOABLE = {
-    "rename_theme", "remove_track", "edit_track", "merge_artists", "fix_artists",
-    "change_setting",
+class _UndoFailed(Exception):
+    """An undo that can't go ahead; the message is shown on the log page."""
+
+
+async def _undo_rename_theme(request: Request, entry, data) -> str | None:
+    db = ctx_of(request).db
+    theme = await db.theme_by_id(data["theme_id"])
+    if theme is None:
+        raise _UndoFailed("That day's theme no longer exists.")
+    try:
+        await db.rename_theme(theme["id"], data["title"])
+    except sqlite3.IntegrityError:
+        raise _UndoFailed("That day already has a theme with that title.") from None
+    return data["title"]
+
+
+async def _undo_remove_track(request: Request, entry, data) -> str | None:
+    outcome, label = await put_back(request, data["date"], data["video_id"])
+    if outcome == "gone":
+        raise _UndoFailed("That removal was already lifted.")
+    return label if outcome == "restored" else f"{label} (allowed back)"
+
+
+async def _undo_edit_track(request: Request, entry, data) -> str | None:
+    if not await ctx_of(request).db.revert_track_edit(
+        data["track_id"], data["title"], data["artist"], data["edited_at"]
+    ):
+        raise _UndoFailed("That song is no longer in the archive.")
+    return entry["before"]
+
+
+async def _undo_fix_artists(request: Request, entry, data) -> str | None:
+    db = ctx_of(request).db
+    for row in data["rows"]:
+        await db.revert_track_edit(
+            row["id"], row["title"], row["artist"], row["meta_edited_at"]
+        )
+    return entry["before"]
+
+
+async def _undo_merge_artists(request: Request, entry, data) -> str | None:
+    await ctx_of(request).db.unmerge_artists(
+        data["spellings"], data["canonical"], [tuple(c) for c in data["changed"]]
+    )
+    return entry["before"]
+
+
+async def _undo_change_setting(request: Request, entry, data) -> str | None:
+    setting = overrides_mod.BY_KEY.get(data["key"])
+    if setting is None or settings_of(request).config is None:
+        raise _UndoFailed("That setting can't be changed here any more.")
+    error = await set_override(request, setting, data["override"], data.get("had", True))
+    if error:
+        raise _UndoFailed(error)
+    return entry["before"]
+
+
+# How to reverse each undoable action; each returns the value the undo leaves.
+_UNDOERS = {
+    "rename_theme": _undo_rename_theme,
+    "remove_track": _undo_remove_track,
+    "edit_track": _undo_edit_track,
+    "fix_artists": _undo_fix_artists,
+    "merge_artists": _undo_merge_artists,
+    "change_setting": _undo_change_setting,
 }
+UNDOABLE = set(_UNDOERS)
 
 
 @router.post("/log/{entry_id}/undo")
-async def undo(request: Request, entry_id: int):  # noqa: C901
+async def undo(request: Request, entry_id: int):
     _token, form = await checked_form(request)
     ctx = ctx_of(request)
     db = ctx.db
@@ -54,48 +117,11 @@ async def undo(request: Request, entry_id: int):  # noqa: C901
         return go(f"{ADMIN_PATH}/log", error="That change can't be undone.")
     if entry["undone_by"]:
         return go(f"{ADMIN_PATH}/log", error="That change was already undone.")
-    data = json.loads(entry["undo"])
     action = entry["action"]
-    after = None
-    if action == "rename_theme":
-        theme = await db.theme_by_id(data["theme_id"])
-        if theme is None:
-            return go(f"{ADMIN_PATH}/log", error="That day's theme no longer exists.")
-        try:
-            await db.rename_theme(theme["id"], data["title"])
-        except sqlite3.IntegrityError:
-            return go(f"{ADMIN_PATH}/log", error="That day already has a theme with that title.")
-        after = data["title"]
-    elif action == "remove_track":
-        outcome, label = await put_back(request, data["date"], data["video_id"])
-        if outcome == "gone":
-            return go(f"{ADMIN_PATH}/log", error="That removal was already lifted.")
-        after = label if outcome == "restored" else f"{label} (allowed back)"
-    elif action == "edit_track":
-        if not await db.revert_track_edit(
-            data["track_id"], data["title"], data["artist"], data["edited_at"]
-        ):
-            return go(f"{ADMIN_PATH}/log", error="That song is no longer in the archive.")
-        after = entry["before"]
-    elif action == "fix_artists":
-        for row in data["rows"]:
-            await db.revert_track_edit(
-                row["id"], row["title"], row["artist"], row["meta_edited_at"]
-            )
-        after = entry["before"]
-    elif action == "merge_artists":
-        await db.unmerge_artists(
-            data["spellings"], data["canonical"], [tuple(c) for c in data["changed"]]
-        )
-        after = entry["before"]
-    elif action == "change_setting":
-        setting = overrides_mod.BY_KEY.get(data["key"])
-        if setting is None or settings_of(request).config is None:
-            return go(f"{ADMIN_PATH}/log", error="That setting can't be changed here any more.")
-        error = await set_override(request, setting, data["override"], data.get("had", True))
-        if error:
-            return go(f"{ADMIN_PATH}/log", error=error)
-        after = entry["before"]
+    try:
+        after = await _UNDOERS[action](request, entry, json.loads(entry["undo"]))
+    except _UndoFailed as exc:
+        return go(f"{ADMIN_PATH}/log", error=str(exc))
     new_id = await db.log_admin(
         "undo", ip=client_host(request), target=entry["target"],
         before=f"{ACTION_LABELS.get(action, action)}: {entry['after'] or ''}", after=after,
