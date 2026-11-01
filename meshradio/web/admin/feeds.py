@@ -24,7 +24,7 @@ FEED_STALE_FACTOR = 3
 
 # The Pi pushes every two minutes even with nothing new ([relay] interval_s),
 # so a receiver that hasn't heard from it in three pushes reads as quiet, and
-# past the uptime check's limit (MAX_RELAY_AGE_S in uptime.yml) as stopped.
+# after half an hour as stopped.
 RELAY_QUIET_S = 3 * 120
 RELAY_STOPPED_S = 1800
 

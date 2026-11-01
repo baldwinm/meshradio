@@ -346,12 +346,22 @@ else's music. The [live instance](https://meshradio.co) is deployed
 this way on Render — see [render.yaml](render.yaml) and
 [meshradio.render.toml](meshradio.render.toml).
 
-**The relay problem.** Cloudflare (and YouTube) challenge datacenter IPs, so
-a hosted instance can't poll CoreScope or fetch YouTube itself. The fix is a
-**relay**: a home node with residential internet (a Raspberry Pi under
-systemd) polls the channel normally, then pushes new messages — plus the track
-metadata it already resolved — to the hosted instance's authenticated
-`POST /api/ingest` endpoint. Turn it on with a `[relay]` block:
+**Where the hosted site's songs come from.** It polls both analyzer feeds
+itself (`[corescope]` and `[comchan]` in
+[meshradio.render.toml](meshradio.render.toml)). Titles come from YouTube
+oEmbed, lengths from each video's watch page (or the visitor's browser), and
+for YouTube's auto-generated "art tracks", whose channel is a stand-in like
+"Release - Topic", the artists credited in the description ("Provided to
+YouTube by … · Artist"), the same block yt-dlp reads on the Pi.
+
+**The optional relay.** Early on, Cloudflare and YouTube refused datacenter IPs,
+so the hosted site was fed by a **relay**: a home node with residential internet
+(a Raspberry Pi under systemd) polls the channel normally, then pushes new
+messages, plus the track metadata it already resolved, to the hosted instance's
+authenticated `POST /api/ingest` endpoint. The live site no longer needs it and
+runs without one (no `MESHRADIO_INGEST_TOKEN`, so the endpoint answers 404). The
+code stays, so a host that can't reach the feeds can still be fed. Turn it on
+with an ingest token on the host and a `[relay]` block on the home node:
 
 ```toml
 [relay]
@@ -368,14 +378,13 @@ and the relay stays off — the radio itself keeps running.
 The relay is self-healing: each push reports the receiver's track count, and
 when it drops below the home node's (e.g. a fresh host with an empty disk) the
 pusher resets its cursor and re-backfills the whole channel automatically. This
-is now a safety net rather than the norm — the hosted instance keeps its
+is a safety net rather than the norm: the hosted instance keeps its
 archive on a persistent disk (`disk:` in [render.yaml](render.yaml)), so
 history survives deploys, restarts, and spin-downs on its own, and the host
-also polls CoreScope directly. The relay going down
-no longer costs the archive. `/healthz` exposes liveness plus ingest freshness
+polls the analyzers directly. `/healthz` exposes liveness plus ingest freshness
 (Render's health check hits it; a stale `ingest_age_s` means every ingest
-source stopped), how long since the relay last pushed (`relay_age_s`, since
-the host's own polling hides a quiet Pi), and how many unexpected failures
+source stopped), how long since a relay last pushed (`relay_age_s`, null
+without one), and how many unexpected failures
 the last hour saw (`errors_1h`: crashed loops, failed background tasks and
 requests that raised, with `error_sources` naming where; the log has the
 tracebacks).
@@ -406,8 +415,8 @@ The Pi can keep itself up to date: once CI passes on `main`, a timer
 comments there say how to install it) pulls the new commit, reinstalls the
 package, restarts the service and checks `/healthz`, rolling back to the
 previous commit if the radio doesn't come up healthy. Each run leaves a
-report that **Admin → Overview → Updates** shows (on the Pi, and on the
-hosted site, which the Pi relays it to): the version and commit each side
+report that **Admin → Overview → Updates** shows (on the Pi, and on a
+hosted site that the Pi relays to): the version and commit each side
 runs, when the updater last checked, and what happened. A Pi briefly on a
 different commit from the site is normal right after a merge (the site
 redeploys on Render, the Pi checks every ten minutes); half an hour out of
@@ -421,10 +430,9 @@ meshradio`.
 GitHub also runs CodeQL security analysis on every pull request and weekly,
 merges Dependabot's non-major updates once CI passes, and checks
 `https://meshradio.co/healthz` every ten minutes, opening an issue labelled
-`uptime` when the site is down, has stopped ingesting, hasn't heard from the
-Pi relay in half an hour, logged more than two errors in the last hour, or
-hears from the Pi that its auto-updater is stuck or hasn't run in half an hour,
-and closing it on recovery. The issue is assigned to `baldwinm` (or the
+`uptime` when the site is down, has stopped ingesting, or logged more than
+two errors in the last hour, and closing it on recovery. The Pi isn't part of
+the check: its own admin page shows its auto-updater. The issue is assigned to `baldwinm` (or the
 `UPTIME_ASSIGNEE` repository variable), so GitHub Mobile sends a push
 notification.
 
@@ -695,7 +703,7 @@ CI passes ([release-tag.yml](.github/workflows/release-tag.yml)), so
 | Player: live policy, queue, archive replay, quiet hours | ✅ working, tested |
 | Web player (browser audio, radio-station mode, EQ/analyzer) | ✅ working, tested |
 | **Embed mode + per-visitor sessions (public hosting)** | ✅ working, deployed on Render |
-| **Relay (home node → hosted instance) + auto-backfill** | ✅ working, running on the Pi |
+| **Relay (home node → hosted instance) + auto-backfill** | ✅ working, optional (the live site polls the feeds itself) |
 | **Supervised runtime, CI gate, `/healthz`** | ✅ working |
 | Archive browsing: calendar, all-themes list, search, stats, member pages, Atom feed, link previews | ✅ working, tested |
 | DB snapshots + restore, `--set-theme` / `--delete-track` operator fixes | ✅ working, tested |

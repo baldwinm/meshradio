@@ -34,10 +34,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      # Shared secret for POST /api/ingest (the Pi relay pushes channel
-      # history here). Copy the generated value into the Pi's [relay] token.
-      - key: MESHRADIO_INGEST_TOKEN
-        generateValue: true
+      # No MESHRADIO_INGEST_TOKEN: the site polls both analyzers itself, so
+      # it takes no relay pushes and POST /api/ingest answers 404. To take
+      # pushes from a home Pi again, set one in the dashboard and copy it
+      # into the Pi's [relay] token. (Removing it from here doesn't delete
+      # the dashboard's copy; that is done by hand.)
       # The admin page (/admin) is off until MESHRADIO_ADMIN_PASSWORD_HASH is
       # set in the dashboard to what `meshradio --hash-admin-password` prints
       # (and, for two-step sign-in, MESHRADIO_ADMIN_TOTP_SECRET). Not declared
