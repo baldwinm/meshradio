@@ -11,6 +11,7 @@ import re
 import sqlite3
 import time
 from argparse import Namespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -790,3 +791,33 @@ def test_saved_settings_apply_at_startup_and_bad_ones_are_skipped():
     assert applied == {"player.max_queue": 300}
     assert config.player.max_queue == 300 and config.player.volume == 70
     assert config.web.rate_limit is True
+
+
+def test_feed_row_builders_cover_every_state():
+    poll = SimpleNamespace(enabled=True, base_url="https://scope.example", poll_interval_s=60)
+    now = 10_000.0
+    off = admin_feeds.poller_row("comchan", "comchan", None, {}, now)
+    assert (off["state"], off["status"], off["probe"]) == ("off", "Off", False)
+    for info, expected in (({}, ("dim", "Waiting for its first poll")),
+                           ({"status": "error"}, ("bad", "No answer")),
+                           ({"status": "ok", "last_ok": now - 10}, ("ok", "OK")),
+                           ({"status": "ok", "last_ok": now - 181}, ("warn", "Quiet"))):
+        row = admin_feeds.poller_row("corescope", "CoreScope", poll, info, now)
+        assert (row["state"], row["status"]) == expected
+        assert row["detail"] == "https://scope.example" and row["probe"] is True
+
+    assert admin_feeds.relay_in_row({}, now)["status"] == "No push received since start"
+
+    assert admin_feeds.relay_push_row({}, "u")["status"] == "Not pushed yet"
+    ok = admin_feeds.relay_push_row({"at": 5, "ok": True, "remote_total": 42}, "u")
+    assert (ok["state"], ok["status"], ok["last_ok"], ok["resend"]) == (
+        "ok", "OK · public site has 42 songs", 5, True)
+    bad = admin_feeds.relay_push_row({"at": 5, "ok": False, "error": "Timeout"}, "u")
+    assert (bad["state"], bad["status"], bad["last_ok"]) == ("bad", "Failed (Timeout)", None)
+
+    up = admin_feeds.mesh_row("", {"status": "connected", "at": 7})
+    assert (up["state"], up["status"], up["detail"], up["at"]) == (
+        "ok", "Connected", "auto-detected", 7)
+    down = admin_feeds.mesh_row("/dev/ttyUSB0", {})
+    assert (down["state"], down["status"], down["detail"]) == (
+        "bad", "Not connected", "/dev/ttyUSB0")

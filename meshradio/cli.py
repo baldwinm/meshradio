@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from . import backup as backup_mod
 from .app import run
-from .config import ConfigError, load_config, validate_config
+from .config import Config, ConfigError, load_config, validate_config
 from .db import MAX_TITLE, VIDEO_ID_RE, Database, clean_text
 from .ingest import parse
 from .ingest.corescope import format_probe, probe
@@ -27,7 +27,22 @@ from .web.admin_auth import hash_password, new_totp_secret, otpauth_uri
 log = logging.getLogger("meshradio")
 
 
-def main() -> None:  # noqa: C901
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    # Neither needs a config: they print a value for the operator to set.
+    _run_configless_command(args)
+    _setup_logging(args.verbose)
+    config = _load_cli_config(args)
+    _run_one_shot_command(parser, config, args)
+
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(run(config, demo=args.demo))
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """The command line's flags."""
     parser = argparse.ArgumentParser(prog="meshradio", description="MeshRadio appliance")
     parser.add_argument("--config", help="path to config.toml")
     parser.add_argument("--profile", choices=("dev", "pi4", "lite"),
@@ -74,9 +89,11 @@ def main() -> None:  # noqa: C901
                         help="print a new secret for two-step admin sign-in, to set as "
                              "MESHRADIO_ADMIN_TOTP_SECRET and add to an authenticator app")
     parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
+    return parser
 
-    # Neither needs a config: they print a value for the operator to set.
+
+def _run_configless_command(args: argparse.Namespace) -> None:
+    """Handle the flags that print a value and exit without reading a config."""
     if args.hash_admin_password:
         raise SystemExit(_run_hash_admin_password())
     if args.new_totp_secret:
@@ -85,17 +102,21 @@ def main() -> None:  # noqa: C901
         print(f"authenticator link: {otpauth_uri(secret)}")
         raise SystemExit(0)
 
+
+def _setup_logging(verbose: bool) -> None:
     # Mesh sender names and theme titles carry emoji; keep Windows dev
     # consoles (cp1252) from raising on every log line that includes one.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         stream=sys.stdout,
     )
     logging.getLogger("aiosqlite").setLevel(logging.INFO)
 
+
+def _load_cli_config(args: argparse.Namespace) -> Config:
     # A value the radio can't run on stops it here, with every offending key
     # named, rather than as a loop crashing under the supervisor forever.
     try:
@@ -108,7 +129,13 @@ def main() -> None:  # noqa: C901
     except ConfigError as exc:
         print(f"meshradio: {exc}", file=sys.stderr)
         raise SystemExit(2) from None
+    return config
 
+
+def _run_one_shot_command(
+    parser: argparse.ArgumentParser, config: Config, args: argparse.Namespace
+) -> None:
+    """Handle the maintenance flags that act on the archive and exit."""
     if args.list_backups or args.restore_backup is not None:
         raise SystemExit(_run_backup_cli(config, args))
 
@@ -122,9 +149,6 @@ def main() -> None:  # noqa: C901
         parser.error("--track-date only applies with --delete-track")
     if args.probe_feed is not None:
         raise SystemExit(asyncio.run(_run_probe_feed(config, args)))
-
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run(config, demo=args.demo))
 
 
 def _run_hash_admin_password() -> int:

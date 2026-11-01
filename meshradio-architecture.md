@@ -1,10 +1,10 @@
 # MeshRadio — Architecture Document
 
 *A standalone internet radio that plays the Austin MeshCore `#music` channel.*
-*Status: v0.15 — the core software is built, tested (587 tests), and running:
+*Status: v0.15 — the core software is built, tested (589 tests), and running:
 ingest, cache-first player, browser web player, YouTube-Mix radio mode, a
 browsable archive site (calendar, themes, search, stats, member and artist pages, weekly recap, feeds),
-a signed-in admin page (§9), and a public embed-mode deployment fed by a home-node relay (§14). The hardware
+a signed-in admin page (§9), and a public embed-mode deployment that polls the feeds itself, with an optional home-node relay (§14). The hardware
 kit (§2) remains design-locked and not yet built; module status is tracked in
 the [README](README.md). This document is the full design; sections marked below
 note where the implementation has diverged from or gone beyond the original plan
@@ -640,8 +640,9 @@ are caught up from the furthest song they still hold.
   weekly; findings show under Security → Code scanning. The test job runs the suite on Python 3.11, 3.12 and 3.13,
   and a lint job runs `ruff check` and `mypy` (configured in `pyproject.toml`),
   so a style or type regression holds a deploy the way a red suite does. Ruff
-  also caps function complexity (mccabe, `max-complexity = 10`); functions
-  already over it carry `# noqa: C901`, and that list is the refactor backlog. The
+  also caps function complexity (mccabe, `max-complexity = 10`) with no
+  exemptions: a test fails if a `# noqa: C901` comes back, so a function that
+  grows past the cap is split rather than waved through. The
   lint job also runs `scripts/check_docs.py`, which fails when the test count
   in this document's status line stops matching the suite (`--fix` rewrites
   it). A third job, `browser`, loads every public page on both an appliance and

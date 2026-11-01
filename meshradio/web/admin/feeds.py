@@ -29,72 +29,84 @@ RELAY_QUIET_S = 3 * 120
 RELAY_STOPPED_S = 1800
 
 
-def feed_rows(request: Request, now: float) -> list[dict[str, Any]]:  # noqa: C901
+def poller_row(name: str, label: str, cfg: Any, info: dict[str, Any],
+               now: float) -> dict[str, Any]:
+    """A feed this server polls itself (CoreScope, comchan)."""
+    if cfg is None or not cfg.enabled or not cfg.base_url:
+        return {"name": name, "label": label, "detail": "", "state": "off",
+                "status": "Off", "at": None, "last_ok": None, "probe": False}
+    last_ok = info.get("last_ok")
+    stale_after = cfg.poll_interval_s * FEED_STALE_FACTOR
+    if info.get("status") == "error":
+        state, status = "bad", "No answer"
+    elif info.get("status") == "ok" and last_ok and now - last_ok > stale_after:
+        state, status = "warn", "Quiet"
+    elif info.get("status") == "ok":
+        state, status = "ok", "OK"
+    else:
+        state, status = "dim", "Waiting for its first poll"
+    return {"name": name, "label": label, "detail": cfg.base_url, "state": state,
+            "status": status, "at": info.get("at"), "last_ok": last_ok, "probe": True}
+
+
+def relay_in_row(info: dict[str, Any], now: float) -> dict[str, Any]:
+    """Pushes received here from the Pi."""
+    at = info.get("at")
+    if not at:
+        state, status = "dim", "No push received since start"
+    elif now - at > RELAY_STOPPED_S:
+        state, status = "bad", f"No push for {int((now - at) // 60)} min"
+    elif now - at > RELAY_QUIET_S:
+        state, status = "warn", "Quiet"
+    else:
+        state, status = "ok", "OK"
+    return {"name": "relay", "label": "Relay from the Pi", "detail": "received here",
+            "state": state, "status": status, "at": at, "last_ok": at, "probe": False}
+
+
+def relay_push_row(status: dict[str, Any], push_url: str) -> dict[str, Any]:
+    """This radio's own pushes to the public site."""
+    if not status:
+        state, text = "dim", "Not pushed yet"
+    elif status.get("ok"):
+        state, text = "ok", f"OK · public site has {status.get('remote_total', '?')} songs"
+    else:
+        state, text = "bad", f"Failed ({status.get('error')})"
+    return {"name": "relay-push", "label": "Relay to the public site",
+            "detail": push_url, "state": state, "status": text, "at": status.get("at"),
+            "last_ok": status.get("at") if status.get("ok") else None,
+            "probe": False, "resend": True}
+
+
+def mesh_row(serial_port: str, info: dict[str, Any]) -> dict[str, Any]:
+    """The locally attached mesh node."""
+    connected = info.get("status") == "connected"
+    return {"name": "mesh", "label": "Mesh node", "detail": serial_port or "auto-detected",
+            "state": "ok" if connected else "bad",
+            "status": "Connected" if connected else "Not connected",
+            "at": info.get("at"), "last_ok": None, "probe": False}
+
+
+def feed_rows(request: Request, now: float) -> list[dict[str, Any]]:
     """One row per ingest path this server runs, with a plain-words status
     and a state for its chip: ok, warn, bad, or off."""
     ctx = ctx_of(request)
     settings = settings_of(request)
     config = settings.config
     seen = ctx.health.get("feeds", {})
-    rows: list[dict[str, Any]] = []
-
-    def poller(name: str, label: str, cfg: Any) -> None:
-        if cfg is None or not cfg.enabled or not cfg.base_url:
-            rows.append({"name": name, "label": label, "detail": "", "state": "off",
-                         "status": "Off", "at": None, "last_ok": None, "probe": False})
-            return
-        info = seen.get(name, {})
-        last_ok = info.get("last_ok")
-        stale_after = cfg.poll_interval_s * FEED_STALE_FACTOR
-        if info.get("status") == "error":
-            state, status = "bad", "No answer"
-        elif info.get("status") == "ok" and last_ok and now - last_ok > stale_after:
-            state, status = "warn", "Quiet"
-        elif info.get("status") == "ok":
-            state, status = "ok", "OK"
-        else:
-            state, status = "dim", "Waiting for its first poll"
-        rows.append({"name": name, "label": label, "detail": cfg.base_url, "state": state,
-                     "status": status, "at": info.get("at"), "last_ok": last_ok,
-                     "probe": True})
-
-    poller("corescope", "CoreScope", config.corescope if config else None)
-    poller("comchan", "comchan (backup)", config.comchan if config else None)
-
+    rows = [
+        poller_row("corescope", "CoreScope", config.corescope if config else None,
+                   seen.get("corescope", {}), now),
+        poller_row("comchan", "comchan (backup)", config.comchan if config else None,
+                   seen.get("comchan", {}), now),
+    ]
     if ctx.ingest_token:
-        info = seen.get("relay", {})
-        at = info.get("at")
-        if not at:
-            state, status = "dim", "No push received since start"
-        elif now - at > RELAY_STOPPED_S:
-            state, status = "bad", f"No push for {int((now - at) // 60)} min"
-        elif now - at > RELAY_QUIET_S:
-            state, status = "warn", "Quiet"
-        else:
-            state, status = "ok", "OK"
-        rows.append({"name": "relay", "label": "Relay from the Pi", "detail": "received here",
-                     "state": state, "status": status,
-                     "at": at, "last_ok": at, "probe": False})
+        rows.append(relay_in_row(seen.get("relay", {}), now))
     if settings.relay is not None:
-        status = settings.relay.status
-        if not status:
-            state, text = "dim", "Not pushed yet"
-        elif status.get("ok"):
-            state, text = "ok", f"OK · public site has {status.get('remote_total', '?')} songs"
-        else:
-            state, text = "bad", f"Failed ({status.get('error')})"
-        rows.append({"name": "relay-push", "label": "Relay to the public site",
-                     "detail": config.relay.push_url if config else "", "state": state,
-                     "status": text, "at": status.get("at"),
-                     "last_ok": status.get("at") if status.get("ok") else None,
-                     "probe": False, "resend": True})
+        rows.append(relay_push_row(settings.relay.status,
+                                   config.relay.push_url if config else ""))
     if config is not None and config.mesh.enabled:
-        info = seen.get("mesh", {})
-        link = info.get("status")
-        rows.append({"name": "mesh", "label": "Mesh node", "detail": config.mesh.serial_port
-                     or "auto-detected", "state": "ok" if link == "connected" else "bad",
-                     "status": "Connected" if link == "connected" else "Not connected",
-                     "at": info.get("at"), "last_ok": None, "probe": False})
+        rows.append(mesh_row(config.mesh.serial_port, seen.get("mesh", {})))
     return rows
 
 
