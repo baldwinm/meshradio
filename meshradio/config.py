@@ -291,58 +291,95 @@ def _quiet_hours_ok(spec: str) -> bool:
     return True
 
 
-def validate_config(cfg: Config) -> None:  # noqa: C901
+def validate_config(cfg: Config) -> None:
     """Raise ConfigError naming every key whose value the radio can't run on."""
+    problems = _type_problems(cfg) + _choice_problems(cfg) + _admin_problems(cfg)
+    if problems:
+        raise ConfigError("config:\n  " + "\n  ".join(problems))
+
+
+def _key(section: str, name: str) -> str:
+    return f"[{section}] {name}"
+
+
+def _type_problems(cfg: Config) -> list[str]:
+    """Keys whose value has the wrong type or is out of range."""
+    return (_int_problems(cfg) + _bool_problems(cfg) + _string_problems(cfg)
+            + _float_problems(cfg) + _string_list_problems(cfg))
+
+
+def _int_problems(cfg: Config) -> list[str]:
     problems: list[str] = []
-
-    def key(section: str, name: str) -> str:
-        return f"[{section}] {name}"
-
     for section, name, lo, hi in _INTS:
         value = getattr(getattr(cfg, section), name)
         if isinstance(value, bool) or not isinstance(value, int):
-            problems.append(f"{key(section, name)} must be an integer, got {value!r}")
+            problems.append(f"{_key(section, name)} must be an integer, got {value!r}")
         elif (lo is not None and value < lo) or (hi is not None and value > hi):
             bounds = f"at least {lo}" if hi is None else f"between {lo} and {hi}"
-            problems.append(f"{key(section, name)} must be {bounds}, got {value!r}")
+            problems.append(f"{_key(section, name)} must be {bounds}, got {value!r}")
+    return problems
+
+
+def _bool_problems(cfg: Config) -> list[str]:
+    problems: list[str] = []
     for section, name in _BOOLS:
         value = getattr(getattr(cfg, section), name)
         if not isinstance(value, bool):
-            problems.append(f"{key(section, name)} must be true or false, got {value!r}")
+            problems.append(f"{_key(section, name)} must be true or false, got {value!r}")
+    return problems
+
+
+def _string_problems(cfg: Config) -> list[str]:
+    problems: list[str] = []
     for section, name in _STRINGS:
         value = getattr(getattr(cfg, section), name)
         if not isinstance(value, str):
-            problems.append(f"{key(section, name)} must be a string, got {value!r}")
+            problems.append(f"{_key(section, name)} must be a string, got {value!r}")
+    return problems
+
+
+def _float_problems(cfg: Config) -> list[str]:
+    problems: list[str] = []
     for section, name, flo, fhi in _FLOATS:
         value = getattr(getattr(cfg, section), name)
         if isinstance(value, bool) or not isinstance(value, int | float):
-            problems.append(f"{key(section, name)} must be a number, got {value!r}")
+            problems.append(f"{_key(section, name)} must be a number, got {value!r}")
         elif not flo <= value <= fhi:
-            problems.append(f"{key(section, name)} must be between {flo:g} and {fhi:g}, "
+            problems.append(f"{_key(section, name)} must be between {flo:g} and {fhi:g}, "
                             f"got {value!r}")
+    return problems
+
+
+def _string_list_problems(cfg: Config) -> list[str]:
+    problems: list[str] = []
     for section, name in _STRING_LISTS:
         value = getattr(getattr(cfg, section), name)
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-            problems.append(f"{key(section, name)} must be a list of strings, got {value!r}")
+            problems.append(f"{_key(section, name)} must be a list of strings, got {value!r}")
+    return problems
 
+
+def _choice_problems(cfg: Config) -> list[str]:
+    """Keys whose value must be one of a known set or parse as a format."""
+    problems: list[str] = []
     if cfg.hardware_profile not in VALID_PROFILES:
         problems.append(
             f"hardware_profile must be one of {VALID_PROFILES}, got {cfg.hardware_profile!r}"
         )
     if isinstance(cfg.player.backend, str) and cfg.player.backend not in VALID_BACKENDS:
         problems.append(
-            f"{key('player', 'backend')} must be one of {VALID_BACKENDS}, "
+            f"{_key('player', 'backend')} must be one of {VALID_BACKENDS}, "
             f"got {cfg.player.backend!r}"
         )
     audio_format = cfg.cache.audio_format
     if isinstance(audio_format, str) and audio_format not in VALID_AUDIO_FORMATS:
         problems.append(
-            f"{key('cache', 'audio_format')} must be one of {VALID_AUDIO_FORMATS}, "
+            f"{_key('cache', 'audio_format')} must be one of {VALID_AUDIO_FORMATS}, "
             f"got {cfg.cache.audio_format!r}"
         )
     if isinstance(cfg.player.quiet_hours, str) and not _quiet_hours_ok(cfg.player.quiet_hours):
         problems.append(
-            f"{key('player', 'quiet_hours')} must be empty or \"HH:MM-HH:MM\", "
+            f"{_key('player', 'quiet_hours')} must be empty or \"HH:MM-HH:MM\", "
             f"got {cfg.player.quiet_hours!r}"
         )
     if isinstance(cfg.player.timezone, str):
@@ -350,8 +387,14 @@ def validate_config(cfg: Config) -> None:  # noqa: C901
             ZoneInfo(cfg.player.timezone)
         except (ZoneInfoNotFoundError, ValueError):
             problems.append(
-                f"{key('player', 'timezone')} is not a known time zone: {cfg.player.timezone!r}"
+                f"{_key('player', 'timezone')} is not a known time zone: {cfg.player.timezone!r}"
             )
+    return problems
+
+
+def _admin_problems(cfg: Config) -> list[str]:
+    """Admin sign-in secrets that could never let anyone in."""
+    problems: list[str] = []
     # A hash that can never match would leave an admin page nobody can enter;
     # say so at startup instead. (Imported here: the web package isn't
     # needed to read a config otherwise.)
@@ -360,26 +403,33 @@ def validate_config(cfg: Config) -> None:  # noqa: C901
     admin_hash = cfg.web.admin_password_hash
     if isinstance(admin_hash, str) and admin_hash and not password_hash_ok(admin_hash):
         problems.append(
-            f"{key('web', 'admin_password_hash')} is not a hash from "
+            f"{_key('web', 'admin_password_hash')} is not a hash from "
             "`meshradio --hash-admin-password`"
         )
     totp = cfg.web.admin_totp_secret
     if isinstance(totp, str) and totp and not totp_secret_ok(totp):
         problems.append(
-            f"{key('web', 'admin_totp_secret')} is not a base32 secret from "
+            f"{_key('web', 'admin_totp_secret')} is not a base32 secret from "
             "`meshradio --new-totp-secret`"
         )
     if isinstance(totp, str) and totp and not admin_hash:
         problems.append(
-            f"{key('web', 'admin_totp_secret')} is set but "
-            f"{key('web', 'admin_password_hash')} isn't; the admin page needs a password"
+            f"{_key('web', 'admin_totp_secret')} is set but "
+            f"{_key('web', 'admin_password_hash')} isn't; the admin page needs a password"
         )
-    if problems:
-        raise ConfigError("config:\n  " + "\n  ".join(problems))
+    return problems
 
 
-def load_config(path: str | Path | None = None) -> Config:  # noqa: C901
+def load_config(path: str | Path | None = None) -> Config:
     cfg = Config()
+    _apply_first_config_file(cfg, path)
+    _apply_env_overrides(cfg)
+    validate_config(cfg)
+    return cfg
+
+
+def _apply_first_config_file(cfg: Config, path: str | Path | None) -> None:
+    """Apply the first config file found: the given path, $MESHRADIO_CONFIG, or the defaults."""
     candidates = [
         path,
         os.environ.get("MESHRADIO_CONFIG"),
@@ -402,6 +452,8 @@ def load_config(path: str | Path | None = None) -> Config:  # noqa: C901
                     log.warning("config: unknown section [%s] ignored", section)
             break
 
+
+def _apply_env_overrides(cfg: Config) -> None:
     # Secrets belong in the environment, not in a committed config file: the
     # receiver's token on a host, the pusher's on the home node.
     env_token = os.environ.get("MESHRADIO_INGEST_TOKEN")
@@ -424,6 +476,3 @@ def load_config(path: str | Path | None = None) -> Config:  # noqa: C901
     env_public = os.environ.get("MESHRADIO_PUBLIC_URL")
     if env_public and env_public.strip():
         cfg.web.public_url = env_public.strip()
-
-    validate_config(cfg)
-    return cfg
