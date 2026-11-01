@@ -83,22 +83,118 @@ async def seed_demo(config, ingest: IngestService) -> None:
     log.info("demo seed complete")
 
 
-async def run(config, demo: bool = False) -> None:  # noqa: C901
-    log.info("meshradio %s starting (profile=%s)", __version__, config.hardware_profile)
-    config.data_dir.mkdir(parents=True, exist_ok=True)
-
+async def _premigration_backup(config) -> None:
     # Snapshot the DB before migrations touch it — a bad migration then has a
     # clean pre-migration copy to roll back to. No-op on first boot (no DB yet).
-    if config.backup.enabled and config.db_path.exists():
-        try:
-            dest = await asyncio.to_thread(
-                backup_mod.snapshot, config.db_path, config.backup_dir, "premigrate"
+    if not (config.backup.enabled and config.db_path.exists()):
+        return
+    try:
+        dest = await asyncio.to_thread(
+            backup_mod.snapshot, config.db_path, config.backup_dir, "premigrate"
+        )
+        if dest is not None:
+            log.info("pre-migration db backup -> %s", dest.name)
+            await asyncio.to_thread(backup_mod.rotate, config.backup_dir, config.backup.keep)
+    except Exception:
+        log.exception("pre-migration backup failed (continuing)")
+
+
+def _feed_services(config, ingest: IngestService, db: Database, bus: EventBus) -> list:
+    """The ingest paths that are switched on: the mesh radio and the analyzer feeds."""
+    services: list = []
+    if config.mesh.enabled:
+        services.append(MeshIngest(config.mesh, ingest, bus))
+    if config.corescope.enabled:
+        services.append(CoreScopePoller(config.corescope, ingest, db, bus))
+    # Backup analyzer feed, polled alongside the primary rather than failed
+    # over to: dedupe no-ops the overlap while both are up, so an outage on
+    # either one costs nothing but the other's poll interval.
+    if config.comchan.enabled and config.comchan.base_url:
+        services.append(
+            CoreScopePoller(
+                config.comchan, ingest, db, bus, name="comchan", source="comchan"
             )
-            if dest is not None:
-                log.info("pre-migration db backup -> %s", dest.name)
-                await asyncio.to_thread(backup_mod.rotate, config.backup_dir, config.backup.keep)
-        except Exception:
-            log.exception("pre-migration backup failed (continuing)")
+        )
+    return services
+
+
+def _make_relay(config, db: Database) -> RelayPusher | None:
+    if not (config.relay.push_url and config.relay.token):
+        return None
+    try:
+        return RelayPusher(config.relay, db, tz=config.player.timezone)
+    except ValueError as exc:
+        # A misconfigured relay must not take the radio down with it (or
+        # loop the systemd unit); it just doesn't push until fixed.
+        log.error("relay disabled: %s", exc)
+        return None
+
+
+def _make_concerts(config) -> tuple[Concerts | None, list]:
+    """Concert lookups and the services they need, or (None, []) without a key."""
+    # Upcoming shows for the playing artist (concerts.py), only with a
+    # Ticketmaster key. The IP database is fetched where geoip_download says
+    # so (the public site); the Pi's listeners are on its LAN, which no
+    # database knows, so they get the configured home location instead.
+    if not config.concerts.ticketmaster_key:
+        return None, []
+    home = Place(
+        label=config.concerts.home_label,
+        lat=float(config.concerts.home_lat),
+        lon=float(config.concerts.home_lon),
+        country="US",
+        home=True,
+    )
+    locator = GeoLocator(config.geoip_db, home=home)
+    concerts = Concerts(
+        ShowFinder(config.concerts.ticketmaster_key), locator,
+        radius_miles=config.concerts.radius_miles,
+    )
+    services = [GeoDbUpdater(locator)] if config.concerts.geoip_download else []
+    return concerts, services
+
+
+def _make_player_factory(config, db: Database, bus: EventBus, player: PlayerService):
+    # Public embed hosting: every visiting browser gets its own session
+    # player (queue/position/day), so nobody can pause or steal anyone
+    # else's music. The appliance modes stay one communal radio.
+    if not isinstance(player.backend, EmbedBackend):
+        return None
+
+    def player_factory(out_bus: EventBus) -> PlayerService:
+        # Not started here: the SessionManager starts the players it
+        # keeps and never starts the throwaway one a session-less page
+        # view renders from.
+        return PlayerService(
+            config.player,
+            db,
+            bus,                       # hears shared TRACK_READY events
+            backend=EmbedBackend(),
+            output_getter=lambda: "embed",
+            events_out=out_bus,        # announces state only to its session
+        )
+
+    return player_factory
+
+
+def _make_admin(config, relay, file_values, overrides) -> AdminSettings | None:
+    # The admin page exists only with a password hash configured (§9).
+    if not config.web.admin_password_hash:
+        return None
+    return AdminSettings(
+        password_hash=config.web.admin_password_hash,
+        totp_secret=config.web.admin_totp_secret,
+        config=config,
+        relay=relay,
+        file_values=file_values,
+        overrides=overrides,
+    )
+
+
+async def run(config, demo: bool = False) -> None:
+    log.info("meshradio %s starting (profile=%s)", __version__, config.hardware_profile)
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    await _premigration_backup(config)
 
     db = Database(config.db_path)
     await db.connect()
@@ -140,86 +236,22 @@ async def run(config, demo: bool = False) -> None:  # noqa: C901
     # Embed hosting never downloads, so song lengths are looked up instead.
     if isinstance(player.backend, EmbedBackend):
         services.append(DurationService(db, bus))
-    if config.mesh.enabled:
-        services.append(MeshIngest(config.mesh, ingest, bus))
-    if config.corescope.enabled:
-        services.append(CoreScopePoller(config.corescope, ingest, db, bus))
-    # Backup analyzer feed, polled alongside the primary rather than failed
-    # over to: dedupe no-ops the overlap while both are up, so an outage on
-    # either one costs nothing but the other's poll interval.
-    if config.comchan.enabled and config.comchan.base_url:
-        services.append(
-            CoreScopePoller(
-                config.comchan, ingest, db, bus, name="comchan", source="comchan"
-            )
-        )
-    relay = None
-    if config.relay.push_url and config.relay.token:
-        try:
-            relay = RelayPusher(config.relay, db, tz=config.player.timezone)
-            services.append(relay)
-        except ValueError as exc:
-            # A misconfigured relay must not take the radio down with it (or
-            # loop the systemd unit); it just doesn't push until fixed.
-            log.error("relay disabled: %s", exc)
+    services += _feed_services(config, ingest, db, bus)
+    relay = _make_relay(config, db)
+    if relay is not None:
+        services.append(relay)
     if config.backup.enabled:
         services.append(BackupService(config.backup, config.db_path, config.backup_dir))
-
-    # Upcoming shows for the playing artist (concerts.py), only with a
-    # Ticketmaster key. The IP database is fetched where geoip_download says
-    # so (the public site); the Pi's listeners are on its LAN, which no
-    # database knows, so they get the configured home location instead.
-    concerts = None
-    if config.concerts.ticketmaster_key:
-        home = Place(
-            label=config.concerts.home_label,
-            lat=float(config.concerts.home_lat),
-            lon=float(config.concerts.home_lon),
-            country="US",
-            home=True,
-        )
-        locator = GeoLocator(config.geoip_db, home=home)
-        concerts = Concerts(
-            ShowFinder(config.concerts.ticketmaster_key), locator,
-            radius_miles=config.concerts.radius_miles,
-        )
-        if config.concerts.geoip_download:
-            services.append(GeoDbUpdater(locator))
+    concerts, concert_services = _make_concerts(config)
+    services += concert_services
 
     for service in services:
         service.start()
 
     demo_task = spawn("demo-seed", seed_demo(config, ingest)) if demo else None
 
-    # Public embed hosting: every visiting browser gets its own session
-    # player (queue/position/day), so nobody can pause or steal anyone
-    # else's music. The appliance modes stay one communal radio.
-    player_factory = None
-    if isinstance(player.backend, EmbedBackend):
-        def player_factory(out_bus: EventBus) -> PlayerService:
-            # Not started here: the SessionManager starts the players it
-            # keeps and never starts the throwaway one a session-less page
-            # view renders from.
-            return PlayerService(
-                config.player,
-                db,
-                bus,                       # hears shared TRACK_READY events
-                backend=EmbedBackend(),
-                output_getter=lambda: "embed",
-                events_out=out_bus,        # announces state only to its session
-            )
-
-    # The admin page exists only with a password hash configured (§9).
-    admin = None
-    if config.web.admin_password_hash:
-        admin = AdminSettings(
-            password_hash=config.web.admin_password_hash,
-            totp_secret=config.web.admin_totp_secret,
-            config=config,
-            relay=relay,
-            file_values=file_values,
-            overrides=overrides,
-        )
+    player_factory = _make_player_factory(config, db, bus, player)
+    admin = _make_admin(config, relay, file_values, overrides)
 
     web_app = create_app(
         bus,

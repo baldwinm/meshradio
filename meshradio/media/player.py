@@ -698,7 +698,7 @@ class PlayerService(Service):
             "queue_track_ids": [t["id"] for t in self.queue],
         }
 
-    async def restore(self, snap: dict[str, Any]) -> None:  # noqa: C901
+    async def restore(self, snap: dict[str, Any]) -> None:
         """Rebuild from a snapshot. Tracks that vanished or lost readiness
         since the save are skipped; a playing position advances by the wall
         time since the save, clamped inside the track."""
@@ -719,9 +719,10 @@ class PlayerService(Service):
         current = rows.get(current_id) if current_id is not None else None
         if current and not self._is_playable(current):
             current = None
-        status = snap.get("status")
-        if current and status in ("playing", "paused"):
-            self.current = current
+        status: str = snap.get("status") or ""
+        resumed = current if current and status in ("playing", "paused") else None
+        if resumed is not None:
+            self.current = resumed
             self.status = status
         # The queue is rebuilt through _enqueue, so a snapshot from before the
         # ceiling (or a tampered one) comes back deduplicated and bounded.
@@ -729,6 +730,12 @@ class PlayerService(Service):
         for i in queue_ids:
             if i in rows and self._is_playable(rows[i]):
                 self._enqueue(dict(rows[i]))
+        await self._catch_up_restored_day(snap, wanted)
+        if resumed is not None:
+            self._restore_position(snap, resumed, status)
+        self.publish_state()
+
+    async def _catch_up_restored_day(self, snap: dict[str, Any], wanted: list) -> None:
         # Nothing was listening for new songs between the save and now (the
         # idle session was reaped, or the process restarted), so the day may
         # hold posts this player never saw. Queue them behind what it has.
@@ -745,13 +752,14 @@ class PlayerService(Service):
                 if track["id"] > seen:
                     self._enqueue(dict(track))
             self.seen_track_id = max(seen, high)
-        if current and status in ("playing", "paused"):
-            position = max(float(snap.get("position") or 0.0), 0.0)
-            if status == "playing" and snap.get("saved_at"):
-                position += max(0.0, time.time() - float(snap["saved_at"]))
-            duration = _duration(current)
-            if duration:
-                position = min(position, max(duration - 1.0, 0.0))
-            self._pos_base = position
-            self._pos_epoch = time.monotonic() if status == "playing" else None
-        self.publish_state()
+
+    def _restore_position(self, snap: dict[str, Any], current: dict[str, Any],
+                          status: str) -> None:
+        position = max(float(snap.get("position") or 0.0), 0.0)
+        if status == "playing" and snap.get("saved_at"):
+            position += max(0.0, time.time() - float(snap["saved_at"]))
+        duration = _duration(current)
+        if duration:
+            position = min(position, max(duration - 1.0, 0.0))
+        self._pos_base = position
+        self._pos_epoch = time.monotonic() if status == "playing" else None
