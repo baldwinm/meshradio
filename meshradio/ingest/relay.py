@@ -1,7 +1,8 @@
 """Relay pusher — mirror this node's channel history to a hosted instance.
 
-Cloudflare challenges datacenter IPs, so a hosted (embed-mode) deployment
-can't poll CoreScope itself. This service runs on a node with residential
+Optional. It was built because Cloudflare can challenge datacenter IPs, so a
+hosted (embed-mode) deployment might not poll CoreScope itself; the live site
+does poll both analyzers and runs without a relay. This service runs on a node with residential
 internet (the Pi at home), reconstructs channel messages from the local DB,
 and POSTs anything new to the hosted instance's authenticated
 ``/api/ingest`` endpoint. The receiver funnels them through the normal

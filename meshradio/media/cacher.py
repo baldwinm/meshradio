@@ -28,6 +28,7 @@ import httpx
 from ..bus import TRACK_DISCOVERED, TRACK_FAILED, TRACK_READY, EventBus
 from ..config import CacheConfig
 from ..db import Database
+from ..db.fields import is_placeholder_artist
 from ..net import http_client
 from ..runtime import Service, spawn
 from . import metadata
@@ -208,7 +209,8 @@ class Cacher(Service):
             return
         self._embed_attempts.pop(track_id, None)
         await self.db.update_track_metadata(
-            track_id, title=meta["title"] or None, artist=meta["artist"] or None
+            track_id, title=meta["title"] or None,
+            artist=await self._embed_artist(video_id, meta["artist"]),
         )
         await self.db.set_cache_status(track_id, "ready")
         await self._publish(TRACK_READY, track_id)
@@ -228,6 +230,17 @@ class Cacher(Service):
         await self.db.set_cache_status(track_id, "ready", existing["cache_path"])
         await self._publish(TRACK_READY, track_id)
         return True
+
+    async def _embed_artist(self, video_id: str, channel: str | None) -> str | None:
+        """The artist for an embed-mode song: oEmbed's channel name, unless
+        that is a stand-in ("Release - Topic") or missing, in which case the
+        credits in the watch page's description, as yt-dlp reads them on
+        the Pi. Nothing found keeps the stand-in, which the row stores as no
+        artist and Fix artists lists."""
+        if channel and not is_placeholder_artist(channel):
+            return channel
+        credits = await metadata.fetch_watch_credits(video_id, self._http)
+        return credits or channel or None
 
     async def _download(self, url: str, video_id: str) -> dict[str, Any] | None:
         """Run yt-dlp; return its info JSON (plus _filepath) or None on failure."""
