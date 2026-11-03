@@ -3,6 +3,11 @@
 // back, and follows seeks/pauses from the shared state.
 let ytPlayer = null, ytApiRequested = false, ytCurrentVid = null, embedTrackId = null;
 
+function normalizeTrackId(id) {
+  const s = String(id == null ? "" : id);
+  return /^[A-Za-z0-9_-]+$/.test(s) ? s : null;
+}
+
 function loadYtApi() {
   if (ytApiRequested) return;
   ytApiRequested = true;
@@ -30,23 +35,24 @@ function onYtError(e) {
   // the session until someone presses next. Report it first, while it is
   // still this session's current song, so the server can check with YouTube
   // and stop offering a video that is gone for good.
-  if (embedTrackId !== null) {
-    const id = embedTrackId;
+  const id = normalizeTrackId(embedTrackId);
+  if (id !== null) {
     const ended = () => fetch("/api/ended/" + id, { method: "POST" });
-    fetch("/api/unplayable/" + id + "/" + e.data, { method: "POST" })
+    fetch("/api/unplayable/" + id + "/" + encodeURIComponent(String(e.data)), { method: "POST" })
       .then(ended, ended);
   }
 }
 
 function onYtState(e) {
-  if (e.data === YT.PlayerState.ENDED && embedTrackId !== null) {
-    fetch("/api/ended/" + embedTrackId, { method: "POST" });
+  const id = normalizeTrackId(embedTrackId);
+  if (e.data === YT.PlayerState.ENDED && id !== null) {
+    fetch("/api/ended/" + id, { method: "POST" });
   } else if (e.data === YT.PlayerState.PLAYING) {
     audioCtl.hidden = true;
     const cur = lastState && lastState.current;
     const d = ytPlayer.getDuration();
-    if (cur && embedTrackId === cur.id && !cur.duration && d > 0)
-      fetch("/api/duration/" + embedTrackId + "/" + d, { method: "POST" });
+    if (cur && id !== null && embedTrackId === cur.id && !cur.duration && d > 0)
+      fetch("/api/duration/" + id + "/" + d, { method: "POST" });
   }
 }
 
@@ -78,7 +84,7 @@ function applyEmbed(s) {
   if (!window.YT || !window.YT.Player) { loadYtApi(); return; }  // resumes via onYouTubeIframeAPIReady
   if (!ytPlayer) {
     ytCurrentVid = s.current.video_id;
-    embedTrackId = s.current.id;
+    embedTrackId = normalizeTrackId(s.current.id);
     ytPlayer = new YT.Player("yt-player", {
       videoId: ytCurrentVid,
       // A cued (paused) session must not fight the server state by
