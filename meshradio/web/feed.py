@@ -42,7 +42,7 @@ FEED_SUBTITLE = (
 
 # XML 1.0 forbids these outright (everything below U+0020 but tab, newline and
 # carriage return, plus the two non-characters a UTF-8 encoder will still emit).
-_XML_INVALID = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+_XML_INVALID = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 
 
 def _clean(value: Any) -> str:
