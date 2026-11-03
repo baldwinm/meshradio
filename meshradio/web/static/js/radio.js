@@ -34,6 +34,10 @@ function showCtl(action, label) {
   audioCtl.hidden = false;
 }
 
+function isSafeTrackId(id) {
+  return (typeof id === "string") && /^[A-Za-z0-9_-]+$/.test(id);
+}
+
 function applyState(s) {
   lastState = s;
   if (s.embed) { applyEmbed(s); return; }
@@ -49,7 +53,8 @@ function applyState(s) {
   audio.volume = s.volume / 100;
   if (s.status === "playing" && s.current) {
     if (currentTrackId !== s.current.id) {
-      currentTrackId = s.current.id;
+      const nextTrackId = isSafeTrackId(s.current.id) ? s.current.id : null;
+      currentTrackId = nextTrackId;
       audio.src = "/audio/" + s.current.id;
       // Join the song where the server already is, not at 0. This tab may be
       // adopting a track that's been playing for two minutes — a page load, a
@@ -62,7 +67,11 @@ function applyState(s) {
       audio.onloadedmetadata = () => {
         if (joinAt > 1) { try { audio.currentTime = joinAt; } catch (e) {} }
       };
-      audio.onended = () => fetch("/api/ended/" + currentTrackId, { method: "POST" });
+      audio.onended = () => {
+        if (isSafeTrackId(currentTrackId)) {
+          fetch("/api/ended/" + encodeURIComponent(currentTrackId), { method: "POST" });
+        }
+      };
     } else if (audio.readyState > 0 && Math.abs(audio.currentTime - s.position) > 3) {
       audio.currentTime = s.position;  // a remote tab scrubbed; follow it
     }
