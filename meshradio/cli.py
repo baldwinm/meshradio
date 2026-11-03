@@ -97,6 +97,13 @@ def _run_configless_command(args: argparse.Namespace) -> None:
     if args.hash_admin_password:
         raise SystemExit(_run_hash_admin_password())
     if args.new_totp_secret:
+        if not sys.stderr.isatty():
+            print(
+                "Refusing to print TOTP secret to non-interactive stderr "
+                "(possible log capture). Run this command in a terminal.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
         secret = new_totp_secret()
         print("Generated TOTP secret (treat as sensitive; do not store in logs):", file=sys.stderr)
         print(secret, file=sys.stderr)
