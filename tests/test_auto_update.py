@@ -130,6 +130,18 @@ def test_a_green_commit_is_installed_and_restarted(pi):
     assert pi.log() == ""
 
 
+def test_the_health_check_asks_before_the_wait_runs_out(pi):
+    """A wait that ends before the first request (here none at all; on a busy
+    machine, a second ticking over between two clock reads) still asks once,
+    so a healthy update isn't rolled back unasked."""
+    pi.env["MESHRADIO_HEALTH_WAIT"] = "0"
+    target = pi.commit("meshradio/app.py", "v2")
+    pi.ci_passes()
+    result = pi.run()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert pi.head() == target
+
+
 def test_a_docs_only_change_skips_the_restart(pi):
     target = pi.commit("README.md", "docs")
     pi.ci_passes()
