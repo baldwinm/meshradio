@@ -98,7 +98,7 @@ def _run_configless_command(args: argparse.Namespace) -> None:
         raise SystemExit(_run_hash_admin_password())
     if args.new_totp_secret:
         secret = new_totp_secret()
-        print(secret)
+        print("Generated new TOTP provisioning URI (treat as sensitive):")
         print(f"authenticator link: {otpauth_uri(secret)}")
         raise SystemExit(0)
 
