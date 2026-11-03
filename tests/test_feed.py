@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
 from meshradio.ingest.parse import untitled_theme
-from meshradio.web.feed import FEED_DAYS, SONGS_PER_ENTRY, atom_stamp, build_feed
+from meshradio.web.feed import _XML_INVALID, FEED_DAYS, SONGS_PER_ENTRY, atom_stamp, build_feed
 
 from .helpers import client_for, page_app
 
@@ -220,3 +220,14 @@ async def test_recent_days_counts_days_with_songs_not_empty_themes(db):
         await db.create_theme(f"2026-08-{day:02d}", f"silent {day}")
     rows = await db.recent_days_tracks(days=1)
     assert [r["title"] for r in rows] == ["A1"]
+
+
+def test_only_the_characters_xml_forbids_are_stripped():
+    """The pattern names each forbidden character by escape, so a scanner (or a
+    reader) sees exactly which ones; this pins that it strips those and no more."""
+    forbidden = {*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0xFFFE, 0xFFFF}
+    stripped = {
+        i for i in range(0x110000)
+        if not 0xD800 <= i <= 0xDFFF and _XML_INVALID.fullmatch(chr(i))
+    }
+    assert stripped == forbidden
