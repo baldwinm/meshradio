@@ -821,3 +821,19 @@ def test_feed_row_builders_cover_every_state():
     down = admin_feeds.mesh_row("/dev/ttyUSB0", {})
     assert (down["state"], down["status"], down["detail"]) == (
         "bad", "Not connected", "/dev/ttyUSB0")
+
+
+def test_admin_redirects_never_leave_the_site():
+    """``go`` is the one place admin redirects are made; whatever reaches it
+    lands on this site, under /admin as every caller means it to."""
+    from meshradio.web.admin.common import go, local_path
+
+    assert local_path("/admin/artists/fix?name=x") == "/admin/artists/fix?name=x"
+    assert local_path("/admin") == "/admin"
+    for hostile in ("https://evil.example/", "//evil.example", "/\\evil.example",
+                    "\\\\evil.example", "javascript:alert(1)", "admin", "",
+                    "/admin\r\nSet-Cookie: x=1"):
+        assert local_path(hostile) == "/admin", hostile
+    response = go("//evil.example", error="nope")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin?error=nope"

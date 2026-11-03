@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Any
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -66,10 +66,26 @@ def is_embed(request: Request) -> bool:
     return ctx_of(request).sessions is not None
 
 
+def local_path(path: str) -> str:
+    """A redirect target that stays on this site, else the admin home.
+
+    Every caller passes a path under /admin, some built from a form field
+    (Undo's ``back``, sign-in's ``next``) that is checked where it is read;
+    this is the backstop at the one place redirects are made. Backslashes
+    count as slashes, as browsers treat them, so ``/\\evil.example`` is seen
+    as the other-host link it is."""
+    candidate = path.replace("\\", "/")
+    parts = urlsplit(candidate)
+    if (parts.scheme or parts.netloc or not candidate.startswith("/")
+            or "\r" in candidate or "\n" in candidate):
+        return ADMIN_PATH
+    return candidate
+
+
 def go(path: str, **params: Any) -> RedirectResponse:
     """A redirect after a POST (303, so the browser follows with a GET)."""
     query = {k: v for k, v in params.items() if v not in (None, "")}
-    url = path + ("?" + urlencode(query) if query else "")
+    url = local_path(path) + ("?" + urlencode(query) if query else "")
     return RedirectResponse(url, status_code=303)
 
 

@@ -127,15 +127,18 @@ install() {
     fi
 }
 
+# Asks at least once before the deadline can count: checking the clock
+# first let a second tick between the two `date` calls end the wait with
+# no request made, and a healthy update was rolled back.
 healthy() {
     deadline=$(( $(date +%s) + WAIT ))
-    while [ "$(date +%s)" -lt "$deadline" ]; do
+    while :; do
         if curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null | grep -q '"ok":true'; then
             return 0
         fi
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
         sleep 3
     done
-    return 1
 }
 
 if ! git_ fetch --quiet origin "$BRANCH" 2>/dev/null; then

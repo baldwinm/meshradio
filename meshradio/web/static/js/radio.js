@@ -34,8 +34,13 @@ function showCtl(action, label) {
   audioCtl.hidden = false;
 }
 
-function isSafeTrackId(id) {
-  return (typeof id === "string") && /^[A-Za-z0-9_-]+$/.test(id);
+// Request paths built from pushed state only ever carry digits: track ids
+// are database row ids and the player's error codes are numbers, so
+// anything else (a malformed push) is dropped rather than sent. embed.js
+// uses this too.
+function pathDigits(value) {
+  const s = String(value);
+  return /^\d+$/.test(s) ? s : null;
 }
 
 function applyState(s) {
@@ -53,8 +58,7 @@ function applyState(s) {
   audio.volume = s.volume / 100;
   if (s.status === "playing" && s.current) {
     if (currentTrackId !== s.current.id) {
-      const nextTrackId = isSafeTrackId(s.current.id) ? s.current.id : null;
-      currentTrackId = nextTrackId;
+      currentTrackId = s.current.id;
       audio.src = "/audio/" + s.current.id;
       // Join the song where the server already is, not at 0. This tab may be
       // adopting a track that's been playing for two minutes — a page load, a
@@ -68,9 +72,8 @@ function applyState(s) {
         if (joinAt > 1) { try { audio.currentTime = joinAt; } catch (e) {} }
       };
       audio.onended = () => {
-        if (isSafeTrackId(currentTrackId)) {
-          fetch("/api/ended/" + encodeURIComponent(currentTrackId), { method: "POST" });
-        }
+        const id = pathDigits(currentTrackId);
+        if (id !== null) fetch("/api/ended/" + id, { method: "POST" });
       };
     } else if (audio.readyState > 0 && Math.abs(audio.currentTime - s.position) > 3) {
       audio.currentTime = s.position;  // a remote tab scrubbed; follow it

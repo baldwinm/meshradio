@@ -30,23 +30,33 @@ function onYtError(e) {
   // the session until someone presses next. Report it first, while it is
   // still this session's current song, so the server can check with YouTube
   // and stop offering a video that is gone for good.
-  if (embedTrackId !== null) {
-    const id = embedTrackId;
+  // An unknown code is sent as 0, which the server never treats as a dead
+  // video, so the song is still skipped but not checked.
+  const id = pathDigits(embedTrackId);
+  if (id !== null) {
+    const code = pathDigits(e && e.data) ?? "0";
     const ended = () => fetch("/api/ended/" + id, { method: "POST" });
-    fetch("/api/unplayable/" + id + "/" + e.data, { method: "POST" })
+    fetch("/api/unplayable/" + id + "/" + code, { method: "POST" })
       .then(ended, ended);
   }
 }
 
+// A duration as a path segment: a plain positive decimal, or null.
+function pathSeconds(value) {
+  const s = String(value);
+  return /^\d+(\.\d+)?$/.test(s) && Number(s) > 0 ? s : null;
+}
+
 function onYtState(e) {
-  if (e.data === YT.PlayerState.ENDED && embedTrackId !== null) {
-    fetch("/api/ended/" + embedTrackId, { method: "POST" });
+  const id = pathDigits(embedTrackId);
+  if (e.data === YT.PlayerState.ENDED && id !== null) {
+    fetch("/api/ended/" + id, { method: "POST" });
   } else if (e.data === YT.PlayerState.PLAYING) {
     audioCtl.hidden = true;
     const cur = lastState && lastState.current;
-    const d = ytPlayer.getDuration();
-    if (cur && embedTrackId === cur.id && !cur.duration && d > 0)
-      fetch("/api/duration/" + embedTrackId + "/" + d, { method: "POST" });
+    const d = pathSeconds(ytPlayer.getDuration());
+    if (cur && id !== null && embedTrackId === cur.id && !cur.duration && d !== null)
+      fetch("/api/duration/" + id + "/" + d, { method: "POST" });
   }
 }
 

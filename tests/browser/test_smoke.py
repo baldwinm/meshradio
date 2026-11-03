@@ -246,3 +246,27 @@ def test_the_player_sits_in_the_card_and_docks_elsewhere(hosted, page):
     expect(win).not_to_have_class(re.compile(r"\bin-slot\b"))
     assert win.evaluate("el => getComputedStyle(el).position") == "fixed"
     assert page.evaluate("window.__yt.loads.length") == 1    # the song never reloaded
+
+
+def test_browser_speaker_keeps_its_song_and_reports_the_end(appliance, page):
+    """The browser-as-speaker mode (no mpv): a repeat state push for the song
+    already playing must not restart it, and the song's end is reported by its
+    numeric id. Track ids are numbers, so a check that wanted a string once
+    restarted the song on every push and never reported the end."""
+    ended: list[str] = []
+    page.route("**/audio/*", lambda route: route.fulfill(status=204, body=""))
+    page.route("**/api/ended/*", lambda route: (ended.append(route.request.url),
+                                                route.fulfill(json={"advanced": True})))
+    page.goto(appliance.url + "/")
+    state = ("({web_audio: true, speaker: true, status: 'playing', volume: 50,"
+             " position: 0, current: {id: 7, video_id: 'aaaaaaaaaaa'}})")
+    page.evaluate(f"applyState({state})")
+    first_src = page.evaluate("audio.src")
+    assert first_src.endswith("/audio/7")
+    page.evaluate("audio.src = audio.src + '#kept'")  # a restart would replace this
+    page.evaluate(f"applyState({state})")
+    assert page.evaluate("audio.src").endswith("#kept")
+    assert page.evaluate("currentTrackId") == 7
+    page.evaluate("audio.onended()")
+    page.wait_for_timeout(200)
+    assert [url.rsplit("/", 1)[-1] for url in ended] == ["7"]
