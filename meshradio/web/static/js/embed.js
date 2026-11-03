@@ -3,6 +3,17 @@
 // back, and follows seeks/pauses from the shared state.
 let ytPlayer = null, ytApiRequested = false, ytCurrentVid = null, embedTrackId = null;
 
+function toSafeTrackId(value) {
+  const s = String(value);
+  return /^\d+$/.test(s) ? s : null;
+}
+
+function toSafeYtErrorCode(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n)) return "0";
+  return (n === 2 || n === 5 || n === 100 || n === 101 || n === 150) ? String(n) : "0";
+}
+
 function loadYtApi() {
   if (ytApiRequested) return;
   ytApiRequested = true;
@@ -30,23 +41,25 @@ function onYtError(e) {
   // the session until someone presses next. Report it first, while it is
   // still this session's current song, so the server can check with YouTube
   // and stop offering a video that is gone for good.
-  if (embedTrackId !== null) {
-    const id = embedTrackId;
+  const id = toSafeTrackId(embedTrackId);
+  if (id !== null) {
+    const errCode = toSafeYtErrorCode(e.data);
     const ended = () => fetch("/api/ended/" + id, { method: "POST" });
-    fetch("/api/unplayable/" + id + "/" + e.data, { method: "POST" })
+    fetch("/api/unplayable/" + id + "/" + errCode, { method: "POST" })
       .then(ended, ended);
   }
 }
 
 function onYtState(e) {
-  if (e.data === YT.PlayerState.ENDED && embedTrackId !== null) {
-    fetch("/api/ended/" + embedTrackId, { method: "POST" });
+  const id = toSafeTrackId(embedTrackId);
+  if (e.data === YT.PlayerState.ENDED && id !== null) {
+    fetch("/api/ended/" + id, { method: "POST" });
   } else if (e.data === YT.PlayerState.PLAYING) {
     audioCtl.hidden = true;
     const cur = lastState && lastState.current;
     const d = ytPlayer.getDuration();
-    if (cur && embedTrackId === cur.id && !cur.duration && d > 0)
-      fetch("/api/duration/" + embedTrackId + "/" + d, { method: "POST" });
+    if (cur && embedTrackId === cur.id && !cur.duration && d > 0 && id !== null)
+      fetch("/api/duration/" + id + "/" + d, { method: "POST" });
   }
 }
 
