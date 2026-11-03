@@ -22,7 +22,7 @@ from .ingest import parse
 from .ingest.corescope import format_probe, probe
 from .media.cacher import drop_cache_file
 from .net import http_client
-from .web.admin_auth import hash_password, new_totp_secret, otpauth_uri
+from .web.admin_auth import hash_password, new_totp_secret
 
 log = logging.getLogger("meshradio")
 
@@ -99,7 +99,7 @@ def _run_configless_command(args: argparse.Namespace) -> None:
     if args.new_totp_secret:
         secret = new_totp_secret()
         print(secret)
-        print(f"authenticator link: {otpauth_uri(secret)}")
+        print("add this secret to your authenticator app as a TOTP account")
         raise SystemExit(0)
 
 
