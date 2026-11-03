@@ -98,8 +98,9 @@ def _run_configless_command(args: argparse.Namespace) -> None:
         raise SystemExit(_run_hash_admin_password())
     if args.new_totp_secret:
         secret = new_totp_secret()
-        print(secret)
-        print("add this secret to your authenticator app as a TOTP account")
+        print("Generated TOTP secret (treat as sensitive; do not store in logs):", file=sys.stderr)
+        print(secret, file=sys.stderr)
+        print("add this secret to your authenticator app as a TOTP account", file=sys.stderr)
         raise SystemExit(0)
 
 
