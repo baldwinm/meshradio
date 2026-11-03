@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Any
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -66,10 +66,24 @@ def is_embed(request: Request) -> bool:
     return ctx_of(request).sessions is not None
 
 
+def _safe_redirect_path(path: str) -> str:
+    """Only allow local absolute paths; fallback to the admin root."""
+    candidate = (path or "").replace("\\", "/").strip()
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return ADMIN_PATH
+    parts = urlsplit(candidate)
+    if parts.scheme or parts.netloc:
+        return ADMIN_PATH
+    if any(ch in candidate for ch in ("\r", "\n")):
+        return ADMIN_PATH
+    return candidate
+
+
 def go(path: str, **params: Any) -> RedirectResponse:
     """A redirect after a POST (303, so the browser follows with a GET)."""
     query = {k: v for k, v in params.items() if v not in (None, "")}
-    url = path + ("?" + urlencode(query) if query else "")
+    safe_path = _safe_redirect_path(path)
+    url = safe_path + ("?" + urlencode(query) if query else "")
     return RedirectResponse(url, status_code=303)
 
 
