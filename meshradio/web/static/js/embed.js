@@ -31,9 +31,14 @@ function onYtError(e) {
   // still this session's current song, so the server can check with YouTube
   // and stop offering a video that is gone for good.
   if (embedTrackId !== null) {
-    const id = embedTrackId;
+    const id = Number(embedTrackId);
     const ended = () => fetch("/api/ended/" + id, { method: "POST" });
-    fetch("/api/unplayable/" + id + "/" + e.data, { method: "POST" })
+    const errCode = Number(e && e.data);
+    if (!Number.isSafeInteger(id) || !Number.isSafeInteger(errCode)) {
+      ended();
+      return;
+    }
+    fetch("/api/unplayable/" + id + "/" + errCode, { method: "POST" })
       .then(ended, ended);
   }
 }
