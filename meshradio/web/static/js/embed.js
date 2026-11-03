@@ -3,6 +3,16 @@
 // back, and follows seeks/pauses from the shared state.
 let ytPlayer = null, ytApiRequested = false, ytCurrentVid = null, embedTrackId = null;
 
+function safeTrackIdSegment(id) {
+  const v = String(id);
+  return /^[A-Za-z0-9_-]+$/.test(v) ? encodeURIComponent(v) : null;
+}
+
+function safeDurationSegment(d) {
+  const n = Number(d);
+  return Number.isFinite(n) && n > 0 ? encodeURIComponent(String(n)) : null;
+}
+
 function loadYtApi() {
   if (ytApiRequested) return;
   ytApiRequested = true;
@@ -45,8 +55,13 @@ function onYtState(e) {
     audioCtl.hidden = true;
     const cur = lastState && lastState.current;
     const d = ytPlayer.getDuration();
-    if (cur && embedTrackId === cur.id && !cur.duration && d > 0)
-      fetch("/api/duration/" + embedTrackId + "/" + d, { method: "POST" });
+    if (cur && embedTrackId === cur.id && !cur.duration && d > 0) {
+      const safeId = safeTrackIdSegment(embedTrackId);
+      const safeDuration = safeDurationSegment(d);
+      if (safeId !== null && safeDuration !== null) {
+        fetch("/api/duration/" + safeId + "/" + safeDuration, { method: "POST" });
+      }
+    }
   }
 }
 
