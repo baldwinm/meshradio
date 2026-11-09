@@ -10,15 +10,18 @@ import socket
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import uvicorn
 
 from meshradio.audio.routing import make_router
 from meshradio.bus import EventBus
-from meshradio.config import Config, PlayerConfig
+from meshradio.config import CacheConfig, Config, PlayerConfig
 from meshradio.db import Database
 from meshradio.ingest.service import IngestService
+from meshradio.media import metadata
+from meshradio.media.cacher import Cacher
 from meshradio.media.player import EmbedBackend, NullBackend, PlayerService
 from meshradio.web.admin_auth import AdminSettings, csrf_token, hash_password
 from meshradio.web.server import create_app
@@ -44,6 +47,34 @@ def watch_page(description: str) -> str:
         f'"lengthSeconds":"200","shortDescription":{json.dumps(description)},'
         '"author":"Release - Topic"}};</script></html>'
     )
+
+
+def captcha_redirect(video_id: str = "aaaaaaaaaaa"):
+    """What YouTube answers a server Google suspects of being a bot: a 302
+    to the "unusual traffic" captcha instead of the watch page."""
+    return httpx.Response(
+        302,
+        headers={"location": "https://www.google.com/sorry/index?continue="
+                 f"https://www.youtube.com/watch%3Fv%3D{video_id}"},
+    )
+
+
+def embed_cacher(db, bus, tmp_path, monkeypatch, channel, credits):
+    """A hosted-site cacher whose oEmbed names ``channel`` as the uploader
+    and whose watch-page credits read ``credits``; returns it and the list
+    of videos the credits were asked for."""
+    calls = []
+
+    async def fake_oembed(video_id, client=None):
+        return {"title": "Song", "artist": channel, "thumbnail": ""}
+
+    async def fake_credits(video_id, client=None):
+        calls.append(video_id)
+        return credits
+
+    monkeypatch.setattr(metadata, "fetch_oembed", fake_oembed)
+    monkeypatch.setattr(metadata, "fetch_watch_credits", fake_credits)
+    return Cacher(CacheConfig(), Path(tmp_path), db, bus, embed=True), calls
 
 
 # -- tracks -------------------------------------------------------------------
