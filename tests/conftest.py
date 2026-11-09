@@ -4,6 +4,7 @@ import pytest
 
 from meshradio.bus import EventBus
 from meshradio.db import Database
+from meshradio.media import metadata
 from meshradio.runtime import clear_errors
 
 # The browser tests need Playwright and Chromium, which the dev install
@@ -31,6 +32,15 @@ def _no_carried_errors():
     clear_errors()
     yield
     clear_errors()
+
+
+@pytest.fixture(autouse=True)
+def _no_youtube_block():
+    """A YouTube block is process-wide; one test's refusal mustn't pause the
+    watch-page lookups of the next."""
+    metadata.clear_watch_block()
+    yield
+    metadata.clear_watch_block()
 
 
 @pytest.fixture(autouse=True)

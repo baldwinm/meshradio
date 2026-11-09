@@ -1,16 +1,11 @@
 """Artist credits for YouTube's auto-generated art tracks, read on the
 hosted site itself rather than relayed from the Pi's yt-dlp."""
 
-from pathlib import Path
-
 import httpx
 
-from meshradio.config import CacheConfig
-from meshradio.media import cacher as cacher_mod
 from meshradio.media import metadata
-from meshradio.media.cacher import Cacher
 
-from .helpers import art_track_description, make_pending_track, watch_page
+from .helpers import art_track_description, embed_cacher, make_pending_track, watch_page
 
 
 def test_credits_are_read_from_an_art_track_description():
@@ -66,23 +61,8 @@ async def test_a_refused_watch_page_gives_no_credits():
         assert await metadata.fetch_watch_credits("aaaaaaaaaaa", client) is None
 
 
-def _embed_cacher(db, bus, tmp_path, monkeypatch, channel, credits):
-    calls = []
-
-    async def fake_oembed(video_id, client=None):
-        return {"title": "Song", "artist": channel, "thumbnail": ""}
-
-    async def fake_credits(video_id, client=None):
-        calls.append(video_id)
-        return credits
-
-    monkeypatch.setattr(cacher_mod.metadata, "fetch_oembed", fake_oembed)
-    monkeypatch.setattr(cacher_mod.metadata, "fetch_watch_credits", fake_credits)
-    return Cacher(CacheConfig(), Path(tmp_path), db, bus, embed=True), calls
-
-
 async def test_a_release_topic_song_gets_its_credited_artist(db, bus, monkeypatch, tmp_path):
-    c, calls = _embed_cacher(db, bus, tmp_path, monkeypatch, "Release - Topic", "Real Artist")
+    c, calls = embed_cacher(db, bus, tmp_path, monkeypatch, "Release - Topic", "Real Artist")
     track = await make_pending_track(db, "aaaaaaaaaaa")
     await c.process_track(track)
     row = await db.track_by_id(track["id"])
@@ -92,14 +72,14 @@ async def test_a_release_topic_song_gets_its_credited_artist(db, bus, monkeypatc
 
 
 async def test_a_song_with_no_channel_name_is_looked_up_too(db, bus, monkeypatch, tmp_path):
-    c, calls = _embed_cacher(db, bus, tmp_path, monkeypatch, "", "Real Artist")
+    c, calls = embed_cacher(db, bus, tmp_path, monkeypatch, "", "Real Artist")
     track = await make_pending_track(db, "aaaaaaaaaaa")
     await c.process_track(track)
     assert (await db.track_by_id(track["id"]))["artist"] == "Real Artist"
 
 
 async def test_a_real_channel_name_is_kept_without_a_lookup(db, bus, monkeypatch, tmp_path):
-    c, calls = _embed_cacher(db, bus, tmp_path, monkeypatch, "Artist A", "Someone Else")
+    c, calls = embed_cacher(db, bus, tmp_path, monkeypatch, "Artist A", "Someone Else")
     track = await make_pending_track(db, "aaaaaaaaaaa")
     await c.process_track(track)
     assert (await db.track_by_id(track["id"]))["artist"] == "Artist A"
@@ -107,7 +87,7 @@ async def test_a_real_channel_name_is_kept_without_a_lookup(db, bus, monkeypatch
 
 
 async def test_no_credits_leaves_the_song_for_fix_artists(db, bus, monkeypatch, tmp_path):
-    c, _ = _embed_cacher(db, bus, tmp_path, monkeypatch, "Release - Topic", None)
+    c, _ = embed_cacher(db, bus, tmp_path, monkeypatch, "Release - Topic", None)
     track = await make_pending_track(db, "aaaaaaaaaaa")
     await c.process_track(track)
     row = await db.track_by_id(track["id"])

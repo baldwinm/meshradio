@@ -59,6 +59,10 @@ class DurationService(Service):
                             v for v in await self.db.videos_missing_duration()
                             if self._attempts.get(v, 0) < self.MAX_ATTEMPTS
                         )
+                    blocked = metadata.watch_block_remaining()
+                    if blocked:
+                        await asyncio.sleep(blocked)
+                        continue
                     video_id = self._next()
                     if video_id is None:
                         try:
@@ -108,6 +112,10 @@ class DurationService(Service):
             self.bus.publish(TRACK_DURATION, {"video_id": video_id, "duration": known})
             return False
         seconds = await metadata.fetch_duration(video_id, self._http)
+        if seconds is None and metadata.watch_blocked():
+            # Refused, not unanswerable: ask again for it once the block ends.
+            self._urgent.appendleft(video_id)
+            return True
         if seconds is None:
             self._attempts[video_id] = self._attempts.get(video_id, 0) + 1
             self._streak += 1

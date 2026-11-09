@@ -67,6 +67,10 @@ class Cacher(Service):
         # oEmbed metadata and no cache file.
         self.embed = embed
         self._embed_attempts: dict[int, int] = {}
+        # Art tracks whose credits couldn't be read because YouTube was
+        # refusing this server (track id -> video id); asked again once the
+        # block ends, so they don't all land on Fix artists.
+        self._credits_due: dict[int, str] = {}
         # Running estimate of cache-dir bytes, seeded once from disk off the
         # event loop. Lets prune() skip the full walk while well under the cap.
         self._cache_bytes: int | None = None
@@ -95,6 +99,7 @@ class Cacher(Service):
                     # catches boot backlog, bus events dropped under a relay
                     # backfill burst, and embed-mode oEmbed retries. Anything
                     # that leaves a track pending self-heals within a minute.
+                    await self._retry_credits()
                     for track in await self.db.pending_tracks():
                         await self._submit(track)
                     try:
@@ -208,9 +213,11 @@ class Cacher(Service):
             await self._publish(TRACK_FAILED, track_id)
             return
         self._embed_attempts.pop(track_id, None)
+        artist = await self._embed_artist(video_id, meta["artist"])
+        if (not artist or is_placeholder_artist(artist)) and metadata.watch_blocked():
+            self._credits_due[track_id] = video_id
         await self.db.update_track_metadata(
-            track_id, title=meta["title"] or None,
-            artist=await self._embed_artist(video_id, meta["artist"]),
+            track_id, title=meta["title"] or None, artist=artist,
         )
         await self.db.set_cache_status(track_id, "ready")
         await self._publish(TRACK_READY, track_id)
@@ -241,6 +248,21 @@ class Cacher(Service):
             return channel
         credits = await metadata.fetch_watch_credits(video_id, self._http)
         return credits or channel or None
+
+    async def _retry_credits(self) -> None:
+        """Ask again for the credits of art tracks that missed them while
+        YouTube was refusing this server. A row someone has since corrected
+        by hand keeps that correction (update_track_metadata sees to it)."""
+        for track_id, video_id in list(self._credits_due.items()):
+            if metadata.watch_blocked():
+                return
+            credits = await metadata.fetch_watch_credits(video_id, self._http)
+            if credits is None and metadata.watch_blocked():
+                return
+            del self._credits_due[track_id]
+            if credits:
+                await self.db.update_track_metadata(track_id, artist=credits)
+                log.info("filled in art-track artist for %s after a YouTube block", video_id)
 
     async def _download(self, url: str, video_id: str) -> dict[str, Any] | None:
         """Run yt-dlp; return its info JSON (plus _filepath) or None on failure."""
